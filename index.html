@@ -271,7 +271,7 @@
         import { 
             getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut,
             createUserWithEmailAndPassword, updatePassword, reauthenticateWithCredential,
-            EmailAuthProvider
+            EmailAuthProvider, sendPasswordResetEmail
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { 
             getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot,
@@ -4681,35 +4681,21 @@
 
 
             function renderSettings(subPage) {
+                // 僅保留「帳號列表」與「社區列表」兩個子分頁
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
                         <button data-subtab="accounts" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'accounts' ? 'active' : ''}">帳號列表</button>
-                        <button data-subtab="rules" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'rules' ? 'active' : ''}">計點規則</button>
-                        <button data-subtab="general" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'general' ? 'active' : ''}">一般設定</button>
-                        <button data-subtab="location" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'location' ? 'active' : ''}">定位位置</button>
-                        <button data-subtab="workdays" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'workdays' ? 'active' : ''}">上班設定</button>
-                        <button data-subtab="group" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'group' ? 'active' : ''}">群組設定</button>
                         <button data-subtab="community" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'community' ? 'active' : ''}">社區列表</button>
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
-                
+
                 const subPageContent = document.getElementById('sub-page-content');
                 if (subPage === 'accounts') {
                     renderSettingsAccounts(subPageContent);
-                } else if (subPage === 'rules') {
-                    renderSettingsRules(subPageContent);
-                } else if (subPage === 'general') {
-                    renderSettingsGeneral(subPageContent);
-                } else if (subPage === 'location') {
-                    renderSettingsLocation(subPageContent);
-                } else if (subPage === 'workdays') {
-                    renderSettingsWorkdays(subPageContent);
-                } else if (subPage === 'group') {
-                    renderSettingsGroup(subPageContent);
-                } else if (subPage === 'community') {
+                } else {
                     renderSettingsCommunity(subPageContent);
                 }
-                
+
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('settings', btn.dataset.subtab)));
             }
 
@@ -4786,14 +4772,10 @@
                         <button id="add-user-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 mb-4 flex items-center justify-center">
                             <i data-lucide="plus-circle" class="w-4 h-4 mr-2"></i>新增帳號
                         </button>
-                        <button id="reset-points-btn" class="w-full bg-yellow-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-yellow-700 mb-4 flex items-center justify-center">
-                            <i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i>重置所有用戶點數為0
-                        </button>
                         <div id="user-list" class="space-y-2"></div>
                     </div>`;
                 lucide.createIcons();
                 document.getElementById('add-user-btn').addEventListener('click', () => openUserModal());
-                document.getElementById('reset-points-btn').addEventListener('click', resetAllUserPoints);
 
                 const userList = document.getElementById('user-list');
                 const usersRef = collection(db, "users");
@@ -6196,6 +6178,7 @@
                 const modalId = `user-modal-${Date.now()}`;
                 const isEditing = user !== null;
                 const title = isEditing ? '編輯帳號' : '新增帳號';
+                const isSelfEditing = isEditing && user.id === (state.currentUser?.uid || null);
                 let newUserAvatarFile = null;
                 let newUserAvatarBase64 = null;
                 const close = () => document.getElementById(modalId)?.remove();
@@ -6263,6 +6246,38 @@
                                         <option value="admin" ${isEditing && user.role === 'admin' ? 'selected' : ''}>管理員</option>
                                     </select>
                                 </div>
+
+                                <!-- 服務社區 (可複選) -->
+                                <div id="service-communities-section">
+                                    <label class="block text-sm font-medium text-gray-700">服務社區 (可複選)</label>
+                                    <div class="flex items-center mb-2">
+                                        <input type="checkbox" id="service-community-select-all" class="mr-2">
+                                        <span class="text-sm text-gray-600">全選</span>
+                                    </div>
+                                    <div id="service-community-list" class="grid grid-cols-1 gap-2"></div>
+                                </div>
+
+                                <!-- 密碼管理（編輯） -->
+                                ${isEditing ? `
+                                <div class="bg-gray-50 p-3 rounded-md border">
+                                    <p class="text-sm font-medium text-gray-700 mb-2">密碼管理</p>
+                                    ${isSelfEditing ? `
+                                        <div>
+                                            <label for="edit-new-password" class="block text-sm font-medium text-gray-700">新密碼 (選填，至少6位數)</label>
+                                            <input type="password" id="edit-new-password" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        </div>
+                                        <div>
+                                            <label for="edit-confirm-password" class="block text-sm font-medium text-gray-700">再次確認新密碼</label>
+                                            <input type="password" id="edit-confirm-password" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        </div>
+                                    ` : `
+                                        <button type="button" id="send-reset-email-btn" class="w-full bg-gray-200 text-gray-700 py-2 rounded-md hover:bg-gray-300">
+                                            寄送重設密碼信到 ${user.email}
+                                        </button>
+                                        <p class="mt-2 text-xs text-gray-500">無法直接變更其他用戶密碼，請透過 Email 重設。</p>
+                                    `}
+                                </div>
+                                ` : ''}
                                 
                                 <p id="user-form-error" class="text-red-500 text-sm text-center"></p>
                                 <div class="flex justify-end space-x-2 pt-2 flex-shrink-0">
@@ -6281,6 +6296,8 @@
                 const errorEl = document.getElementById('user-form-error');
                 const avatarPreview = document.getElementById('user-avatar-preview');
                 const avatarUploadInput = document.getElementById('user-avatar-upload');
+                const serviceCommunityListEl = document.getElementById('service-community-list');
+                const serviceCommunitySelectAllEl = document.getElementById('service-community-select-all');
 
                 // 壓縮圖片為 Base64，限制大小與尺寸
                 const compressToBase64 = async (file, maxW = 320, maxH = 320, quality = 0.8) => {
@@ -6343,7 +6360,36 @@
                     }
                 });
                 
-                
+                // 載入服務社區清單（多選 + 全選）
+                (async () => {
+                    try {
+                        const communitiesSnap = await getDocs(collection(db, 'communities'));
+                        const communities = [];
+                        communitiesSnap.forEach(docSnap => communities.push({ id: docSnap.id, ...docSnap.data() }));
+                        communities.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+                        const selectedIds = isEditing && Array.isArray(user.serviceCommunities) ? new Set(user.serviceCommunities) : new Set();
+                        serviceCommunityListEl.innerHTML = communities.map(c => {
+                            const label = `${c.region ? `[${c.region}] ` : ''}${c.code ? `[${c.code}] ` : ''}${c.name || ''}`;
+                            const checked = selectedIds.has(c.id) ? 'checked' : '';
+                            return `
+                                <label class="flex items-center space-x-2">
+                                    <input type="checkbox" name="service-community" value="${c.id}" class="rounded" ${checked}>
+                                    <span class="text-sm text-gray-700">${label}</span>
+                                </label>
+                            `;
+                        }).join('');
+
+                        if (serviceCommunitySelectAllEl) {
+                            serviceCommunitySelectAllEl.addEventListener('change', (e) => {
+                                const checked = e.target.checked;
+                                serviceCommunityListEl.querySelectorAll('input[name="service-community"]').forEach(chk => { chk.checked = checked; });
+                            });
+                        }
+                    } catch (err) {
+                        console.error('載入服務社區失敗', err);
+                        serviceCommunityListEl.innerHTML = '<p class="text-sm text-red-500">服務社區載入失敗</p>';
+                    }
+                })();
 
 
                 // --- Form Logic ---
@@ -6362,7 +6408,10 @@
                     const email = document.getElementById('user-email').value;
                     const role = document.getElementById('user-role').value;
                     
-                    const updateData = { name, phone, lineId, role, email };
+                    // 收集服務社區
+                    const scChecks = modal.querySelectorAll('input[name="service-community"]');
+                    const serviceCommunities = Array.from(scChecks).filter(c => c.checked).map(c => c.value);
+                    const updateData = { name, phone, lineId, role, email, serviceCommunities };
 
                     try {
                         let targetUserId = isEditing ? user.id : null;
@@ -6428,6 +6477,27 @@
                         }
                         updateData.avatarUrl = newAvatarUrl;
 
+                        // --- 密碼修改（僅本人可直接修改） ---
+                        if (isSelfEditing) {
+                            const newPwd = document.getElementById('edit-new-password')?.value || '';
+                            const confirmNewPwd = document.getElementById('edit-confirm-password')?.value || '';
+                            if (newPwd || confirmNewPwd) {
+                                if (newPwd.length < 6) throw new Error('新密碼長度至少需要6個字元。');
+                                if (newPwd !== confirmNewPwd) throw new Error('兩次輸入的新密碼不相符。');
+                                try {
+                                    await updatePassword(auth.currentUser, newPwd);
+                                    showToast('密碼已更新');
+                                } catch (pwdErr) {
+                                    console.error('更新密碼失敗', pwdErr);
+                                    if (pwdErr?.code === 'auth/requires-recent-login') {
+                                        throw new Error('更新密碼需要重新登入，請先登出再登入後重試');
+                                    } else {
+                                        throw new Error('更新密碼失敗，請稍後再試');
+                                    }
+                                }
+                            }
+                        }
+
                         // --- Database Operation ---
                         if (isEditing) {
                             await updateDoc(doc(db, "users", targetUserId), updateData);
@@ -6448,6 +6518,23 @@
                         showLoading(false);
                     }
                 });
+
+                // 寄送重設密碼信（編輯他人時）
+                const sendResetBtn = document.getElementById('send-reset-email-btn');
+                if (sendResetBtn) {
+                    sendResetBtn.addEventListener('click', async () => {
+                        try {
+                            showLoading(true);
+                            await sendPasswordResetEmail(auth, user.email);
+                            showToast('已寄出重設密碼通知信');
+                        } catch (err) {
+                            console.error('寄送重設密碼信失敗', err);
+                            showToast('寄送失敗：請稍後再試', true);
+                        } finally {
+                            showLoading(false);
+                        }
+                    });
+                }
             }
             
             function openRuleModal(rule = null) {
