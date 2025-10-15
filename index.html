@@ -5955,7 +5955,11 @@
                         close();
                     } catch (err) {
                         console.error('儲存社區失敗', err);
-                        errorEl.textContent = err.message || '儲存失敗';
+                        if (err && (err.code === 'permission-denied' || /insufficient permissions/i.test(err.message || ''))) {
+                            errorEl.textContent = '您目前沒有權限新增或編輯社區，請聯絡管理員。';
+                        } else {
+                            errorEl.textContent = err.message || '儲存失敗';
+                        }
                     } finally {
                         showLoading(false);
                     }

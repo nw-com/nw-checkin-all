@@ -5,6 +5,12 @@ service cloud.firestore {
     function isAdmin() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
+    // 社區維護角色：允許管理員、人事、主管、初階主管
+    function isCommunityEditor() {
+      return (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager']
+      );
+    }
     // 補打申請審核角色：管理員、人事、高階主管
     function isReviewer() {
       return (
@@ -193,6 +199,38 @@ service cloud.firestore {
         (request.resource.data.markAbnormalLocation == null || request.resource.data.markAbnormalLocation is bool) &&
         (request.resource.data.otherLocations == null || request.resource.data.otherLocations is list) &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+    }
+
+    // 社區列表：任何登入者可讀，僅社區維護角色可寫
+    match /communities/{communityId} {
+      allow read: if request.auth != null;
+      // 僅社區維護角色可新增社區；限制欄位與型別
+      allow create: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'name','address','region','code','location','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.address == null || request.resource.data.address is string) &&
+        request.resource.data.region in ['台北','新北','桃園'] &&
+        request.resource.data.code is string &&
+        request.resource.data.location is geopoint &&
+        request.resource.data.createdAt is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+
+      // 僅社區維護角色可更新社區；限制欄位與型別
+      allow update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'name','address','region','code','location','updatedAt'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.address == null || request.resource.data.address is string) &&
+        request.resource.data.region in ['台北','新北','桃園'] &&
+        request.resource.data.code is string &&
+        request.resource.data.location is geopoint &&
+        request.resource.data.updatedAt is timestamp;
+
+      // 僅社區維護角色可刪除社區
+      allow delete: if isCommunityEditor();
     }
   }
 }
