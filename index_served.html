@@ -245,13 +245,13 @@
     <script type="module">
         // --- e??�L e??e|?e�L-aR?i??e??a?�La-?a!?a?�Da?�Le?aa�P��c?? API e??e?�X e??�L ---
         const firebaseConfig = {
-          apiKey: "AIzaSyAzgs-DZbCYHP7wEM1iWi948yL77ikigBg",
-          authDomain: "nw-check-in.firebaseapp.com",
-          projectId: "nw-check-in",
-          storageBucket: "nw-check-in.appspot.com",
-          messagingSenderId: "1060821780559",
-          appId: "1:1060821780559:web:2638d630526d54f1a5023a",
-          measurementId: "G-61Q1QNNRD2"
+          apiKey: "AIzaSyD81_3sUzJSoQI9ODzpAa95ub2h4xrWCZo",
+          authDomain: "nw-checkin-all.firebaseapp.com",
+          projectId: "nw-checkin-all",
+          storageBucket: "nw-checkin-all.firebasestorage.app",
+          messagingSenderId: "162851442567",
+          appId: "1:162851442567:web:46e9b42fdbb171d7ff4d22",
+          measurementId: "G-PLQS2H99D3"
         };
         const GOOGLE_MAPS_API_KEY = "AIzaSyAzhLdWtycJgfz8UsXWlji63DkXpA4kmyY";
         // --- e??�L e�L-aR?c�g?a?? e??�L ---
@@ -323,16 +323,16 @@
             }
         })();
 
-        // e��?e?2a�X?a??a�M-a??a�L?c��?
+        // 角色對應中文標籤
         function roleLabel(role) {
             switch (role) {
-                case 'field': return 'a??a??';
-                case 'user': return 'a?��a??';
-                case 'junior_manager': return 'a??e??a�M?cR!';
-                case 'manager': return 'e??e??a�M?cR!';
-                case 'hr': return 'aooao?';
-                case 'admin': return 'cR!c??a?!';
-                default: return role || 'a?��a??';
+                case 'field': return '外勤';
+                case 'user': return '內勤';
+                case 'junior_manager': return '初階主管';
+                case 'manager': return '高階主管';
+                case 'hr': return '人事';
+                case 'admin': return '管理員';
+                default: return role || '內勤';
             }
         }
 
@@ -5357,11 +5357,11 @@ const statusText = getStatusDisplayText(record.type || '未知', record.location
                                         <option value="秘書" ${isEditing && user.role === '秘書' ? 'selected' : ''}>秘書</option>
                                         <option value="清潔" ${isEditing && user.role === '清潔' ? 'selected' : ''}>清潔</option>
                                         <option value="機電" ${isEditing && user.role === '機電' ? 'selected' : ''}>機電</option>
-                                        <option value="user" ${isEditing && user.role === 'user' ? 'selected' : ''}>a?��a??</option>
-                                        <option value="junior_manager" ${isEditing && user.role === 'junior_manager' ? 'selected' : ''}>a??e??a�M?cR!</option>
-                                        <option value="manager" ${isEditing && user.role === 'manager' ? 'selected' : ''}>e??e??a�M?cR!</option>
-                                        <option value="hr" ${isEditing && user.role === 'hr' ? 'selected' : ''}>aooao?</option>
-                                        <option value="admin" ${isEditing && user.role === 'admin' ? 'selected' : ''}>cR!c??a?!</option>
+                                        <option value="user" ${isEditing && user.role === 'user' ? 'selected' : ''}>內勤</option>
+                                        <option value="junior_manager" ${isEditing && user.role === 'junior_manager' ? 'selected' : ''}>初階主管</option>
+                                        <option value="manager" ${isEditing && user.role === 'manager' ? 'selected' : ''}>高階主管</option>
+                                        <option value="hr" ${isEditing && user.role === 'hr' ? 'selected' : ''}>人事</option>
+                                        <option value="admin" ${isEditing && user.role === 'admin' ? 'selected' : ''}>管理員</option>
                                     </select>
                                 </div>
                                 
