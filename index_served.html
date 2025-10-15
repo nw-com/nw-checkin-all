@@ -344,8 +344,19 @@
                 case 'junior_manager': return 'bg-violet-100 text-violet-700';
                 case 'hr': return 'bg-amber-100 text-amber-700';
                 case 'field': return 'bg-green-100 text-green-700';
+                case '總幹事': return 'bg-green-100 text-green-700';
+                case '保全': return 'bg-green-100 text-green-700';
+                case '秘書': return 'bg-green-100 text-green-700';
+                case '清潔': return 'bg-green-100 text-green-700';
+                case '機電': return 'bg-green-100 text-green-700';
                 default: return 'bg-blue-100 text-blue-700'; // user / a??a??
             }
+        }
+
+        // is field-like role helper
+        function isFieldLikeRole(role) {
+            const fieldRoles = new Set(['field','總幹事','保全','秘書','清潔','機電']);
+            return fieldRoles.has(role);
         }
         
         const loadingScreen = document.getElementById('loading-screen');
@@ -485,7 +496,7 @@
                 const role = state.currentUserData.role;
                 [navTracking, navSettings, navHr, navGroup].forEach(el => el && el.classList.add('hide'));
 
-                if (role === 'field') {
+                if (isFieldLikeRole(role)) {
                     // a??a??i??a??e!��c?oa�?a??a?!a�?e??a�?a??a??a�?a??e??
                     [navDashboard, navFeatures, navCalendar, navTracking, navSettings, navHr, navGroup].forEach(el => el && el.classList.add('hide'));
                     if (navClockIn) navClockIn.classList.remove('hide');
@@ -519,7 +530,7 @@
                 appContainer.classList.remove('hide');
                 
                 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-                if (role === 'field') {
+                if (isFieldLikeRole(role)) {
                     // a??a??e??e�L-e�2a?�Da�?a??a?!a�?e??
                     const clockBtn = document.querySelector('.tab-btn[data-tab="clock-in"]');
                     if (clockBtn) clockBtn.classList.add('active');
@@ -724,7 +735,7 @@
                     'clock-in': () => renderClockIn(subPage || 'location'),
                     'tracking': () => ['admin','manager','hr'].includes(state.currentUserData.role) ? renderTracking(subPage || 'map') : renderAccessDenied(),
                     'features': () => renderFeatures(subPage || 'news'),
-                    'other': () => state.currentUserData.role === 'field' ? renderOther(subPage || 'news') : renderAccessDenied(),
+                    'other': () => isFieldLikeRole(state.currentUserData.role) ? renderOther(subPage || 'news') : renderAccessDenied(),
                     'calendar': () => renderCalendar(subPage || 'overview'),
                     'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'accounts') : renderAccessDenied(),
                     'hr': () => (state.currentUserData.role === 'admin' || state.currentUserData.role === 'hr') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
@@ -5340,7 +5351,12 @@ const statusText = getStatusDisplayText(record.type || '未知', record.location
                                 <div>
                                     <label for="user-role" class="block text-sm font-medium text-gray-700">e��?e?2 (a??a!?)</label>
                                     <select id="user-role" class="w-full mt-1 px-3 py-2 border rounded-md">
-                                        <option value="field" ${isEditing && user.role === 'field' ? 'selected' : ''}>a??a??</option>
+                                        <option value="field" ${isEditing && user.role === 'field' ? 'selected' : ''}>外勤（一般）</option>
+                                        <option value="總幹事" ${isEditing && user.role === '總幹事' ? 'selected' : ''}>總幹事</option>
+                                        <option value="保全" ${isEditing && user.role === '保全' ? 'selected' : ''}>保全</option>
+                                        <option value="秘書" ${isEditing && user.role === '秘書' ? 'selected' : ''}>秘書</option>
+                                        <option value="清潔" ${isEditing && user.role === '清潔' ? 'selected' : ''}>清潔</option>
+                                        <option value="機電" ${isEditing && user.role === '機電' ? 'selected' : ''}>機電</option>
                                         <option value="user" ${isEditing && user.role === 'user' ? 'selected' : ''}>a?��a??</option>
                                         <option value="junior_manager" ${isEditing && user.role === 'junior_manager' ? 'selected' : ''}>a??e??a�M?cR!</option>
                                         <option value="manager" ${isEditing && user.role === 'manager' ? 'selected' : ''}>e??e??a�M?cR!</option>

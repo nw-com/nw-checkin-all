@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>西北勤務打卡系統｜風格二</title>
+  <link rel="icon" type="image/png" href="https://static.wixstatic.com/ficons/6148f9_bb3f0e3c08bd4a3e83840553497fd866~mv2.ico" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body { font-family: 'Inter', 'Noto Sans TC', sans-serif; }
+    .gradient-header {
+      background: linear-gradient(135deg, #111827 0%, #1f2937 50%, #dc2626 100%);
+    }
+    .card { box-shadow: 0 10px 25px rgba(0,0,0,0.08); }
+    .hide { display: none !important; }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-100">
+  <header class="gradient-header text-white">
+    <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <i data-lucide="activity" class="w-6 h-6"></i>
+        <div>
+          <div class="text-sm opacity-80">西北勤務打卡系統</div>
+          <div class="text-lg font-semibold">風格二｜輕量儀表板</div>
+        </div>
+      </div>
+      <a href="./index.html" class="text-sm underline hover:opacity-90">回到原版</a>
+    </div>
+  </header>
+
+  <!-- 登入卡片 -->
+  <main id="login-page" class="max-w-md mx-auto mt-10 p-6 bg-white rounded-2xl card">
+    <div class="text-center mb-6">
+      <i data-lucide="lock" class="w-8 h-8 text-red-600 mx-auto"></i>
+      <h1 class="mt-2 text-xl font-semibold text-gray-800">登入帳號</h1>
+      <p class="text-gray-500 text-sm">使用同一組 Firebase 帳號</p>
+    </div>
+    <form id="login-form">
+      <label class="block text-sm text-gray-700 mb-1">電子郵件</label>
+      <input id="email" type="email" class="w-full px-3 py-2 border rounded-md mb-3 focus:outline-none focus:ring-2 focus:ring-red-500" required />
+      <div class="flex items-center justify-between mb-1">
+        <label class="text-sm text-gray-700">密碼</label>
+        <label class="flex items-center gap-2 text-xs text-gray-600">
+          <input id="remember-me" type="checkbox" class="h-4 w-4 text-red-600 border-gray-300 rounded" />
+          記住我
+        </label>
+      </div>
+      <div class="relative mb-4">
+        <input id="password" type="password" class="w-full px-3 py-2 border rounded-md pr-10 focus:outline-none focus:ring-2 focus:ring-red-500" required />
+        <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 px-3 text-gray-500">
+          <i id="password-icon" data-lucide="eye-off" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <button type="submit" class="w-full bg-red-600 text-white font-semibold py-2 rounded-md hover:bg-red-700">登入</button>
+      <p id="login-error" class="text-red-600 text-sm mt-3 text-center"></p>
+    </form>
+  </main>
+
+  <!-- 儀表板 -->
+  <section id="dashboard" class="max-w-5xl mx-auto px-4 mt-8 hide">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <!-- 我的狀態 -->
+      <div class="bg-white rounded-2xl p-5 card md:col-span-1">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold">我的狀態</h2>
+          <span id="role-badge" class="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">—</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <img id="profile-avatar" src="https://placehold.co/64x64/EFEFEF/333333?text=U" class="w-16 h-16 rounded-full object-cover" alt="avatar" />
+          <div>
+            <div id="profile-name" class="text-xl font-bold">—</div>
+            <div id="profile-status" class="text-gray-600">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 最近打卡（只讀） -->
+      <div class="bg-white rounded-2xl p-5 card md:col-span-2">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold">最近打卡（僅顯示本人）</h2>
+          <span id="records-count" class="text-sm text-gray-500">—</span>
+        </div>
+        <div id="recent-records" class="divide-y divide-gray-100"></div>
+      </div>
+    </div>
+  </section>
+
+  <script type="module">
+    // 使用與原版相同的 Firebase 設定（共用資料，不更動結構）
+    const firebaseConfig = {
+      apiKey: "AIzaSyAzgs-DZbCYHP7wEM1iWi948yL77ikigBg",
+      authDomain: "nw-check-in.firebaseapp.com",
+      projectId: "nw-check-in",
+      storageBucket: "nw-check-in.appspot.com",
+      messagingSenderId: "1060821780559",
+      appId: "1:1060821780559:web:2638d630526d54f1a5023a",
+      measurementId: "G-61Q1QNNRD2"
+    };
+
+    // Icon library fallback，避免 lucide 未載入導致錯誤
+    if (!window.lucide || typeof window.lucide.createIcons !== 'function') {
+      window.lucide = window.lucide || {};
+      window.lucide.createIcons = function(){};
+    }
+
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, getDoc, collection, getDocs, query, where, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getStorage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+
+    // 暴露必要 helper 供非模組腳本或其他頁使用（沿用原版慣例）
+    window.__fs = { doc, getDoc, collection, getDocs, query, where, limit };
+    window.__authHelpers = { onAuthStateChanged };
+
+    // 角色中文標籤與徽章色
+    function roleLabel(role) {
+      switch (role) {
+        case 'field': return '外勤';
+        case 'user': return '內勤';
+        case 'junior_manager': return '初階主管';
+        case 'manager': return '高階主管';
+        case 'hr': return '人事';
+        case 'admin': return '管理員';
+        default: return role || '內勤';
+      }
+    }
+    function roleBadgeClass(role) {
+      switch (role) {
+        case 'admin': return 'bg-red-100 text-red-700';
+        case 'manager': return 'bg-purple-100 text-purple-700';
+        case 'junior_manager': return 'bg-violet-100 text-violet-700';
+        case 'hr': return 'bg-amber-100 text-amber-700';
+        case 'field': return 'bg-green-100 text-green-700';
+        case '總幹事': return 'bg-green-100 text-green-700';
+        case '保全': return 'bg-green-100 text-green-700';
+        case '秘書': return 'bg-green-100 text-green-700';
+        case '清潔': return 'bg-green-100 text-green-700';
+        case '機電': return 'bg-green-100 text-green-700';
+        default: return 'bg-blue-100 text-blue-700';
+      }
+    }
+
+    // 初始化 App
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+    window.__app = app; window.__auth = auth; window.__db = db; window.__storage = storage;
+    try { window.dispatchEvent(new Event('firebase-ready')); } catch (e) {}
+
+    // DOM 參照
+    const loginPage = document.getElementById('login-page');
+    const dashboard = document.getElementById('dashboard');
+    const loginForm = document.getElementById('login-form');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const rememberMe = document.getElementById('remember-me');
+    const togglePasswordBtn = document.getElementById('toggle-password');
+    const loginError = document.getElementById('login-error');
+
+    // 密碼顯示切換
+    togglePasswordBtn.addEventListener('click', () => {
+      const icon = document.getElementById('password-icon');
+      if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        icon.outerHTML = '<i id="password-icon" data-lucide="eye" class="w-5 h-5"></i>';
+      } else {
+        passwordInput.type = 'password';
+        icon.outerHTML = '<i id="password-icon" data-lucide="eye-off" class="w-5 h-5"></i>';
+      }
+      window.lucide.createIcons();
+    });
+
+    // 記住 email
+    const savedEmail = localStorage.getItem('rememberedEmail');
+    if (savedEmail) { emailInput.value = savedEmail; rememberMe.checked = true; }
+
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault(); loginError.textContent = '';
+      const email = emailInput.value; const password = passwordInput.value;
+      try {
+        if (rememberMe.checked) localStorage.setItem('rememberedEmail', email); else localStorage.removeItem('rememberedEmail');
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (err) { loginError.textContent = '登入失敗，請檢查帳密。'; }
+    });
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        loginPage.classList.remove('hide');
+        dashboard.classList.add('hide');
+        return;
+      }
+
+      loginPage.classList.add('hide');
+      dashboard.classList.remove('hide');
+      window.lucide.createIcons();
+
+      // 載入使用者資料（只讀）
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          const avatar = document.getElementById('profile-avatar');
+          const nameEl = document.getElementById('profile-name');
+          const statusEl = document.getElementById('profile-status');
+          const roleBadge = document.getElementById('role-badge');
+          avatar.src = data.avatarUrl || `https://placehold.co/64x64/EFEFEF/333333?text=${(data.name||'U').charAt(0)}`;
+          nameEl.textContent = data.name || user.email;
+          statusEl.textContent = data.clockInStatus || '—';
+          roleBadge.textContent = roleLabel(data.role);
+          roleBadge.className = `px-2 py-1 rounded-full text-xs ${roleBadgeClass(data.role)}`;
+        }
+      } catch (e) { /* 讀取失敗則保持空 */ }
+
+      // 載入最近打卡（只讀、本人）
+      try {
+        const listEl = document.getElementById('recent-records');
+        const countEl = document.getElementById('records-count');
+        listEl.innerHTML = '<div class="py-8 text-center text-gray-500">載入中...</div>';
+        const clockRef = collection(db, 'clockInRecords');
+        const q = query(clockRef, where('userId', '==', user.uid), limit(25));
+        const qs = await getDocs(q);
+        const records = [];
+        qs.forEach(d => records.push({ id: d.id, ...d.data() }));
+        records.sort((a,b) => {
+          const ta = a.timestamp?.toDate?.() || (a.timestamp ? new Date(a.timestamp) : new Date(0));
+          const tb = b.timestamp?.toDate?.() || (b.timestamp ? new Date(b.timestamp) : new Date(0));
+          return tb - ta;
+        });
+        const recent = records.slice(0, 10);
+        countEl.textContent = `共 ${records.length} 筆（顯示 10 筆）`;
+        if (recent.length === 0) {
+          listEl.innerHTML = '<div class="py-8 text-center text-gray-500">尚無打卡紀錄</div>';
+        } else {
+          listEl.innerHTML = recent.map(r => {
+            const ts = r.timestamp?.toDate?.() || (r.timestamp ? new Date(r.timestamp) : null);
+            const timeStr = ts ? ts.toLocaleString() : '—';
+            const locName = r.locationName || '—';
+            const type = r.type || '—';
+            return `
+              <div class="py-3 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <i data-lucide="fingerprint" class="w-4 h-4 text-gray-500"></i>
+                  <div>
+                    <div class="font-medium">${type}</div>
+                    <div class="text-xs text-gray-500">${timeStr}</div>
+                  </div>
+                </div>
+                <div class="text-sm text-gray-600">${locName}</div>
+              </div>
+            `;
+          }).join('');
+          window.lucide.createIcons();
+        }
+      } catch (e) {
+        const listEl = document.getElementById('recent-records');
+        listEl.innerHTML = '<div class="py-8 text-center text-red-600">載入打卡紀錄失敗</div>';
+      }
+    });
+  </script>
+</body>
+</html>

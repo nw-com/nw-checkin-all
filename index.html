@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>西北社區打卡系統</title>
+    <title>西北勤務打卡系統</title>
     <link rel="icon" type="image/png" href="https://static.wixstatic.com/ficons/6148f9_bb3f0e3c08bd4a3e83840553497fd866~mv2.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -154,8 +154,8 @@
     <div id="login-page" class="w-full max-w-sm p-8 bg-white rounded-2xl shadow-lg hide">
         <div class="text-center mb-8">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
-            <h1 class="text-2xl font-bold text-gray-800 mt-4">西北社區打卡系統</h1>
-            <p class="text-gray-500">社區版V0.0.1</p>
+            <h1 class="text-2xl font-bold text-gray-800 mt-4">西北勤務打卡系統</h1>
+            <p class="text-gray-500">雲端測試版V2.2.8</p>
         </div>
         <form id="login-form">
             <div class="mb-4">
@@ -190,7 +190,7 @@
         <header class="h-[70px] flex items-center justify-between px-4 border-b border-gray-200 flex-shrink-0">
             <div class="flex items-center space-x-2">
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
-                <span class="text-lg font-bold text-gray-800">西北社區打卡系統</span>
+                <span class="text-lg font-bold text-gray-800">西北勤務打卡系統</span>
                 <span id="welcome-message" class="text-sm text-gray-600 ml-2"></span>
             </div>
             <button id="profile-avatar-btn">
@@ -385,8 +385,19 @@
                 case 'junior_manager': return 'bg-violet-100 text-violet-700';
                 case 'hr': return 'bg-amber-100 text-amber-700';
                 case 'field': return 'bg-green-100 text-green-700';
+                case '總幹事': return 'bg-green-100 text-green-700';
+                case '保全': return 'bg-green-100 text-green-700';
+                case '秘書': return 'bg-green-100 text-green-700';
+                case '清潔': return 'bg-green-100 text-green-700';
+                case '機電': return 'bg-green-100 text-green-700';
                 default: return 'bg-blue-100 text-blue-700'; // user / 其他
             }
+        }
+
+        // 新增輔助：判斷是否為「外勤及其子角色」
+        function isFieldLikeRole(role) {
+            const fieldRoles = new Set(['field','總幹事','保全','秘書','清潔','機電']);
+            return fieldRoles.has(role);
         }
         
         const loadingScreen = document.getElementById('loading-screen');
@@ -526,7 +537,7 @@
                 const role = state.currentUserData.role;
                 [navTracking, navSettings, navHr, navGroup].forEach(el => el && el.classList.add('hide'));
 
-                if (role === 'field') {
+                if (isFieldLikeRole(role)) {
                     // 外勤：僅顯示「打卡」與「其他」分頁
                     [navDashboard, navFeatures, navCalendar, navTracking, navSettings, navHr, navGroup].forEach(el => el && el.classList.add('hide'));
                     if (navClockIn) navClockIn.classList.remove('hide');
@@ -560,7 +571,7 @@
                 appContainer.classList.remove('hide');
                 
                 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-                if (role === 'field') {
+                if (isFieldLikeRole(role)) {
                     // 外勤預設進入「打卡」頁
                     const clockBtn = document.querySelector('.tab-btn[data-tab="clock-in"]');
                     if (clockBtn) clockBtn.classList.add('active');
@@ -770,7 +781,7 @@
                     'clock-in': () => renderClockIn(subPage || 'location'),
                     'tracking': () => ['admin','manager','hr'].includes(state.currentUserData.role) ? renderTracking(subPage || 'map') : renderAccessDenied(),
                     'features': () => renderFeatures(subPage || 'news'),
-                    'other': () => state.currentUserData.role === 'field' ? renderOther(subPage || 'news') : renderAccessDenied(),
+                    'other': () => isFieldLikeRole(state.currentUserData.role) ? renderOther(subPage || 'news') : renderAccessDenied(),
                     'calendar': () => renderCalendar(subPage || 'overview'),
                     'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'accounts') : renderAccessDenied(),
                     'hr': () => (state.currentUserData.role === 'admin' || state.currentUserData.role === 'hr') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
@@ -5849,7 +5860,12 @@
                                 <div>
                                     <label for="user-role" class="block text-sm font-medium text-gray-700">角色 (必填)</label>
                                     <select id="user-role" class="w-full mt-1 px-3 py-2 border rounded-md">
-                                        <option value="field" ${isEditing && user.role === 'field' ? 'selected' : ''}>外勤</option>
+                                        <option value="field" ${isEditing && user.role === 'field' ? 'selected' : ''}>外勤（一般）</option>
+                                        <option value="總幹事" ${isEditing && user.role === '總幹事' ? 'selected' : ''}>總幹事</option>
+                                        <option value="保全" ${isEditing && user.role === '保全' ? 'selected' : ''}>保全</option>
+                                        <option value="秘書" ${isEditing && user.role === '秘書' ? 'selected' : ''}>秘書</option>
+                                        <option value="清潔" ${isEditing && user.role === '清潔' ? 'selected' : ''}>清潔</option>
+                                        <option value="機電" ${isEditing && user.role === '機電' ? 'selected' : ''}>機電</option>
                                         <option value="user" ${isEditing && user.role === 'user' ? 'selected' : ''}>內勤</option>
                                         <option value="junior_manager" ${isEditing && user.role === 'junior_manager' ? 'selected' : ''}>初階主管</option>
                                         <option value="manager" ${isEditing && user.role === 'manager' ? 'selected' : ''}>高階主管</option>
@@ -7259,7 +7275,6 @@
     </script>
 </body>
 </html>
-
 
 
 
