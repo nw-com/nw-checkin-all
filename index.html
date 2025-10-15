@@ -375,6 +375,7 @@
                 case 'junior_manager': return '初階主管';
                 case 'manager': return '高階主管';
                 case 'hr': return '人事';
+                case 'community_admin': return '社區管理員';
                 case 'admin': return '管理員';
                 default: return role || '內勤';
             }
@@ -4853,8 +4854,42 @@
             
             function renderSettingsAccounts(container) {
                 container.innerHTML = `
-                    <div class="p-4">
-                        <button id="add-user-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 mb-4 flex items-center justify-center">
+                    <div class="p-4 space-y-4">
+                        <div class="bg-white p-3 rounded-md shadow-sm border space-y-2">
+                            <div class="flex items-center justify-between">
+                                <h3 class="font-bold text-lg">帳號列表</h3>
+                                <div class="flex items-center gap-2">
+                                    <button id="export-users-json" class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 flex items-center"><i data-lucide="download" class="w-4 h-4 mr-1"></i>匯出 JSON</button>
+                                    <button id="import-users-json" class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 flex items-center"><i data-lucide="upload" class="w-4 h-4 mr-1"></i>匯入 JSON</button>
+                                    <input id="import-users-file" type="file" accept="application/json" class="hidden" />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">角色</label>
+                                    <select id="filter-role" class="w-full px-3 py-2 border rounded-md">
+                                        <option value="">全部角色</option>
+                                        <option value="admin">${roleLabel('admin')}</option>
+                                        <option value="manager">${roleLabel('manager')}</option>
+                                        <option value="hr">${roleLabel('hr')}</option>
+                                        <option value="junior_manager">${roleLabel('junior_manager')}</option>
+                                        <option value="community_admin">${roleLabel('community_admin')}</option>
+                                        <option value="field">${roleLabel('field')}</option>
+                                        <option value="user">${roleLabel('user')}</option>
+                                    </select>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="block text-sm text-gray-600 mb-1">服務社區 (可複選)</label>
+                                    <div class="flex items-center gap-3 mb-2">
+                                        <label class="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" id="filter-sc-select-all" class="rounded" /> 全選</label>
+                                        <button id="reset-filters" class="text-sm text-blue-600 hover:text-blue-800">重置篩選</button>
+                                    </div>
+                                    <div id="filter-sc-list" class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto border rounded-md p-2"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button id="add-user-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 flex items-center justify-center">
                             <i data-lucide="plus-circle" class="w-4 h-4 mr-2"></i>新增帳號
                         </button>
                         <div id="user-list" class="space-y-2"></div>
@@ -4865,37 +4900,91 @@
                 const userList = document.getElementById('user-list');
                 const usersRef = collection(db, "users");
                 const q = query(usersRef, orderBy("name"));
-                const unsubscribe = onSnapshot(q, (querySnapshot) => {
-                    userList.innerHTML = '';
-                    const users = [];
-                    querySnapshot.forEach(doc => users.push({ id: doc.id, ...doc.data() }));
-                    state.users = users; // Update global state
 
-                    if (users.length === 0) {
+                // 篩選狀態
+                let allUsers = [];
+                let lastRendered = [];
+                const roleSelect = document.getElementById('filter-role');
+                const scListEl = document.getElementById('filter-sc-list');
+                const scSelectAllEl = document.getElementById('filter-sc-select-all');
+                const resetBtn = document.getElementById('reset-filters');
+                const exportBtn = document.getElementById('export-users-json');
+                const importBtn = document.getElementById('import-users-json');
+                const importFileInput = document.getElementById('import-users-file');
+
+                // 載入社區供篩選
+                (async () => {
+                    try {
+                        const communitiesSnap = await getDocs(collection(db, 'communities'));
+                        const communities = [];
+                        communitiesSnap.forEach(docSnap => communities.push({ id: docSnap.id, ...docSnap.data() }));
+                        communities.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+                        scListEl.innerHTML = communities.map(c => {
+                            const label = `${c.region ? `[${c.region}] ` : ''}${c.code ? `[${c.code}] ` : ''}${c.name || ''}`;
+                            return `
+                                <label class="flex items-center gap-2">
+                                    <input type="checkbox" name="filter-sc" value="${c.id}" class="rounded">
+                                    <span class="text-sm text-gray-700">${label}</span>
+                                </label>
+                            `;
+                        }).join('');
+                        scSelectAllEl?.addEventListener('change', (e) => {
+                            const checked = e.target.checked;
+                            scListEl.querySelectorAll('input[name="filter-sc"]').forEach(chk => { chk.checked = checked; });
+                            renderUserList();
+                        });
+                        scListEl.querySelectorAll('input[name="filter-sc"]').forEach(chk => {
+                            chk.addEventListener('change', renderUserList);
+                        });
+                    } catch (err) {
+                        console.error('載入社區篩選清單失敗', err);
+                        scListEl.innerHTML = '<p class="text-sm text-red-500">社區篩選載入失敗</p>';
+                    }
+                })();
+
+                roleSelect.addEventListener('change', renderUserList);
+                resetBtn.addEventListener('click', () => {
+                    roleSelect.value = '';
+                    scSelectAllEl.checked = false;
+                    scListEl.querySelectorAll('input[name="filter-sc"]').forEach(chk => { chk.checked = false; });
+                    renderUserList();
+                });
+
+                const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                    allUsers = [];
+                    querySnapshot.forEach(doc => allUsers.push({ id: doc.id, ...doc.data() }));
+                    state.users = allUsers; // Update global state
+                    renderUserList();
+                });
+
+                function renderUserList() {
+                    userList.innerHTML = '';
+                    if (allUsers.length === 0) {
                         userList.innerHTML = `<p class="text-center text-gray-500 p-4">尚未建立任何帳號</p>`;
                         return;
                     }
+                    const selectedRole = roleSelect.value || '';
+                    const selectedSc = Array.from(scListEl.querySelectorAll('input[name="filter-sc"]')).filter(c => c.checked).map(c => c.value);
+                    const selectedScSet = new Set(selectedSc);
 
-                    users.forEach(user => {
+                    const filtered = allUsers.filter(u => {
+                        const roleOk = selectedRole ? (u.role === selectedRole) : true;
+                        const scOk = selectedScSet.size > 0 ? Array.isArray(u.serviceCommunities) && u.serviceCommunities.some(id => selectedScSet.has(id)) : true;
+                        return roleOk && scOk;
+                    });
+
+                    filtered.forEach(user => {
                         const userElement = document.createElement('div');
                         userElement.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
                         userElement.innerHTML = `
                             <div class="flex items-center">
-                                <img src="${user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${user.name.charAt(0)}`}" class="w-10 h-10 rounded-full mr-3 object-cover">
+                                <img src="${user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(user.name||'?').charAt(0)}`}" class="w-10 h-10 rounded-full mr-3 object-cover">
                                 <div>
-                                    <p class="font-medium text-gray-800">${user.name}</p>
-                                    <p class="text-sm text-gray-500">${user.email}</p>
-                                    <div class="flex items-center">
+                                    <p class="font-medium text-gray-800">${user.name || '(未命名)'}</p>
+                                    <p class="text-sm text-gray-500">${user.email || ''}</p>
+                                    <div class="flex items-center flex-wrap gap-2 mt-1">
                                         <p class="text-xs text-gray-400 mr-2">${user.phone || ''}</p>
-                                        <span class="text-xs px-2 py-1 rounded-full ${
-  user.role === 'admin' ? 'bg-red-100 text-red-700' : 
-  user.role === 'manager' ? 'bg-purple-100 text-purple-700' : 
-  'bg-blue-100 text-blue-700'
-}">${
-  user.role === 'admin' ? '管理員' : 
-  user.role === 'manager' ? '高階主管' : 
-  '內勤'
-}</span>
+                                        <span class="text-xs px-2 py-1 rounded-full ${roleBadgeClass(user.role)}">${roleLabel(user.role)}</span>
                                     </div>
                                 </div>
                             </div>
@@ -4903,14 +4992,9 @@
                                 <button data-userid="${user.id}" class="edit-user-btn p-2 text-gray-500 hover:text-red-600"><i data-lucide="edit" class="w-4 h-4"></i></button>
                                 <button data-userid="${user.id}" class="delete-user-btn p-2 text-gray-500 hover:text-red-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                             </div>`;
-                        // 覆寫角色徽章呈現：使用 roleLabel 與 roleBadgeClass
-                        const badgeSpan = userElement.querySelector('span.text-xs.px-2.py-1.rounded-full');
-                        if (badgeSpan) {
-                            badgeSpan.className = `text-xs px-2 py-1 rounded-full ${roleBadgeClass(user.role)}`;
-                            badgeSpan.textContent = roleLabel(user.role);
-                        }
                         userList.appendChild(userElement);
                     });
+                    lastRendered = filtered;
                     lucide.createIcons();
 
                     document.querySelectorAll('.edit-user-btn').forEach(btn => btn.addEventListener('click', (e) => {
@@ -4935,7 +5019,93 @@
                             }
                         }
                     }));
+                }
+
+                // 匯出 JSON
+                exportBtn.addEventListener('click', () => {
+                    try {
+                        const data = lastRendered.map(u => ({
+                            id: u.id,
+                            name: u.name || '',
+                            email: u.email || '',
+                            phone: u.phone || '',
+                            role: u.role || 'user',
+                            lineId: u.lineId || '',
+                            avatarUrl: u.avatarUrl || '',
+                            serviceCommunities: Array.isArray(u.serviceCommunities) ? u.serviceCommunities : []
+                        }));
+                        const blob = new Blob([JSON.stringify({ users: data }, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        const ts = new Date().toISOString().replace(/[:.]/g,'-');
+                        a.download = `users-export-${ts}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                        showToast('已匯出目前篩選的帳號為 JSON');
+                    } catch (err) {
+                        console.error('匯出 JSON 失敗', err);
+                        showToast('匯出 JSON 失敗', true);
+                    }
                 });
+
+                // 匯入 JSON
+                importBtn.addEventListener('click', async () => {
+                    const isAdmin = await window.checkAdminStatus?.();
+                    if (!isAdmin) {
+                        showToast('僅管理員可匯入帳號資料', true);
+                        return;
+                    }
+                    importFileInput.value = '';
+                    importFileInput.click();
+                });
+                importFileInput.addEventListener('change', async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                        const text = await file.text();
+                        const json = JSON.parse(text);
+                        const items = Array.isArray(json) ? json : (Array.isArray(json.users) ? json.users : []);
+                        if (!Array.isArray(items) || items.length === 0) {
+                            showToast('匯入檔案中無有效使用者資料', true);
+                            return;
+                        }
+                        showLoading(true);
+                        let successCount = 0;
+                        for (const it of items) {
+                            try {
+                                const payload = {
+                                    name: it.name || '',
+                                    email: it.email || '',
+                                    phone: it.phone || '',
+                                    role: it.role || 'user',
+                                    lineId: it.lineId || '',
+                                    avatarUrl: it.avatarUrl || '',
+                                    serviceCommunities: Array.isArray(it.serviceCommunities) ? it.serviceCommunities : [],
+                                };
+                                let targetId = it.id && typeof it.id === 'string' ? it.id : null;
+                                if (targetId) {
+                                    await setDoc(doc(db, 'users', targetId), payload, { merge: true });
+                                } else {
+                                    const newRef = doc(collection(db, 'users'));
+                                    await setDoc(newRef, payload, { merge: false });
+                                }
+                                successCount++;
+                            } catch (writeErr) {
+                                console.warn('匯入單筆失敗', writeErr);
+                            }
+                        }
+                        showToast(`匯入完成，成功 ${successCount} 筆`);
+                    } catch (err) {
+                        console.error('匯入 JSON 解析失敗', err);
+                        showToast('匯入失敗：JSON 格式錯誤', true);
+                    } finally {
+                        showLoading(false);
+                    }
+                });
+
                 state.activeListeners.push(unsubscribe);
             }
 
@@ -5734,26 +5904,67 @@
             // --- Settings: 社區列表 ---
             function renderSettingsCommunity(container) {
                 container.innerHTML = `
-                    <div class="p-4">
-                        <button id="add-community-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 mb-4 flex items-center justify-center">
-                            <i data-lucide="plus-circle" class="w-4 h-4 mr-2"></i>新增社區
-                        </button>
+                    <div class="p-4 space-y-4">
+                        <div class="bg-white p-3 rounded-md shadow-sm border">
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">區域</label>
+                                    <select id="filter-community-region" class="w-full px-3 py-2 border rounded-md">
+                                        <option value="">全部</option>
+                                        <option value="台北">台北</option>
+                                        <option value="新北">新北</option>
+                                        <option value="桃園">桃園</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">編號(前綴)</label>
+                                    <input id="filter-community-code" type="text" class="w-full px-3 py-2 border rounded-md" placeholder="例如：A" />
+                                </div>
+                                <div class="flex items-end">
+                                    <button id="reset-community-filters" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200">重置篩選</button>
+                                </div>
+                                <div class="flex items-end">
+                                    <button id="add-community-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 flex items-center justify-center">
+                                        <i data-lucide="plus-circle" class="w-4 h-4 mr-2"></i>新增社區
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div id="community-list" class="space-y-2">讀取中...</div>
                     </div>`;
                 lucide.createIcons();
                 const listEl = document.getElementById('community-list');
                 document.getElementById('add-community-btn').addEventListener('click', () => openCommunityModal());
+                const regionSelect = document.getElementById('filter-community-region');
+                const codeInput = document.getElementById('filter-community-code');
+                const resetFilterBtn = document.getElementById('reset-community-filters');
 
                 const communitiesRef = collection(db, 'communities');
                 const q = query(communitiesRef, orderBy('name'));
+                let allCommunities = [];
+
                 const unsubscribe = onSnapshot(q, (snap) => {
+                    allCommunities = [];
+                    snap.forEach(docSnap => { allCommunities.push({ id: docSnap.id, ...docSnap.data() }); });
+                    renderCommunityList();
+                });
+
+                function renderCommunityList() {
                     listEl.innerHTML = '';
-                    if (snap.empty) {
+                    if (!allCommunities.length) {
                         listEl.innerHTML = `<p class="text-center text-gray-500 p-4">尚未建立任何社區</p>`;
                         return;
                     }
-                    snap.forEach(docSnap => {
-                        const c = { id: docSnap.id, ...docSnap.data() };
+                    const region = regionSelect.value || '';
+                    const codePrefix = (codeInput.value || '').trim();
+                    const filtered = allCommunities.filter(c => {
+                        const rOk = region ? (c.region === region) : true;
+                        const codeVal = (c.code || '').toString();
+                        const cOk = codePrefix ? codeVal.toUpperCase().startsWith(codePrefix.toUpperCase()) : true;
+                        return rOk && cOk;
+                    });
+
+                    filtered.forEach(c => {
                         const lat = c.location?.latitude ?? '';
                         const lng = c.location?.longitude ?? '';
                         const region = c.region || '';
@@ -5778,6 +5989,7 @@
                             </div>`;
                         listEl.appendChild(row);
                     });
+
                     lucide.createIcons();
 
                     listEl.querySelectorAll('.view-map-btn').forEach(btn => btn.addEventListener('click', (e) => {
@@ -5814,6 +6026,14 @@
                             showToast('刪除社區失敗', true);
                         }
                     }));
+                }
+
+                regionSelect.addEventListener('change', renderCommunityList);
+                codeInput.addEventListener('input', renderCommunityList);
+                resetFilterBtn.addEventListener('click', () => {
+                    regionSelect.value = '';
+                    codeInput.value = '';
+                    renderCommunityList();
                 });
                 state.activeListeners.push(unsubscribe);
             }
