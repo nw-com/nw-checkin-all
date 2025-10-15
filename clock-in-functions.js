@@ -323,24 +323,34 @@ function updateButtonStatus() {
         }
     };
 
-    // 上班/下班單一切換按鈕動態設定器
+    // 上班/下班兩個獨立按鈕動態設定器
     const setWorkToggleButton = (nextType, label, bgClass) => {
-        const toggleBtn = document.getElementById('work-toggle-btn');
-        if (!toggleBtn) return;
-        toggleBtn.dataset.type = nextType;
-        toggleBtn.textContent = label;
-        toggleBtn.disabled = false;
-        toggleBtn.classList.remove('bg-gray-300', 'cursor-not-allowed', 'disabled',
-                                   'bg-green-500', 'hover:bg-green-600',
-                                   'bg-red-500', 'hover:bg-red-600');
-        if (bgClass) {
-            toggleBtn.classList.add(bgClass);
-            // 加上對應 hover 類
-            if (bgClass === 'bg-green-500') {
-                toggleBtn.classList.add('hover:bg-green-600');
-            } else if (bgClass === 'bg-red-500') {
-                toggleBtn.classList.add('hover:bg-red-600');
-            }
+        const startBtn = document.getElementById('work-start-btn');
+        const endBtn = document.getElementById('work-end-btn');
+        if (!startBtn || !endBtn) return;
+        // 重置樣式
+        [startBtn, endBtn].forEach(btn => {
+            btn.classList.remove('bg-gray-300','cursor-not-allowed','disabled','bg-green-500','hover:bg-green-600','bg-red-500','hover:bg-red-600');
+        });
+
+        // 設定文字與型別
+        startBtn.dataset.type = '上班';
+        startBtn.textContent = '上班打卡';
+        endBtn.dataset.type = '下班';
+        endBtn.textContent = '下班打卡';
+
+        if (nextType === '上班') {
+            // 啟用上班、禁用下班
+            startBtn.disabled = false;
+            startBtn.classList.add('bg-green-500','hover:bg-green-600');
+            endBtn.disabled = true;
+            endBtn.classList.add('bg-gray-300','cursor-not-allowed','disabled');
+        } else if (nextType === '下班') {
+            // 啟用下班、禁用上班
+            endBtn.disabled = false;
+            endBtn.classList.add('bg-red-500','hover:bg-red-600');
+            startBtn.disabled = true;
+            startBtn.classList.add('bg-gray-300','cursor-not-allowed','disabled');
         }
     };
     
@@ -368,26 +378,21 @@ function updateButtonStatus() {
         case '外出':
             // 外出中：抵達可動作（藍系），下班不可動作（灰），返回不可動作（灰）
             setOutboundCycleButton('抵達', '抵達打卡', 'bg-blue-500');
-            // 禁用下班按鈕：設為灰色不可動作
-            const toggleBtn1 = document.getElementById('work-toggle-btn');
-            if (toggleBtn1) {
-                toggleBtn1.dataset.type = '下班';
-                toggleBtn1.textContent = '下班打卡';
-                toggleBtn1.disabled = true;
-                toggleBtn1.classList.remove('bg-red-500', 'hover:bg-red-600', 'bg-green-500', 'hover:bg-green-600');
-                toggleBtn1.classList.add('bg-gray-300', 'cursor-not-allowed', 'disabled');
+            const endBtn1 = document.getElementById('work-end-btn');
+            if (endBtn1) {
+                endBtn1.disabled = true;
+                endBtn1.classList.remove('bg-red-500','hover:bg-red-600');
+                endBtn1.classList.add('bg-gray-300','cursor-not-allowed','disabled');
             }
             break;
         case '抵達':
             // 抵達中：離開可動作（藍系），下班不可動作（灰），返回不可動作（灰）
             setOutboundCycleButton('離開', '離開打卡', 'bg-blue-500');
-            const toggleBtn2 = document.getElementById('work-toggle-btn');
-            if (toggleBtn2) {
-                toggleBtn2.dataset.type = '下班';
-                toggleBtn2.textContent = '下班打卡';
-                toggleBtn2.disabled = true;
-                toggleBtn2.classList.remove('bg-red-500', 'hover:bg-red-600', 'bg-green-500', 'hover:bg-green-600');
-                toggleBtn2.classList.add('bg-gray-300', 'cursor-not-allowed', 'disabled');
+            const endBtn2 = document.getElementById('work-end-btn');
+            if (endBtn2) {
+                endBtn2.disabled = true;
+                endBtn2.classList.remove('bg-red-500','hover:bg-red-600');
+                endBtn2.classList.add('bg-gray-300','cursor-not-allowed','disabled');
             }
             break;
         case '離開':

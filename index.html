@@ -344,6 +344,9 @@
             users: [],
             trackingMap: null,
             trackingMarkers: [],
+            // 用於異常標示的設定與快取
+            markAbnormalLocation: true,
+            communitiesById: {},
         };
         
         // 初始化本機裝置ID（用於打卡紀錄與首次打卡裝置標記）
@@ -439,6 +442,86 @@
             const emailInput = document.getElementById('email');
             const togglePasswordBtn = document.getElementById('toggle-password');
             const passwordInput = document.getElementById('password');
+
+            // ---- 距離與異常判定輔助（供多處渲染共用）----
+            function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+                const toRad = (v) => (v * Math.PI) / 180;
+                const R = 6371000; // 地球半徑（公尺）
+                const dLat = toRad(lat2 - lat1);
+                const dLon = toRad(lon2 - lon1);
+                const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
+            }
+
+            async function ensureAbnormalMarkingConfig() {
+                if (state._markSettingLoaded) return;
+                try {
+                    const { doc, getDoc } = window.__fs || {};
+                    const sSnap = await getDoc(doc(db, 'settings', 'location'));
+                    if (sSnap.exists()) {
+                        const s = sSnap.data();
+                        // 若未設定則預設為 true，以符合需求
+                        state.markAbnormalLocation = typeof s.markAbnormalLocation === 'boolean' ? s.markAbnormalLocation : true;
+                    }
+                } catch (e) { /* noop */ }
+                state._markSettingLoaded = true;
+            }
+
+            async function ensureCommunitiesCache() {
+                if (state._communitiesLoaded && state.communitiesById && Object.keys(state.communitiesById).length > 0) return;
+                try {
+                    const { collection, getDocs } = window.__fs || {};
+                    const snap = await getDocs(collection(db, 'communities'));
+                    const map = {};
+                    snap.forEach(d => {
+                        const data = d.data() || {};
+                        const gp = data.location;
+                        const lat = gp && typeof gp.latitude === 'number' ? gp.latitude : null;
+                        const lng = gp && typeof gp.longitude === 'number' ? gp.longitude : null;
+                        const radius = (typeof data.radius === 'number' && data.radius >= 0) ? data.radius : null;
+                        map[d.id] = {
+                            id: d.id,
+                            name: data.name || '',
+                            lat,
+                            lng,
+                            radius,
+                        };
+                    });
+                    state.communitiesById = map;
+                } catch (e) { /* noop */ }
+                state._communitiesLoaded = true;
+            }
+
+            function computeRecordAbnormal(record, serviceCommunityIds) {
+                try {
+                    if (!state.markAbnormalLocation) return null;
+                    const loc = record.location;
+                    const lat = loc && typeof loc.latitude === 'number' ? loc.latitude : null;
+                    const lng = loc && typeof loc.longitude === 'number' ? loc.longitude : null;
+                    if (lat == null || lng == null) return null;
+                    const ids = Array.isArray(serviceCommunityIds) ? serviceCommunityIds : [];
+                    if (!ids.length) return null;
+                    let considered = 0;
+                    let inside = false;
+                    let nearest = Infinity;
+                    let nearestCommunity = null;
+                    for (const id of ids) {
+                        const c = state.communitiesById?.[id];
+                        if (!c || c.lat == null || c.lng == null || !(typeof c.radius === 'number' && c.radius > 0)) continue;
+                        considered++;
+                        const dist = calculateDistanceMeters(lat, lng, c.lat, c.lng);
+                        if (dist <= c.radius) {
+                            inside = true; break;
+                        }
+                        if (dist < nearest) { nearest = dist; nearestCommunity = c; }
+                    }
+                    if (!considered) return null;
+                    if (inside) return { isAbnormal: false };
+                    const detail = nearestCommunity ? `距離${nearestCommunity.name || '最近社區'}約${Math.round(nearest)}公尺（半徑 ${nearestCommunity.radius} 公尺）` : '';
+                    return { isAbnormal: true, detail };
+                } catch (e) { return null; }
+            }
 
             // Remember me logic
             const savedEmail = localStorage.getItem('rememberedEmail');
@@ -1469,14 +1552,10 @@
                             <span id="status-text">尚未打卡</span>
                         </div>
                         <div id="clock-in-buttons" class="grid grid-cols-2 gap-2 pt-4">
-                            <!-- 第一列：上班/下班切換 與 外出循環 -->
-                            <button id="work-toggle-btn" data-type="上班" class="clock-in-btn bg-green-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-green-600">上班打卡</button>
-                            <button id="outbound-cycle-btn" data-type="外出" class="clock-in-btn bg-blue-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-blue-600">外出打卡</button>
-                            <!-- 第二列：返回打卡 與 請假申請（寬度與外出一致，靠右） -->
-                            <button id="return-btn" data-type="返回" class="clock-in-btn bg-gray-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-gray-600">返回打卡</button>
-                            <div class="flex">
-                                <button data-type="臨時請假" id="temp-leave-btn" class="clock-in-btn w-full bg-orange-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-orange-600">請假申請</button>
-                            </div>
+                            <!-- 僅保留三個按鈕：上班、下班、請假申請 -->
+                            <button id="work-start-btn" data-type="上班" class="clock-in-btn bg-green-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-green-600">上班打卡</button>
+                            <button id="work-end-btn" data-type="下班" class="clock-in-btn bg-red-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-red-600">下班打卡</button>
+                            <button data-type="臨時請假" id="temp-leave-btn" class="clock-in-btn w-full bg-orange-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-orange-600">請假申請</button>
                         </div>
                     </div>`;
                 lucide.createIcons();
@@ -2448,7 +2527,10 @@
                 `;
 
                 const dateInput = document.getElementById('record-date');
-                const loadRecords = () => {
+
+                const loadRecords = async () => {
+                    await ensureAbnormalMarkingConfig();
+                    await ensureCommunitiesCache();
                     const selectedDate = new Date(dateInput.value);
                     const startOfDay = new Date(selectedDate);
                     startOfDay.setHours(0, 0, 0, 0);
@@ -2498,11 +2580,16 @@
                             card.className = 'bg-white p-3 rounded-lg shadow-sm border mb-3';
                             const statusText = getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null);
                             const statusColor = getStatusColor(statusText);
+                            const abnormalInfo = computeRecordAbnormal(record, state.currentUserData?.serviceCommunities || []);
+                            const abnormalHtml = (abnormalInfo && abnormalInfo.isAbnormal)
+                                ? `<div class="mt-1 flex items-center"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class="ml-2 text-xs text-gray-500">${abnormalInfo.detail}</span>` : ''}</div>`
+                                : '';
                             card.innerHTML = `
                                 <div class="flex justify-between items-start">
                                     <div>
                                         <p class="font-bold text-lg ${statusColor}">${statusText}</p>
                                         <p class="text-sm text-gray-600">${formatDate(record.timestamp)}</p>
+                                        ${abnormalHtml}
                                     </div>
                                 </div>
                                 <div class="mt-2 flex space-x-2 overflow-x-auto">
@@ -3671,6 +3758,8 @@
                 }
 
                 container.innerHTML = `<div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>`;
+                await ensureAbnormalMarkingConfig();
+                await ensureCommunitiesCache();
                 const querySnapshot = await getDocs(q);
                 if (querySnapshot.empty) {
                     container.innerHTML = `<p class="text-center text-gray-500 p-4">無打卡紀錄</p>`;
@@ -3681,7 +3770,12 @@
                 const usersRef = collection(db, 'users');
                 const usersSnapshot = await getDocs(usersRef);
                 const usersMap = {};
-                usersSnapshot.forEach(doc => { usersMap[doc.id] = doc.data().name; });
+                const userCommunitiesMap = {};
+                usersSnapshot.forEach(doc => { 
+                    const d = doc.data();
+                    usersMap[doc.id] = d.name;
+                    userCommunitiesMap[doc.id] = Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [];
+                });
 
                 container.innerHTML = '';
                 records
@@ -3694,6 +3788,10 @@
                     .forEach(record => {
                         const time = record.timestamp?.toDate?.() || new Date();
                         const userName = usersMap[record.userId] || '未知用戶';
+                        const abnormalInfo = computeRecordAbnormal(record, userCommunitiesMap[record.userId] || []);
+                        const abnormalHtml = (abnormalInfo && abnormalInfo.isAbnormal)
+                            ? `<div class="mt-1"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class=\"ml-2 text-xs text-gray-500\">${abnormalInfo.detail}</span>` : ''}</div>`
+                            : '';
                         const card = document.createElement('div');
                         card.className = 'bg-white p-4 rounded-lg shadow border border-gray-200';
                         card.innerHTML = `
@@ -3706,6 +3804,7 @@
                         ${record.location && typeof record.location.latitude === 'number' && typeof record.location.longitude === 'number' ? `<span class="ml-2 text-sm text-gray-500">${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}</span>` : ''}
                                     </div>
                                     <div class="mt-1 text-xs text-gray-500">裝置ID: ${record.deviceId || '未知'}</div>
+                                    ${abnormalHtml}
                                 </div>
                                 <div class="flex space-x-2 items-start"></div>
                             </div>
@@ -3931,7 +4030,7 @@
                 userSelect.addEventListener('change', loadAttendanceRecords);
                 dateInput.addEventListener('change', loadAttendanceRecords);
                 
-                function loadAttendanceRecords() {
+                async function loadAttendanceRecords() {
                     const selectedDate = new Date(dateInput.value);
                     const startOfDay = new Date(selectedDate);
                     startOfDay.setHours(0, 0, 0, 0);
@@ -3960,7 +4059,8 @@
                     
                     const recordsList = document.getElementById('attendance-records-list');
                     recordsList.innerHTML = `<div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>`;
-                    
+                    await ensureAbnormalMarkingConfig();
+                    await ensureCommunitiesCache();
                     getDocs(q).then((querySnapshot) => {
                         if (querySnapshot.empty) {
                             recordsList.innerHTML = `<p class="text-center text-gray-500 p-4">無打卡紀錄</p>`;
@@ -3987,6 +4087,10 @@
                             }).forEach(record => {
                                 const time = record.timestamp?.toDate?.() || new Date();
                                 const userName = usersMap[record.userId] || '未知用戶';
+                                const abnormalInfo = computeRecordAbnormal(record, (users.find(u => u.id === record.userId)?.serviceCommunities) || []);
+                                const abnormalHtml = (abnormalInfo && abnormalInfo.isAbnormal)
+                                    ? `<div class="mt-1"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class=\"ml-2 text-xs text-gray-500\">${abnormalInfo.detail}</span>` : ''}</div>`
+                                    : '';
                                 
                                 const card = document.createElement('div');
                                 card.className = 'bg-white p-4 rounded-lg shadow border border-gray-200';
@@ -4000,6 +4104,7 @@
                         ${record.location && typeof record.location.latitude === 'number' && typeof record.location.longitude === 'number' ? `<span class="ml-2 text-sm text-gray-500">${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}</span>` : ''}
                                             </div>
                                             <div class="mt-1 text-xs text-gray-500">裝置ID: ${record.deviceId || '未知'}</div>
+                                            ${abnormalHtml}
                                         </div>
                                         <div class="flex space-x-2 items-start"></div>
                                     </div>
@@ -5664,6 +5769,7 @@
                                 </p>
                                 <p class="text-sm text-gray-500">${c.address || ''}</p>
                                 <p class="text-xs text-gray-400">${lat && lng ? `(${lat.toFixed ? lat.toFixed(6) : lat}, ${lng.toFixed ? lng.toFixed(6) : lng})` : '未設定座標'}</p>
+                                <p class="text-xs text-gray-500">有效打卡範圍：${(typeof c.radius === 'number' && c.radius >= 0) ? `${c.radius} 公尺` : '未設定'}</p>
                             </div>
                             <div class="flex items-center gap-2">
                                 <button class="view-map-btn px-2 py-1 text-gray-600 hover:text-red-600" data-lat="${lat}" data-lng="${lng}"><i data-lucide="map-pin" class="w-4 h-4"></i></button>
@@ -5763,6 +5869,11 @@
                                         <label class="block text-sm font-medium text-gray-700">經度</label>
                                         <input id="community-lng" type="number" step="0.000001" value="${initLng ?? ''}" class="w-full mt-1 px-3 py-2 border rounded-md" />
                                     </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">有效打卡範圍半徑 (公尺)</label>
+                                    <input id="community-radius" type="number" min="0" step="1" value="${typeof community?.radius === 'number' ? community.radius : ''}" class="w-full mt-1 px-3 py-2 border rounded-md" placeholder="例如：100" />
+                                    <p class="text-xs text-gray-500 mt-1">打卡點距社區座標的最大距離，超過則標示為打卡位置異常。</p>
                                 </div>
                                 <div>
                                     <button type="button" id="pick-location-btn" class="px-3 py-1 bg-gray-200 rounded-md text-sm">選擇座標</button>
@@ -5892,6 +6003,8 @@
                         const code = codeInput.value.trim();
                         const lat = parseFloat(latInput.value);
                         const lng = parseFloat(lngInput.value);
+                        const radiusInput = document.getElementById('community-radius');
+                        const radiusVal = radiusInput ? parseFloat(radiusInput.value) : null;
                         if (!name) throw new Error('請輸入社區名稱');
                         if (!region) throw new Error('請選擇區域');
                         if (!code) throw new Error('請輸入社區編號');
@@ -5922,6 +6035,7 @@
                             region,
                             code,
                             location: new GeoPoint(lat, lng),
+                            radius: (Number.isFinite(radiusVal) && radiusVal >= 0) ? Math.floor(radiusVal) : 0,
                             updatedAt: serverTimestamp()
                         };
                         if (isEditing) {
