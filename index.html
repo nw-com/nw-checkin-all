@@ -5814,8 +5814,9 @@
                     const lng = parseFloat(lngInput.value);
                     const hasInit = Number.isFinite(lat) && Number.isFinite(lng);
                     openSelectLocationModal(hasInit ? lat : null, hasInit ? lng : null, (selLat, selLng) => {
-                        latInput.value = selLat;
-                        lngInput.value = selLng;
+                        // 正規化為 6 位小數，避免 step 驗證失敗
+                        latInput.value = Number(selLat).toFixed(6);
+                        lngInput.value = Number(selLng).toFixed(6);
                     });
                 });
 
@@ -5854,8 +5855,9 @@
                             const r = data.results[0];
                             const loc = r.geometry && r.geometry.location ? r.geometry.location : null;
                             if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) {
-                                latInput.value = loc.lat;
-                                lngInput.value = loc.lng;
+                                // 正規化為 6 位小數以符合 input 的 step=0.000001
+                                latInput.value = Number(loc.lat).toFixed(6);
+                                lngInput.value = Number(loc.lng).toFixed(6);
                             }
                             // 嘗試從 components 或字串推斷區域
                             let regionCandidate = guessRegionFromComponents(r.address_components || []);
@@ -5884,6 +5886,15 @@
                     errorEl.textContent = '';
                     const v = addrInput.value.trim();
                     if (v) geocodeAddressAndFill(v);
+                });
+                // 失焦時正規化座標為 6 位小數，避免瀏覽器顯示無效值
+                latInput.addEventListener('blur', () => {
+                    const v = parseFloat(latInput.value);
+                    if (Number.isFinite(v)) latInput.value = v.toFixed(6);
+                });
+                lngInput.addEventListener('blur', () => {
+                    const v = parseFloat(lngInput.value);
+                    if (Number.isFinite(v)) lngInput.value = v.toFixed(6);
                 });
                 // 若已有地址但座標或區域缺失，初始化時嘗試解析
                 if ((addrVal && (!Number.isFinite(initLat) || !Number.isFinite(initLng) || !regionVal))) {
