@@ -212,9 +212,6 @@
                 <button data-tab="clock-in" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
                     <i data-lucide="fingerprint"></i><span class="text-xs mt-1">打卡</span>
                 </button>
-                <button id="nav-other" data-tab="other" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 hide">
-                    <i data-lucide="ellipsis"></i><span class="text-xs mt-1">其他</span>
-                </button>
                 <button id="nav-tracking" data-tab="tracking" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
                     <i data-lucide="map-pin"></i><span class="text-xs mt-1">追蹤</span>
                 </button>
@@ -533,60 +530,44 @@
                 const navFeatures = document.getElementById('nav-features');
                 const navCalendar = document.getElementById('nav-calendar');
                 const navSchedule = document.getElementById('nav-schedule');
-                const navOther = document.getElementById('nav-other');
                 const navDashboard = document.querySelector('.tab-btn[data-tab="dashboard"]');
                 const navClockIn = document.querySelector('.tab-btn[data-tab="clock-in"]');
 
-                // 導覽顯示權限（擴充角色：admin, manager(高階主管), junior_manager(初階主管), hr, user, field）
+                // 導覽顯示權限（角色：admin、manager、junior_manager、總幹事、秘書、保全、清潔、機電）
                 const role = state.currentUserData.role;
                 [navTracking, navSettings, navHr, navGroup, navSchedule].forEach(el => el && el.classList.add('hide'));
 
-                if (isFieldLikeRole(role)) {
-                    // 外勤：僅顯示「打卡」與「其他」分頁
-                    [navDashboard, navFeatures, navCalendar, navTracking, navSettings, navHr, navGroup].forEach(el => el && el.classList.add('hide'));
-                    if (navClockIn) navClockIn.classList.remove('hide');
-                    if (navOther) navOther.classList.remove('hide');
-                } else if (role === 'admin') {
-                    // 管理員：顯示追蹤、設定、人事；不顯示群組（依需求）
-                    navTracking.classList.remove('hide');
-                    navSettings.classList.remove('hide');
-                    navHr.classList.remove('hide');
-                    navSchedule.classList.remove('hide');
-                    if (navOther) navOther.classList.add('hide');
+                if (role === 'admin') {
+                    // 管理員：顯示追蹤、設定與排班
+                    navTracking && navTracking.classList.remove('hide');
+                    navSettings && navSettings.classList.remove('hide');
+                    navSchedule && navSchedule.classList.remove('hide');
+                    // 人事分頁不再針對「人事」角色開放，預設隱藏
+                    navHr && navHr.classList.add('hide');
                 } else if (role === 'manager') {
-                    // 高階主管：顯示追蹤
-                    navTracking.classList.remove('hide');
-                    navSchedule.classList.remove('hide');
-                    if (navOther) navOther.classList.add('hide');
+                    // 高階主管：顯示追蹤與排班
+                    navTracking && navTracking.classList.remove('hide');
+                    navSchedule && navSchedule.classList.remove('hide');
                 } else if (role === 'junior_manager') {
-                    // 初階主管：不顯示追蹤；僅顯示群組
-                    // navTracking 保持隱藏
-                    navGroup.classList.remove('hide');
-                    if (navOther) navOther.classList.add('hide');
-                } else if (role === 'hr') {
-                    // 人事：顯示追蹤與人事
-                    navTracking.classList.remove('hide');
-                    navHr.classList.remove('hide');
-                    navSchedule.classList.remove('hide');
-                    if (navOther) navOther.classList.add('hide');
+                    // 初階主管：僅顯示群組
+                    navGroup && navGroup.classList.remove('hide');
+                } else if (role === '總幹事') {
+                    // 總幹事：儀錶板、打卡、追蹤、功能、行事曆
+                    navTracking && navTracking.classList.remove('hide');
+                    // 其他分頁已移除；設定、人事、群組、排班保持隱藏
+                } else if (['秘書','保全','清潔','機電'].includes(role)) {
+                    // 一般人員（秘書、保全、清潔、機電）：儀錶板、打卡、功能、行事曆
+                    // 追蹤、設定、人事、群組、排班全部隱藏
                 } else {
-                    // 內勤/一般使用者：不顯示追蹤、設定、HR、群組；不顯示「其他」分頁
-                    if (navOther) navOther.classList.add('hide');
+                    // 其餘角色：保守預設不顯示進階分頁
                 }
                 
                 loginPage.classList.add('hide');
                 appContainer.classList.remove('hide');
                 
                 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-                if (isFieldLikeRole(role)) {
-                    // 外勤預設進入「打卡」頁
-                    const clockBtn = document.querySelector('.tab-btn[data-tab="clock-in"]');
-                    if (clockBtn) clockBtn.classList.add('active');
-                    showPage('clock-in');
-                } else {
-                    document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active');
-                    showPage('dashboard');
-                }
+                document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active');
+                showPage('dashboard');
                 showLoading(false);
             }
 
@@ -786,13 +767,12 @@
                 const router = {
                     'dashboard': renderDashboard,
                     'clock-in': () => renderClockIn(subPage || 'location'),
-                    'tracking': () => ['admin','manager','hr'].includes(state.currentUserData.role) ? renderTracking(subPage || 'map') : renderAccessDenied(),
+                    'tracking': () => ['admin','manager','總幹事'].includes(state.currentUserData.role) ? renderTracking(subPage || 'map') : renderAccessDenied(),
                     'features': () => renderFeatures(subPage || 'news'),
-                    'other': () => isFieldLikeRole(state.currentUserData.role) ? renderOther(subPage || 'news') : renderAccessDenied(),
                     'calendar': () => renderCalendar(subPage || 'overview'),
-                    'schedule': () => ['admin','manager','hr'].includes(state.currentUserData.role) ? renderCalendar('schedule') : renderAccessDenied(),
+                    'schedule': () => ['admin','manager'].includes(state.currentUserData.role) ? renderCalendar('schedule') : renderAccessDenied(),
                     'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'accounts') : renderAccessDenied(),
-                    'hr': () => (state.currentUserData.role === 'admin' || state.currentUserData.role === 'hr') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
+                    'hr': () => (state.currentUserData.role === 'admin') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
                     'group': () => state.currentUserData.role === 'junior_manager' ? renderGroup(subPage || 'map') : renderAccessDenied()
                 };
                 const renderFunction = router[pageName] || renderAccessDenied;

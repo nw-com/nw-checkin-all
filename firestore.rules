@@ -213,7 +213,7 @@ service cloud.firestore {
         (request.resource.data.address == null || request.resource.data.address is string) &&
         request.resource.data.region in ['台北','新北','桃園'] &&
         request.resource.data.code is string &&
-        request.resource.data.location is geopoint &&
+        request.resource.data.location is latlng &&
         request.resource.data.createdAt is timestamp &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
 
@@ -226,7 +226,7 @@ service cloud.firestore {
         (request.resource.data.address == null || request.resource.data.address is string) &&
         request.resource.data.region in ['台北','新北','桃園'] &&
         request.resource.data.code is string &&
-        request.resource.data.location is geopoint &&
+        request.resource.data.location is latlng &&
         request.resource.data.updatedAt is timestamp;
 
       // 僅社區維護角色可刪除社區
