@@ -818,32 +818,40 @@
             // --- Page Render Functions ---
             
             function renderDashboard() {
-                 mainContent.innerHTML = `
-                    <div class="h-[50px] flex items-center justify-center border-b border-gray-200 bg-white">
-                         <p id="current-time" class="text-lg font-semibold text-gray-700"></p>
-                    </div>
-                    <div class="p-4 overflow-y-auto" style="height: calc(100% - 50px);">
+                const role = state.currentUserData?.role || '';
+                const isManagerial = role === 'admin' || role === 'manager' || role === 'junior_manager';
+
+                // 依角色切換儀表板內容：
+                // 管理員 / 高階主管 / 初階主管：顯示社區列表
+                // 總幹事、一般人員（秘書、保全、清潔、機電 等外勤）：顯示我的狀態與通知
+                let contentHtml = '';
+                if (isManagerial) {
+                    contentHtml = `
+                        <div class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
+                            <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="building-2" class="w-4 h-4 mr-2"></i>社區列表</h3>
+                            <div id="dashboard-community-list" class="space-y-2 text-gray-700">
+                                <div class="text-gray-500">讀取中...</div>
+                            </div>
+                        </div>`;
+                } else {
+                    contentHtml = `
                         <div class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
                             <h3 class="font-bold text-red-800 mb-2 flex items-center"><i data-lucide="user-circle" class="w-4 h-4 mr-2"></i>我的狀態</h3>
                             <div id="my-status" class="text-gray-600">讀取中...</div>
                         </div>
-                        <div id="all-users-summary-card" class="bg-white p-4 rounded-lg mb-4 shadow-sm border cursor-pointer">
-                           <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="users" class="w-4 h-4 mr-2"></i>所有同仁狀態</h3>
-                           <div class="grid grid-cols-2 gap-2 text-gray-700">
-                                <div><span class="text-green-600">上班</span> : <span id="count-work">0</span> 人</div>
-                                <div><span class="text-blue-600">外出</span> : <span id="count-outbound">0</span> 人</div>
-                                <div><span class="text-red-600">下班</span> : <span id="count-off">0</span> 人</div>
-                                <div><span class="text-orange-600">請假</span> : <span id="count-leave">0</span> 人</div>
-                           </div>
-                           <div class="text-xs text-gray-500 mt-2">點擊查看所有同仁狀態</div>
-                       </div>
                         <div id="dashboard-notifications" class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
                            <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="bell" class="w-4 h-4 mr-2"></i>通知</h3>
                            <div id="dashboard-notifications-list" class="space-y-2 text-gray-700">
                              <div class="text-gray-500">讀取中...</div>
                            </div>
-                        </div>
+                        </div>`;
+                }
+
+                mainContent.innerHTML = `
+                    <div class="h-[50px] flex items-center justify-center border-b border-gray-200 bg-white">
+                         <p id="current-time" class="text-lg font-semibold text-gray-700"></p>
                     </div>
+                    <div class="p-4 overflow-y-auto" style="height: calc(100% - 50px);">${contentHtml}</div>
                 `;
                 lucide.createIcons();
                 const timeEl = document.getElementById('current-time');
@@ -851,6 +859,11 @@
                     if(timeEl){ timeEl.textContent = new Date().toLocaleString('zh-TW', { dateStyle: 'long', timeStyle: 'medium' }); }
                 }, 1000);
                 state.activeListeners.push(() => clearInterval(timerInterval));
+                
+                // 管理階層載入社區列表
+                if (isManagerial) {
+                    loadDashboardCommunityList();
+                }
                 
                 // 檢查是否顯示員工狀態
                 // 定義默認設置
@@ -868,7 +881,7 @@
                     localSettings = defaultSettings;
                 }
                 
-                // 應用本地設置
+                // 應用本地設置（僅當存在「所有同仁狀態」卡片時）
                 if (localSettings.showEmployeeStatus === false) {
                     const container = document.getElementById('all-users-summary-card');
                     if (container) container.style.display = 'none';
@@ -896,6 +909,66 @@
                 });
             } catch (error) {
                 console.warn("Error in settings fetch attempt:", error);
+            }
+
+            // 儀表板：社區列表載入（僅管理員/主管顯示）
+            function loadDashboardCommunityList() {
+                try {
+                    const fs = window.__fs || {};
+                    const db = window.__db;
+                    const listEl = document.getElementById('dashboard-community-list');
+                    if (!db || !listEl) return;
+                    const { collection, query, orderBy, getDocs } = fs;
+                    const communitiesRef = collection(db, 'communities');
+                    let q;
+                    try {
+                        q = query(communitiesRef, orderBy('name'));
+                    } catch (_) {
+                        q = communitiesRef;
+                    }
+                    getDocs(q).then((snap) => {
+                        listEl.innerHTML = '';
+                        if (snap.empty) {
+                            listEl.innerHTML = '<div class="text-gray-500">暫無社區資料</div>';
+                            return;
+                        }
+                        snap.forEach(docSnap => {
+                            const c = docSnap.data();
+                            const lat = c.location?.latitude;
+                            const lng = c.location?.longitude;
+                            const region = c.region || '';
+                            const code = c.code || '';
+                            const row = document.createElement('div');
+                            row.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
+                            row.innerHTML = `
+                                <div>
+                                    <p class="font-medium text-gray-800">
+                                        ${region ? `<span class=\"inline-block text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 mr-2\">${region}</span>` : ''}
+                                        ${code ? `<span class=\"inline-block text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 mr-2\">${code}</span>` : ''}
+                                        ${c.name || '(未命名)'}
+                                    </p>
+                                    <p class="text-sm text-gray-500">${c.address || ''}</p>
+                                    <p class="text-xs text-gray-400">${(Number.isFinite(lat) && Number.isFinite(lng)) ? `(${lat.toFixed ? lat.toFixed(6) : lat}, ${lng.toFixed ? lng.toFixed(6) : lng})` : '未設定座標'}</p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    ${(Number.isFinite(lat) && Number.isFinite(lng)) ? `<button class="view-map-btn px-2 py-1 text-gray-600 hover:text-red-600" data-lat="${lat}" data-lng="${lng}"><i data-lucide="map-pin" class="w-4 h-4"></i></button>` : ''}
+                                </div>`;
+                            listEl.appendChild(row);
+                        });
+                        lucide.createIcons();
+                        listEl.querySelectorAll('.view-map-btn').forEach(btn => btn.addEventListener('click', (e) => {
+                            const lat = parseFloat(e.currentTarget.dataset.lat);
+                            const lng = parseFloat(e.currentTarget.dataset.lng);
+                            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+                            openMapModal(lat, lng);
+                        }));
+                    }).catch((err) => {
+                        console.error('讀取社區列表失敗', err);
+                        listEl.innerHTML = '<div class="text-red-500">讀取社區列表失敗</div>';
+                    });
+                } catch (e) {
+                    console.warn('初始化社區列表失敗', e);
+                }
             }
 
             // 點擊摘要卡開啟所有同仁狀態彈窗
@@ -1077,6 +1150,8 @@
                             myStatusFound = true;
                             (async () => {
                                 try {
+                                    const myStatusEl = document.getElementById('my-status');
+                                    if (!myStatusEl) return; // 若未渲染「我的狀態」，則略過更新
                                     const recordsRef = collection(db, 'clockInRecords');
                                     const q = query(recordsRef, where('userId', '==', state.currentUser.uid), orderBy('timestamp', 'desc'), limit(1));
                                     const snap = await getDocs(q);
@@ -1101,7 +1176,7 @@
                                             <span class="font-semibold text-lg ${statusColorLast}">${statusTextLast}</span>
                                           </div>`;
                                     }
-                                    document.getElementById('my-status').innerHTML = innerHTML;
+                                    myStatusEl.innerHTML = innerHTML;
                                 } catch (err) {
                                     console.error('讀取最新打卡紀錄失敗', err);
                                 }
@@ -1138,7 +1213,7 @@
                     if (countOffEl) countOffEl.textContent = countOff;
                     if (countLeaveEl) countLeaveEl.textContent = countLeave;
                     if(!myStatusFound && document.getElementById('my-status')){ document.getElementById('my-status').textContent = '無法取得您的狀態'; }
-                    
+                
                 });
                 state.activeListeners.push(unsubscribe);
             }
@@ -5614,11 +5689,17 @@
                         const c = { id: docSnap.id, ...docSnap.data() };
                         const lat = c.location?.latitude ?? '';
                         const lng = c.location?.longitude ?? '';
+                        const region = c.region || '';
+                        const code = c.code || '';
                         const row = document.createElement('div');
                         row.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
                         row.innerHTML = `
                             <div>
-                                <p class="font-medium text-gray-800">${c.name || '(未命名)'}</p>
+                                <p class="font-medium text-gray-800">
+                                    ${region ? `<span class=\"inline-block text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700 mr-2\">${region}</span>` : ''}
+                                    ${code ? `<span class=\"inline-block text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 mr-2\">${code}</span>` : ''}
+                                    ${c.name || '(未命名)'}
+                                </p>
                                 <p class="text-sm text-gray-500">${c.address || ''}</p>
                                 <p class="text-xs text-gray-400">${lat && lng ? `(${lat.toFixed ? lat.toFixed(6) : lat}, ${lng.toFixed ? lng.toFixed(6) : lng})` : '未設定座標'}</p>
                             </div>
@@ -5677,6 +5758,8 @@
                 const initLng = community?.location?.longitude ?? null;
                 const nameVal = community?.name || '';
                 const addrVal = community?.address || '';
+                const regionVal = community?.region || '';
+                const codeVal = community?.code || '';
                 const modalHTML = `
                     <div id="${modalId}" class="modal-backdrop">
                         <div class="modal-content w-[90%] max-w-md bg-white rounded-lg shadow-xl flex flex-col" style="max-height: 90vh;">
@@ -5692,6 +5775,21 @@
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700">地址</label>
                                     <input id="community-address" type="text" value="${addrVal}" class="w-full mt-1 px-3 py-2 border rounded-md" />
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700">區域 (必選)</label>
+                                        <select id="community-region" class="w-full mt-1 px-3 py-2 border rounded-md" required>
+                                            <option value="" ${!regionVal ? 'selected' : ''}>請選擇</option>
+                                            <option value="台北" ${regionVal === '台北' ? 'selected' : ''}>台北</option>
+                                            <option value="新北" ${regionVal === '新北' ? 'selected' : ''}>新北</option>
+                                            <option value="桃園" ${regionVal === '桃園' ? 'selected' : ''}>桃園</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700">社區編號 (不可重複)</label>
+                                        <input id="community-code" type="text" value="${codeVal}" class="w-full mt-1 px-3 py-2 border rounded-md" placeholder="例如：A001" required />
+                                    </div>
                                 </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
@@ -5723,6 +5821,8 @@
 
                 const nameInput = document.getElementById('community-name');
                 const addrInput = document.getElementById('community-address');
+                const regionInput = document.getElementById('community-region');
+                const codeInput = document.getElementById('community-code');
                 const latInput = document.getElementById('community-lat');
                 const lngInput = document.getElementById('community-lng');
                 const errorEl = document.getElementById('community-form-error');
@@ -5743,13 +5843,39 @@
                     try {
                         const name = nameInput.value.trim();
                         const address = addrInput.value.trim();
+                        const region = regionInput.value.trim();
+                        const code = codeInput.value.trim();
                         const lat = parseFloat(latInput.value);
                         const lng = parseFloat(lngInput.value);
                         if (!name) throw new Error('請輸入社區名稱');
+                        if (!region) throw new Error('請選擇區域');
+                        if (!code) throw new Error('請輸入社區編號');
                         if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error('請設定有效座標');
+                        // 檢查社區編號唯一性
+                        try {
+                            const fs = window.__fs || {};
+                            const db = window.__db;
+                            const { collection, query, where, getDocs } = fs;
+                            if (!collection || !query || !where || !getDocs || !db) {
+                                console.warn('Firestore 函式不可用，跳過編號唯一性檢查');
+                            } else {
+                                const q = query(collection(db, 'communities'), where('code', '==', code));
+                                const snap = await getDocs(q);
+                                let duplicated = false;
+                                snap.forEach(d => {
+                                    const sameId = community?.id && d.id === community.id;
+                                    if (!sameId) duplicated = true;
+                                });
+                                if (duplicated) throw new Error('社區編號已存在，請使用其他編號');
+                            }
+                        } catch (checkErr) {
+                            if (checkErr && checkErr.message) throw checkErr;
+                        }
                         const payload = {
                             name,
                             address,
+                            region,
+                            code,
                             location: new GeoPoint(lat, lng),
                             updatedAt: serverTimestamp()
                         };
