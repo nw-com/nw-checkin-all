@@ -5757,6 +5757,7 @@
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700">地址</label>
                                     <input id="community-address" type="text" value="${addrVal}" class="w-full mt-1 px-3 py-2 border rounded-md" />
+                                    <p class="text-xs text-gray-500 mt-1">輸入地址後自動帶出GPS座標與區域</p>
                                 </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
@@ -5817,6 +5818,77 @@
                         lngInput.value = selLng;
                     });
                 });
+
+                // 地址自動地理編碼與區域判斷
+                const debounceMs = 600;
+                let geoTimer = null;
+                const guessRegionFromText = (text) => {
+                    if (!text) return '';
+                    const t = ('' + text).toLowerCase();
+                    if (/台北|臺北|taipei/.test(t)) return '台北';
+                    if (/新北|new taipei/.test(t)) return '新北';
+                    if (/桃園|taoyuan/.test(t)) return '桃園';
+                    return '';
+                };
+                const guessRegionFromComponents = (components = []) => {
+                    for (const c of components) {
+                        const name = `${c.long_name || ''} ${c.short_name || ''}`;
+                        const r = guessRegionFromText(name);
+                        if (r) return r;
+                    }
+                    return '';
+                };
+                const geocodeAddressAndFill = async (addr) => {
+                    const address = (addr || '').trim();
+                    if (!address) return;
+                    try {
+                        const apiKey = typeof GOOGLE_MAPS_API_KEY !== 'undefined' ? GOOGLE_MAPS_API_KEY : null;
+                        if (!apiKey) {
+                            console.warn('GOOGLE_MAPS_API_KEY 未設定，跳過地理編碼');
+                            return;
+                        }
+                        const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&region=tw&language=zh-TW&key=${apiKey}`;
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        if (data.status === 'OK' && Array.isArray(data.results) && data.results.length > 0) {
+                            const r = data.results[0];
+                            const loc = r.geometry && r.geometry.location ? r.geometry.location : null;
+                            if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) {
+                                latInput.value = loc.lat;
+                                lngInput.value = loc.lng;
+                            }
+                            // 嘗試從 components 或字串推斷區域
+                            let regionCandidate = guessRegionFromComponents(r.address_components || []);
+                            if (!regionCandidate) regionCandidate = guessRegionFromText(r.formatted_address || '');
+                            if (!regionCandidate) regionCandidate = guessRegionFromText(address);
+                            if (regionCandidate) {
+                                regionInput.value = regionCandidate;
+                            }
+                        } else {
+                            console.warn('Geocode 失敗:', data.status, data.error_message || '');
+                            // 若失敗，不阻塞流程；提示訊息留在表單提交階段
+                        }
+                    } catch (e) {
+                        console.error('Geocode 發生錯誤:', e);
+                    }
+                };
+                const triggerGeocodeDebounced = () => {
+                    if (geoTimer) clearTimeout(geoTimer);
+                    geoTimer = setTimeout(() => geocodeAddressAndFill(addrInput.value), debounceMs);
+                };
+                addrInput.addEventListener('input', () => {
+                    errorEl.textContent = '';
+                    triggerGeocodeDebounced();
+                });
+                addrInput.addEventListener('blur', () => {
+                    errorEl.textContent = '';
+                    const v = addrInput.value.trim();
+                    if (v) geocodeAddressAndFill(v);
+                });
+                // 若已有地址但座標或區域缺失，初始化時嘗試解析
+                if ((addrVal && (!Number.isFinite(initLat) || !Number.isFinite(initLng) || !regionVal))) {
+                    setTimeout(() => geocodeAddressAndFill(addrVal), 0);
+                }
 
                 document.getElementById('community-form').addEventListener('submit', async (e) => {
                     e.preventDefault();
