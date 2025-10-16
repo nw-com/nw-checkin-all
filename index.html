@@ -539,15 +539,9 @@
             }
 
             function shouldShowNavigationPage() {
-                const role = state.currentUserData?.role || '';
-                // 管理員登入後一律顯示導覽頁
-                if (role === 'admin') return true;
-                // 其餘管理階層：當未選定社區且有多社區可選時顯示導覽頁
-                if (['manager','junior_manager'].includes(role)) {
-                    const list = state.availableCommunities || [];
-                    return (!state.currentCommunity && list.length > 1);
-                }
-                return false;
+                // 非社區模式：一律顯示導覽頁
+                if (state.appMode === 'community') return false;
+                return true;
             }
 
             function openCommunitySwitchModal() {
@@ -739,28 +733,33 @@
                 [navTracking, navSettings, navHr, navGroup, navSchedule].forEach(el => el && el.classList.add('hide'));
 
                 if (role === 'admin') {
-                    // 管理員：顯示追蹤、設定與排班
+                    // 管理員：顯示追蹤與排班；設定已移至導覽頁
                     navTracking && navTracking.classList.remove('hide');
-                    navSettings && navSettings.classList.remove('hide');
                     navSchedule && navSchedule.classList.remove('hide');
+                    navSettings && navSettings.classList.add('hide');
                     // 人事分頁不再針對「人事」角色開放，預設隱藏
                     navHr && navHr.classList.add('hide');
                 } else if (role === 'manager') {
                     // 高階主管：顯示追蹤與排班
                     navTracking && navTracking.classList.remove('hide');
                     navSchedule && navSchedule.classList.remove('hide');
+                    navSettings && navSettings.classList.add('hide');
                 } else if (role === 'junior_manager') {
                     // 初階主管：僅顯示群組
                     navGroup && navGroup.classList.remove('hide');
+                    navSettings && navSettings.classList.add('hide');
                 } else if (role === '總幹事') {
                     // 總幹事：儀錶板、打卡、追蹤、功能、行事曆
                     navTracking && navTracking.classList.remove('hide');
                     // 其他分頁已移除；設定、人事、群組、排班保持隱藏
+                    navSettings && navSettings.classList.add('hide');
                 } else if (['秘書','保全','清潔','機電'].includes(role)) {
                     // 一般人員（秘書、保全、清潔、機電）：儀錶板、打卡、功能、行事曆
                     // 追蹤、設定、人事、群組、排班全部隱藏
+                    navSettings && navSettings.classList.add('hide');
                 } else {
                     // 其餘角色：保守預設不顯示進階分頁
+                    navSettings && navSettings.classList.add('hide');
                 }
                 
                 loginPage.classList.add('hide');
@@ -1027,13 +1026,23 @@
             function renderNavigation(subPage) {
                 const role = state.currentUserData?.role || '';
                 const showSettings = role === 'admin';
+                // 導覽頁：將子分頁改為底部按鈕列
                 mainContent.innerHTML = `
-                    <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
-                        <button data-subtab="community" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium ${subPage === 'community' || !subPage ? 'bg-red-100 text-red-600 active' : 'text-gray-600'}">依社區</button>
-                        <button data-subtab="name" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium ${subPage === 'name' ? 'bg-red-100 text-red-600 active' : 'text-gray-600'}">依姓名</button>
-                        ${showSettings ? `<button data-subtab="settings" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium ${subPage === 'settings' ? 'bg-red-100 text-red-600 active' : 'text-gray-600'}">設定</button>` : ''}
-                    </div>
-                    <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
+                    <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 70px);"></div>
+                    <div class="h-[70px] border-t border-gray-200 bg-white">
+                        <nav id="nav-bottom" class="flex justify-around h-full items-center">
+                            <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${!subPage || subPage==='community' ? 'active' : ''}">
+                                <i data-lucide="building-2"></i><span class="text-xs mt-1">依社區</span>
+                            </button>
+                            <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${subPage==='name' ? 'active' : ''}">
+                                <i data-lucide="user"></i><span class="text-xs mt-1">依姓名</span>
+                            </button>
+                            ${showSettings ? `
+                            <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${subPage==='settings' ? 'active' : ''}">
+                                <i data-lucide="settings"></i><span class="text-xs mt-1">設定</span>
+                            </button>` : ''}
+                        </nav>
+                    </div>`;
 
                 const subPageContent = document.getElementById('sub-page-content');
                 if (subPage === 'name') {
@@ -1043,8 +1052,14 @@
                 } else {
                     renderNavByCommunity(subPageContent);
                 }
-                mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => {
-                    btn.addEventListener('click', () => showPage('navigation', btn.dataset.subtab));
+                // 綁定底部按鈕事件
+                mainContent.querySelectorAll('.nav-sub-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        // 切換 active 樣式
+                        mainContent.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        showPage('navigation', btn.dataset.subtab);
+                    });
                 });
                 try { lucide.createIcons(); } catch (_) {}
             }
