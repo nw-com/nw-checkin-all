@@ -539,11 +539,13 @@
                         const radius = (typeof data.radius === 'number' && data.radius >= 0) ? data.radius : null;
                         const region = typeof data.region === 'string' ? data.region : '';
                         const code = typeof data.code === 'string' ? data.code : '';
+                        const shortName = typeof data.shortName === 'string' ? data.shortName : '';
                         map[d.id] = {
                             id: d.id,
                             name: data.name || '',
                             region,
                             code,
+                            shortName,
                             lat,
                             lng,
                             radius,
@@ -1229,20 +1231,21 @@
                     const filtered = selectedRegion ? sorted.filter(c => (c?.region || '') === selectedRegion) : sorted;
                     container.innerHTML = `
                         <div class="p-4 space-y-3">
-                            <div class="flex items-center gap-2 mb-2">
-                                <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='台北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="台北">台北</button>
-                                <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='新北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="新北">新北</button>
-                                <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='桃園'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="桃園">桃園</button>
-                            </div>
-                            ${filtered.map(c => `
-                                <div class="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border">
-                                    <div>
-                                        <p class="font-medium text-gray-800">${c.name || '(未命名社區)'}</p>
-                                        ${(Number.isFinite(c.lat) && Number.isFinite(c.lng)) ? `<p class="text-xs text-gray-500">(${c.lat}, ${c.lng}) 半徑 ${c.radius ?? '—'} m</p>` : '<p class="text-xs text-gray-400">未設定座標</p>'}
-                                    </div>
-                                    <button class="enter-community px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700" data-id="${c.id}">進入</button>
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2">
+                                    <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='台北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="台北">台北</button>
+                                    <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='新北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="新北">新北</button>
+                                    <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='桃園'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="桃園">桃園</button>
                                 </div>
-                            `).join('')}
+                                <div class="text-sm text-gray-500">總社區數：${filtered.length}</div>
+                            </div>
+                            <div class="grid grid-cols-5 gap-2">
+                                ${filtered.map(c => `
+                                    <button class="enter-community px-3 py-2 rounded-md border bg-white hover:bg-red-50 text-gray-800 font-medium text-sm" data-id="${c.id}" title="${(c.name || '').replace(/"/g,'&quot;')}">
+                                        ${c.shortName || c.name || c.code || '未命名'}
+                                    </button>
+                                `).join('')}
+                            </div>
                         </div>`;
                     container.querySelectorAll('.enter-community').forEach(btn => {
                         btn.addEventListener('click', (e) => {
@@ -1277,16 +1280,17 @@
                     // 人員依姓氏筆畫少→多
                     users.sort(compareUsersBySurnameStroke);
                     container.innerHTML = `
-                        <div class="p-4 space-y-2">
-                            ${users.map(u => `
-                                <div class="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border">
-                                    <div>
-                                        <p class="font-medium text-gray-800">${u.name || '(未命名)'}</p>
-                                        <p class="text-xs text-gray-500">${roleLabel(u.role)}</p>
-                                    </div>
-                                    <button class="view-att px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700" data-id="${u.id}">出勤</button>
-                                </div>
-                            `).join('')}
+                        <div class="p-4 space-y-3">
+                            <div class="flex items-center justify-end mb-2">
+                                <div class="text-sm text-gray-500">總人員數：${users.length}</div>
+                            </div>
+                            <div class="grid grid-cols-5 gap-2">
+                                ${users.map(u => `
+                                    <button class="view-att px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm" data-id="${u.id}" title="${(u.name || u.displayName || u.email || '').replace(/"/g,'&quot;')}">
+                                        ${u.name || u.displayName || u.email || '(未命名)'}
+                                    </button>
+                                `).join('')}
+                            </div>
                         </div>`;
                     container.querySelectorAll('.view-att').forEach(btn => {
                         btn.addEventListener('click', (e) => {
