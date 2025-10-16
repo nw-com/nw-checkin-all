@@ -47,6 +47,10 @@
             color: #dc2626; /* red-600 */
             border-top-color: #dc2626; /* red-600 */
         }
+        .nav-sub-btn.active {
+            color: #dc2626; /* red-600 */
+            border-top-color: #dc2626; /* red-600 */
+        }
         .sub-tab-btn {
             transition: all 0.2s ease-in-out;
         }
@@ -991,27 +995,23 @@
                 const role = state.currentUserData?.role || '';
                 const showSettings = role === 'admin';
                 mainNav.innerHTML = `
-                    <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${!activeSubTab || activeSubTab==='community' ? 'border-red-600' : 'border-transparent'} pt-2">
-                        <i data-lucide="building-2" class="text-red-600"></i><span class="text-xs mt-1">依社區</span>
+                    <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${!activeSubTab || activeSubTab==='community' ? 'active' : ''}">
+                        <i data-lucide="building-2"></i><span class="text-xs mt-1">依社區</span>
                     </button>
-                    <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${activeSubTab==='name' ? 'border-red-600' : 'border-transparent'} pt-2">
-                        <i data-lucide="user" class="text-red-600"></i><span class="text-xs mt-1">依姓名</span>
+                    <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${activeSubTab==='name' ? 'active' : ''}">
+                        <i data-lucide="user"></i><span class="text-xs mt-1">依姓名</span>
                     </button>
                     ${showSettings ? `
-                    <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${activeSubTab==='settings' ? 'border-red-600' : 'border-transparent'} pt-2">
-                        <i data-lucide="settings" class="text-red-600"></i><span class="text-xs mt-1">設定</span>
+                    <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${activeSubTab==='settings' ? 'active' : ''}">
+                        <i data-lucide="settings"></i><span class="text-xs mt-1">設定</span>
                     </button>` : ''}
                 `;
                 // 綁定容器頁尾子分頁切換
                 mainNav.querySelectorAll('.nav-sub-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
-                        // 切換紅色邊框樣式
-                        mainNav.querySelectorAll('.nav-sub-btn').forEach(b => {
-                            b.classList.remove('border-red-600');
-                            b.classList.add('border-transparent');
-                        });
-                        btn.classList.add('border-red-600');
-                        btn.classList.remove('border-transparent');
+                        // 切換 active 樣式以符合主頁 footer 風格
+                        mainNav.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
                         showPage('navigation', btn.dataset.subtab);
                     });
                 });
