@@ -1411,16 +1411,22 @@
                 const renderList = () => {
                     const sorted = [...list].sort(compareCommunitiesByCode);
                     const filtered = selectedRegion ? sorted.filter(c => (c?.region || '') === selectedRegion) : sorted;
+                    const fontSizeFor = (t) => {
+                        const n = (t || '').length;
+                        return n >= 3 ? '0.95rem' : (n === 2 ? '1.05rem' : '1.2rem');
+                    };
                     container.innerHTML = `
                         <div class="p-4 space-y-3">
-                            <div class="flex items-center justify-between mb-2">
-                                <div class="flex items-center gap-2">
+                            <div class="flex items-center mb-2">
+                                <div class="flex items-center gap-2 flex-nowrap overflow-x-auto">
                                     <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='台北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="台北">台北</button>
                                     <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='新北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="新北">新北</button>
                                     <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='桃園'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="桃園">桃園</button>
                                 </div>
-                                <div class="text-sm text-gray-500">總社區數：${filtered.length}</div>
+                                
                             </div>
+                            <hr class="border-t border-gray-200 my-2" />
+                            <div class="text-sm text-gray-500">總社區數：${filtered.length}</div>
                             <div class="grid grid-cols-5 gap-2">
                                 ${filtered.map(c => {
                                     const raw = (c.shortName || c.name || c.code || '未命名') + '';
@@ -1430,8 +1436,8 @@
                                     const title = (c.name || '').replace(/"/g,'&quot;');
                                     return `
                                     <button class="enter-community px-3 py-2 rounded-md border bg-white hover:bg-red-50 text-gray-800 font-medium text-sm text-center" data-id="${c.id}" title="${title}">
-                                        <span class="block leading-tight">${line1 || '&nbsp;'}</span>
-                                        <span class="block leading-tight">${line2 || '&nbsp;'}</span>
+                                        <span class="block leading-tight" style="font-size: ${fontSizeFor(line1)}">${line1 || '&nbsp;'}</span>
+                                        <span class="block leading-tight" style="font-size: ${fontSizeFor(line2)}">${line2 || '&nbsp;'}</span>
                                     </button>`;
                                 }).join('')}
                             </div>
@@ -1502,27 +1508,29 @@
                         const filtered = selectedRole ? baseUsers.filter(u => (u.role || '') === selectedRole) : baseUsers;
                         container.innerHTML = `
                             <div class="p-4 space-y-3">
-                                <div class="flex items-center justify-between mb-2">
-                                    <div class="flex items-center gap-2">
+                                <div class="flex items-center mb-2">
+                                    <div class="flex items-center gap-2 flex-nowrap overflow-x-auto">
                                         <button class="role-btn px-3 py-1 rounded border ${selectedRole==='總幹事'?'bg-red-600 text-white border-red-600':'bg-white'}" data-role="總幹事">總幹事</button>
                                         <button class="role-btn px-3 py-1 rounded border ${selectedRole==='秘書'?'bg-red-600 text-white border-red-600':'bg-white'}" data-role="秘書">秘書</button>
                                         <button class="role-btn px-3 py-1 rounded border ${selectedRole==='保全'?'bg-red-600 text-white border-red-600':'bg-white'}" data-role="保全">保全</button>
                                         <button class="role-btn px-3 py-1 rounded border ${selectedRole==='清潔'?'bg-red-600 text-white border-red-600':'bg-white'}" data-role="清潔">清潔</button>
                                         <button class="role-btn px-3 py-1 rounded border ${selectedRole==='機電'?'bg-red-600 text-white border-red-600':'bg-white'}" data-role="機電">機電</button>
                                     </div>
-                                    <div class="text-sm text-gray-500">總人員數：${filtered.length}</div>
                                 </div>
+                                <hr class="border-t border-gray-200 my-2" />
+                                <div class="text-sm text-gray-500">總人員數：${filtered.length}</div>
                                 <div class="grid grid-cols-5 gap-2">
                                     ${filtered.map(u => {
                                         const rawName = (u.name || u.displayName || u.email || '(未命名)') + '';
                                         const top = rawName.replace(/\s+/g,'').slice(0,3);
+                                        const fontSizeFor = (t) => { const n = (t || '').length; return n >= 3 ? '0.95rem' : (n === 2 ? '1.05rem' : '1.2rem'); };
                                         const age = computeAge(u.birthDate);
                                         const ageStr = (age === null || age === undefined) ? '(—)' : `(${age})`;
                                         const ageClass = (age !== null && age >= 70) ? 'font-bold text-red-600' : 'text-gray-600';
                                         const title = rawName.replace(/"/g,'&quot;');
                                         return `
                                         <button class="view-att px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm text-center" data-id="${u.id}" title="${title}">
-                                            <span class="block leading-tight">${top || '&nbsp;'}</span>
+                                            <span class="block leading-tight" style="font-size: ${fontSizeFor(top)}">${top || '&nbsp;'}</span>
                                             <span class="block leading-tight ${ageClass}">${ageStr}</span>
                                         </button>`;
                                     }).join('')}
