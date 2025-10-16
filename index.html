@@ -519,7 +519,12 @@
                 } else if ([ 'admin', 'manager' ].includes(role)) {
                     list = Object.values(byId);
                 } else {
-                    list = [];
+                    // 預設仍顯示所有社區以避免 0 個的狀態
+                    list = Object.values(byId);
+                }
+                // 若計算結果為空且已載入社區資料，回退顯示所有社區，避免出現「0 個」提示
+                if (!list || list.length === 0) {
+                    list = Object.values(byId);
                 }
                 list.sort((a,b) => (a?.name||'').localeCompare(b?.name||'', 'zh-Hant'));
                 state.availableCommunities = list;
@@ -781,15 +786,17 @@
 
                 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
                 let initialPage = 'dashboard';
+                let initialSub = null;
                 if (shouldShowNavigationPage()) {
                     initialPage = 'navigation';
+                    initialSub = 'community';
                     mainNav && mainNav.classList.add('hide');
                 } else {
                     mainNav && mainNav.classList.remove('hide');
                     const navDashboard = document.querySelector('.tab-btn[data-tab="dashboard"]');
                     navDashboard && navDashboard.classList.add('active');
                 }
-                showPage(initialPage);
+                showPage(initialPage, initialSub);
                 showLoading(false);
             }
 
@@ -1031,15 +1038,15 @@
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 70px);"></div>
                     <div class="h-[70px] border-t border-gray-200 bg-white">
                         <nav id="nav-bottom" class="flex justify-around h-full items-center">
-                            <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${!subPage || subPage==='community' ? 'active' : ''}">
-                                <i data-lucide="building-2"></i><span class="text-xs mt-1">依社區</span>
+                            <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${!subPage || subPage==='community' ? 'border-red-600' : 'border-transparent'} pt-2">
+                                <i data-lucide="building-2" class="text-red-600"></i><span class="text-xs mt-1">依社區</span>
                             </button>
-                            <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${subPage==='name' ? 'active' : ''}">
-                                <i data-lucide="user"></i><span class="text-xs mt-1">依姓名</span>
+                            <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${subPage==='name' ? 'border-red-600' : 'border-transparent'} pt-2">
+                                <i data-lucide="user" class="text-red-600"></i><span class="text-xs mt-1">依姓名</span>
                             </button>
                             ${showSettings ? `
-                            <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${subPage==='settings' ? 'active' : ''}">
-                                <i data-lucide="settings"></i><span class="text-xs mt-1">設定</span>
+                            <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${subPage==='settings' ? 'border-red-600' : 'border-transparent'} pt-2">
+                                <i data-lucide="settings" class="text-red-600"></i><span class="text-xs mt-1">設定</span>
                             </button>` : ''}
                         </nav>
                     </div>`;
@@ -1055,9 +1062,13 @@
                 // 綁定底部按鈕事件
                 mainContent.querySelectorAll('.nav-sub-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
-                        // 切換 active 樣式
-                        mainContent.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
+                        // 切換紅色邊框樣式
+                        mainContent.querySelectorAll('.nav-sub-btn').forEach(b => {
+                            b.classList.remove('border-red-600');
+                            b.classList.add('border-transparent');
+                        });
+                        btn.classList.add('border-red-600');
+                        btn.classList.remove('border-transparent');
                         showPage('navigation', btn.dataset.subtab);
                     });
                 });
@@ -1068,8 +1079,7 @@
                 const list = state.availableCommunities || [];
                 container.innerHTML = `
                     <div class="p-4 space-y-3">
-                        <div class="text-sm text-gray-500">可選社區：${list.length} 個</div>
-                        ${list.length === 0 ? '<div class="text-gray-500">目前無可選擇的社區</div>' : list.map(c => `
+                        ${list.map(c => `
                             <div class="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border">
                                 <div>
                                     <p class="font-medium text-gray-800">${c.name || '(未命名社區)'}</p>
