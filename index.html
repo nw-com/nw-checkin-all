@@ -1457,9 +1457,9 @@
                                     const [line1, line2] = toTwoLines(c.shortName || c.name || c.code || '');
                                     const title = (c.name || '').replace(/"/g,'&quot;');
                                     return `
-                                    <button class="enter-community px-3 py-2 rounded-md border bg-white hover:bg-red-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" data-id="${c.id}" title="${title}">
-                                        <span class="block leading-tight text-base text-center">${line1 || '&nbsp;'}</span>
-                                        <span class="block leading-tight text-base text-center">${line2 || '&nbsp;'}</span>
+                                    <button class="enter-community w-full px-3 py-2 rounded-md border bg-white hover:bg-red-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" style="aspect-ratio: 1 / 1;" data-id="${c.id}" title="${title}">
+                                        <span class="block leading-tight text-center" style="font-size:13px;">${line1 || '&nbsp;'}</span>
+                                        <span class="block leading-tight text-center" style="font-size:13px;">${line2 || '&nbsp;'}</span>
                                     </button>`;
                                 }).join('')}
                             </div>
@@ -1551,9 +1551,9 @@
                                         const ageClass = (typeof age === 'number' && age >= 70) ? 'font-bold text-red-600' : '';
                                         const title = rawName.replace(/"/g,'&quot;');
                                         return `
-                                        <button class="view-att px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" data-id="${u.id}" title="${title}">
-                                            <span class="block leading-tight text-base whitespace-nowrap text-center">${nameLine}</span>
-                                            <span class="block leading-tight text-base whitespace-nowrap text-center ${ageClass}">${ageText || '&nbsp;'}</span>
+                                        <button class="view-att w-full px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" style="aspect-ratio: 1 / 1;" data-id="${u.id}" title="${title}">
+                                            <span class="block leading-tight whitespace-nowrap text-center" style="font-size:13px;">${nameLine}</span>
+                                            <span class="block leading-tight whitespace-nowrap text-center ${ageClass}" style="font-size:13px;">${ageText || '&nbsp;'}</span>
                                         </button>`;
                                     }).join('')}
                                 </div>
