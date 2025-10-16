@@ -775,10 +775,24 @@
                 }
             }
 
+            function isNavigationAllowed(user = null) {
+                const u = user || state.currentUserData || {};
+                const role = u.role || '';
+                const managerial = new Set(['admin','hr','manager','junior_manager']);
+                const workerRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
+                if (managerial.has(role)) return true;
+                if (workerRoles.has(role)) {
+                    const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities.filter(Boolean) : [];
+                    return ids.length >= 2;
+                }
+                return false;
+            }
+
             function shouldShowNavigationPage() {
-                // 非社區模式：一律顯示導覽頁
+                // 社區模式不顯示導覽頁
                 if (state.appMode === 'community') return false;
-                return true;
+                // 僅允許特定角色或服務 >=2 社區的指定角色進入導覽頁
+                return isNavigationAllowed(state.currentUserData);
             }
 
             function openCommunitySwitchModal() {
@@ -1225,18 +1239,25 @@
                 if (!mainNav) return;
                 const role = state.currentUserData?.role || '';
                 const showSettings = role === 'admin';
-                mainNav.innerHTML = `
+                const managerial = new Set(['admin','hr','manager','junior_manager']);
+                const showNameTab = managerial.has(role);
+                let html = `
                     <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${!activeSubTab || activeSubTab==='community' ? 'active' : ''}">
                         <i data-lucide="building-2"></i><span class="text-xs mt-1">依社區</span>
-                    </button>
+                    </button>`;
+                if (showNameTab) {
+                    html += `
                     <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${activeSubTab==='name' ? 'active' : ''}">
                         <i data-lucide="user"></i><span class="text-xs mt-1">依姓名</span>
-                    </button>
-                    ${showSettings ? `
+                    </button>`;
+                }
+                if (showSettings) {
+                    html += `
                     <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${activeSubTab==='settings' ? 'active' : ''}">
                         <i data-lucide="settings"></i><span class="text-xs mt-1">設定</span>
-                    </button>` : ''}
-                `;
+                    </button>`;
+                }
+                mainNav.innerHTML = html;
                 // 綁定容器頁尾子分頁切換
                 mainNav.querySelectorAll('.nav-sub-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
@@ -1327,7 +1348,7 @@
                     'schedule': () => ['admin','manager'].includes(state.currentUserData.role) ? renderCalendar('schedule') : renderAccessDenied(),
                     'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
                     'hr': () => (state.currentUserData.role === 'admin') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
-                    'navigation': () => renderNavigation(subPage || 'community'),
+                    'navigation': () => isNavigationAllowed(state.currentUserData) ? renderNavigation(subPage || 'community') : renderAccessDenied(),
                     'group': () => state.currentUserData.role === 'junior_manager' ? renderGroup(subPage || 'map') : renderAccessDenied()
                 };
                 const renderFunction = router[pageName] || renderAccessDenied;
