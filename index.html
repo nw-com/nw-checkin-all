@@ -1487,12 +1487,12 @@
             }
 
             function renderNavSettings(container) {
-                // 導覽頁設定僅保留：帳號列表、社區列表
-                const sub = (state.navSettingsSubPage === 'community' || state.navSettingsSubPage === 'accounts')
-                    ? state.navSettingsSubPage
-                    : 'accounts';
+                // 導覽頁設定：帳號申請、帳號列表、社區列表
+                const allowed = ['applications','accounts','community'];
+                const sub = allowed.includes(state.navSettingsSubPage) ? state.navSettingsSubPage : 'accounts';
                 container.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
+                        <button data-subtab="applications" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'applications' ? 'active' : ''}">帳號申請</button>
                         <button data-subtab="accounts" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'accounts' ? 'active' : ''}">帳號列表</button>
                         <button data-subtab="community" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'community' ? 'active' : ''}">社區列表</button>
                     </div>
@@ -1500,7 +1500,9 @@
                 try { lucide.createIcons(); } catch (_) {}
 
                 const contentEl = document.getElementById('nav-settings-content');
-                if (sub === 'accounts') {
+                if (sub === 'applications') {
+                    renderSettingsApplications(contentEl);
+                } else if (sub === 'accounts') {
                     renderSettingsAccounts(contentEl);
                 } else {
                     renderSettingsCommunity(contentEl);
