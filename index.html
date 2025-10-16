@@ -1241,29 +1241,23 @@
             }
 
             function renderNavSettings(container) {
-                // 使用原主頁設定內容：一般、打卡範圍、工作日、群組設定
-                const sub = state.navSettingsSubPage || 'general';
+                // 導覽頁設定僅保留：帳號列表、社區列表
+                const sub = (state.navSettingsSubPage === 'community' || state.navSettingsSubPage === 'accounts')
+                    ? state.navSettingsSubPage
+                    : 'accounts';
                 container.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
-                        <button data-subtab="general" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'general' ? 'active' : ''}">一般</button>
-                        <button data-subtab="location" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'location' ? 'active' : ''}">打卡範圍</button>
-                        <button data-subtab="workdays" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'workdays' ? 'active' : ''}">工作日</button>
-                        <button data-subtab="group" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'group' ? 'active' : ''}">群組設定</button>
+                        <button data-subtab="accounts" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'accounts' ? 'active' : ''}">帳號列表</button>
+                        <button data-subtab="community" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${sub === 'community' ? 'active' : ''}">社區列表</button>
                     </div>
                     <div id="nav-settings-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
                 try { lucide.createIcons(); } catch (_) {}
 
                 const contentEl = document.getElementById('nav-settings-content');
-                if (sub === 'general') {
-                    renderSettingsGeneral(contentEl);
-                } else if (sub === 'location') {
-                    renderSettingsLocation(contentEl);
-                } else if (sub === 'workdays') {
-                    renderSettingsWorkdays(contentEl);
-                } else if (sub === 'group') {
-                    renderSettingsGroup(contentEl);
+                if (sub === 'accounts') {
+                    renderSettingsAccounts(contentEl);
                 } else {
-                    renderSettingsGeneral(contentEl);
+                    renderSettingsCommunity(contentEl);
                 }
 
                 container.querySelectorAll('.sub-tab-btn').forEach(btn => {
