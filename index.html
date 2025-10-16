@@ -1139,7 +1139,43 @@
             }
 
             function renderNavByCommunity(container) {
+                const byId = state.communitiesById || {};
+                const isReady = byId && Object.keys(byId).length > 0;
+                // 若社區資料尚未載入，顯示載入中並在載入完成後重繪
+                if (!isReady) {
+                    container.innerHTML = `
+                        <div class="p-8 flex items-center justify-center h-full">
+                            <div class="text-center text-gray-500">
+                                <i data-lucide="loader" class="w-6 h-6 mx-auto mb-2 animate-spin"></i>
+                                <div>載入社區資料中...</div>
+                            </div>
+                        </div>`;
+                    try {
+                        ensureCommunitiesCache().then(() => {
+                            try { computeAvailableCommunities(); } catch (_) {}
+                            renderNavByCommunity(container);
+                            try { lucide.createIcons(); } catch (_) {}
+                        });
+                    } catch (_) {}
+                    try { lucide.createIcons(); } catch (_) {}
+                    return;
+                }
+
+                // 確保可顯示清單已計算
+                try { computeAvailableCommunities(); } catch (_) {}
                 const list = state.availableCommunities || [];
+                if (!list.length) {
+                    container.innerHTML = `
+                        <div class="p-8 flex items-center justify-center h-full">
+                            <div class="text-center text-gray-500">
+                                <i data-lucide="home" class="w-8 h-8 mx-auto mb-3"></i>
+                                <div>目前沒有可顯示的社區</div>
+                            </div>
+                        </div>`;
+                    try { lucide.createIcons(); } catch (_) {}
+                    return;
+                }
+
                 container.innerHTML = `
                     <div class="p-4 space-y-3">
                         ${list.map(c => `
@@ -1158,6 +1194,7 @@
                         enterCommunityMainPage(id);
                     });
                 });
+                try { lucide.createIcons(); } catch (_) {}
             }
 
             function renderNavByName(container) {
