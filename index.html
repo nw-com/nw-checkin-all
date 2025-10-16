@@ -5785,8 +5785,14 @@
                             await fsSetDoc(fsDoc(db, 'users', targetUserId), userDoc, { merge: true });
                         }
 
-                        const adminInfo = { uid: auth.currentUser?.uid || null, name: state.currentUserData?.name || '' };
-                        await fsUpdateDoc(appRef, { status: 'approved', approvedAt: fsServerTimestamp(), approvedBy: adminInfo });
+                        const updates = {
+                            status: 'approved',
+                            reviewerId: auth.currentUser?.uid || '',
+                            reviewedAt: fsServerTimestamp(),
+                            reviewNotes: ''
+                        };
+                        if (targetUserId) updates.convertedUserId = targetUserId;
+                        await fsUpdateDoc(appRef, updates);
 
                         if (createdAuthUser) { try { await sendPasswordResetEmail(auth, email); } catch (_) {} }
                         showToast('已核准並建立帳號');
@@ -5804,8 +5810,12 @@
                         const reason = prompt('請輸入拒絕原因（可留空）') || '';
                         showLoading(true);
                         const appRef = fsDoc(db, 'accountApplications', appId);
-                        const adminInfo = { uid: auth.currentUser?.uid || null, name: state.currentUserData?.name || '' };
-                        await fsUpdateDoc(appRef, { status: 'rejected', rejectionReason: reason, updatedAt: fsServerTimestamp(), rejectedBy: adminInfo });
+                        await fsUpdateDoc(appRef, {
+                            status: 'rejected',
+                            reviewerId: auth.currentUser?.uid || '',
+                            reviewedAt: fsServerTimestamp(),
+                            reviewNotes: reason || ''
+                        });
                         showToast('已拒絕此申請');
                     } catch (err) {
                         console.error('reject application error', err);
