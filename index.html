@@ -189,8 +189,11 @@
         <!-- Header -->
         <header class="h-[70px] flex items-center justify-between px-4 border-b border-gray-200 flex-shrink-0">
             <div class="flex items-center space-x-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
-                <span class="text-lg font-bold text-gray-800">西北社區打卡系統</span>
+                <button id="header-logo-btn" class="flex items-center space-x-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+                    <span class="text-lg font-bold text-gray-800">西北社區打卡系統</span>
+                </button>
+                <button id="header-community-btn" class="ml-2 px-2 py-1 rounded text-sm bg-gray-100 text-gray-700 hover:bg-gray-200">選擇社區</button>
                 <span id="welcome-message" class="text-sm text-gray-600 ml-2"></span>
             </div>
             <button id="profile-avatar-btn">
@@ -347,6 +350,8 @@
             // 用於異常標示的設定與快取
             markAbnormalLocation: true,
             communitiesById: {},
+            availableCommunities: [],
+            currentCommunity: null,
         };
         
         // 初始化本機裝置ID（用於打卡紀錄與首次打卡裝置標記）
@@ -494,6 +499,93 @@
                 state._communitiesLoaded = true;
             }
 
+            // --- 社區導覽與切換輔助 ---
+            function computeAvailableCommunities() {
+                const user = state.currentUserData || {};
+                const role = user.role || '';
+                let list = [];
+                const byId = state.communitiesById || {};
+                const serviceIds = Array.isArray(user.serviceCommunities) ? user.serviceCommunities.filter(Boolean) : [];
+                if (serviceIds.length > 0) {
+                    list = serviceIds.map(id => byId[id]).filter(Boolean);
+                } else if ([ 'admin', 'manager' ].includes(role)) {
+                    list = Object.values(byId);
+                } else {
+                    list = [];
+                }
+                list.sort((a,b) => (a?.name||'').localeCompare(b?.name||'', 'zh-Hant'));
+                state.availableCommunities = list;
+                if (!state.currentCommunity && list.length === 1) {
+                    state.currentCommunity = list[0];
+                }
+                updateHeaderCommunity();
+                return list;
+            }
+
+            function updateHeaderCommunity() {
+                const btn = document.getElementById('header-community-btn');
+                if (!btn) return;
+                const c = state.currentCommunity;
+                btn.textContent = c?.name ? `${c.name} 社區` : '選擇社區';
+            }
+
+            function shouldShowNavigationPage() {
+                const role = state.currentUserData?.role || '';
+                if (!['admin','manager','junior_manager'].includes(role)) return false;
+                const list = state.availableCommunities || [];
+                return (!state.currentCommunity && list.length > 1);
+            }
+
+            function openCommunitySwitchModal() {
+                const modalContainer = document.getElementById('modal-container');
+                const list = state.availableCommunities || [];
+                if (!modalContainer) return;
+                modalContainer.innerHTML = `
+                    <div class="modal-overlay" id="community-modal-overlay"></div>
+                    <div class="modal-content">
+                        <div class="modal-header">選擇社區</div>
+                        <div class="space-y-2">
+                            ${list.length === 0 ? '<div class="text-gray-500">目前無可選擇的社區</div>' : list.map(c => `
+                                <button class="w-full text-left px-3 py-2 rounded border hover:bg-gray-50" data-id="${c.id}">${c.name || '(未命名社區)'}</button>
+                            `).join('')}
+                        </div>
+                        <div class="modal-actions">
+                            <button id="community-modal-close" class="px-3 py-1 rounded bg-gray-100">關閉</button>
+                        </div>
+                    </div>`;
+                modalContainer.classList.add('show');
+                // bind events
+                const close = () => { modalContainer.classList.remove('show'); modalContainer.innerHTML = ''; };
+                const overlay = document.getElementById('community-modal-overlay');
+                const closeBtn = document.getElementById('community-modal-close');
+                overlay && overlay.addEventListener('click', close);
+                closeBtn && closeBtn.addEventListener('click', close);
+                modalContainer.querySelectorAll('button[data-id]').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const id = e.currentTarget.getAttribute('data-id');
+                        const c = (state.availableCommunities || []).find(x => x.id === id);
+                        if (c) {
+                            state.currentCommunity = c;
+                            updateHeaderCommunity();
+                            showToast(`已切換至「${c.name}」`);
+                            close();
+                            try { showPage('dashboard'); } catch (_) {}
+                        }
+                    });
+                });
+            }
+
+            function enterCommunityMainPage(commId) {
+                const c = (state.availableCommunities || []).find(x => x.id === commId) || state.communitiesById?.[commId];
+                if (c) {
+                    state.currentCommunity = c;
+                    updateHeaderCommunity();
+                    showPage('dashboard');
+                } else {
+                    showToast('找不到社區資料', true);
+                }
+            }
+
             function computeRecordAbnormal(record, serviceCommunityIds) {
                 try {
                     if (!state.markAbnormalLocation) return null;
@@ -606,6 +698,25 @@
             function initializeAppUI() {
                 loadGoogleMapsScript();
                 updateHeaderAvatar();
+                // 準備社區資料與標頭顯示
+                try { ensureCommunitiesCache().then(() => { computeAvailableCommunities(); updateHeaderCommunity(); }); } catch (_) {}
+                // 綁定標頭按鈕事件
+                const logoBtn = document.getElementById('header-logo-btn');
+                const communityBtn = document.getElementById('header-community-btn');
+                if (logoBtn) {
+                    logoBtn.addEventListener('click', () => {
+                        if (shouldShowNavigationPage()) {
+                            mainNav && mainNav.classList.add('hide');
+                            showPage('navigation', 'community');
+                        } else {
+                            mainNav && mainNav.classList.remove('hide');
+                            showPage('dashboard');
+                        }
+                    });
+                }
+                if (communityBtn) {
+                    communityBtn.addEventListener('click', openCommunitySwitchModal);
+                }
                 
                 const navTracking = document.getElementById('nav-tracking');
                 const navSettings = document.getElementById('nav-settings');
@@ -650,8 +761,16 @@
                 appContainer.classList.remove('hide');
                 
                 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-                document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active');
-                showPage('dashboard');
+                let initialPage = 'dashboard';
+                if (shouldShowNavigationPage()) {
+                    initialPage = 'navigation';
+                    mainNav && mainNav.classList.add('hide');
+                } else {
+                    mainNav && mainNav.classList.remove('hide');
+                    const navDashboard = document.querySelector('.tab-btn[data-tab="dashboard"]');
+                    navDashboard && navDashboard.classList.add('active');
+                }
+                showPage(initialPage);
                 showLoading(false);
             }
 
@@ -847,16 +966,21 @@
                 state.currentLocation = null;
                 state.trackingMap = null;
                 state.trackingMarkers = [];
+                // 導覽頁不顯示底部導覽列
+                if (mainNav) {
+                    mainNav.classList.toggle('hide', pageName === 'navigation');
+                }
                 mainContent.innerHTML = `<div class="flex justify-center items-center h-full"><div class="loader"></div></div>`;
                 const router = {
                     'dashboard': renderDashboard,
                     'clock-in': () => renderClockIn(subPage || 'location'),
-                    'tracking': () => ['admin','manager','總幹事'].includes(state.currentUserData.role) ? renderTracking(subPage || 'map') : renderAccessDenied(),
+                    'tracking': () => ['admin','manager','總幹事'].includes(state.currentUserData.role) ? renderTracking(subPage || 'map', params) : renderAccessDenied(),
                     'features': () => renderFeatures(subPage || 'news'),
                     'calendar': () => renderCalendar(subPage || 'overview'),
                     'schedule': () => ['admin','manager'].includes(state.currentUserData.role) ? renderCalendar('schedule') : renderAccessDenied(),
                     'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'accounts') : renderAccessDenied(),
                     'hr': () => (state.currentUserData.role === 'admin') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
+                    'navigation': () => renderNavigation(subPage || 'community'),
                     'group': () => state.currentUserData.role === 'junior_manager' ? renderGroup(subPage || 'map') : renderAccessDenied()
                 };
                 const renderFunction = router[pageName] || renderAccessDenied;
@@ -877,6 +1001,104 @@
                         <p>您沒有權限訪問此頁面。</p>
                     </div>
                 `;
+            }
+
+            // 導覽頁（管理階層使用）
+            function renderNavigation(subPage) {
+                const role = state.currentUserData?.role || '';
+                const showSettings = role === 'admin';
+                mainContent.innerHTML = `
+                    <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
+                        <button data-subtab="community" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium ${subPage === 'community' || !subPage ? 'bg-red-100 text-red-600 active' : 'text-gray-600'}">依社區</button>
+                        <button data-subtab="name" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium ${subPage === 'name' ? 'bg-red-100 text-red-600 active' : 'text-gray-600'}">依姓名</button>
+                        ${showSettings ? `<button data-subtab="settings" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium ${subPage === 'settings' ? 'bg-red-100 text-red-600 active' : 'text-gray-600'}">設定</button>` : ''}
+                    </div>
+                    <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
+
+                const subPageContent = document.getElementById('sub-page-content');
+                if (subPage === 'name') {
+                    renderNavByName(subPageContent);
+                } else if (subPage === 'settings' && showSettings) {
+                    renderNavSettings(subPageContent);
+                } else {
+                    renderNavByCommunity(subPageContent);
+                }
+                mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => {
+                    btn.addEventListener('click', () => showPage('navigation', btn.dataset.subtab));
+                });
+                try { lucide.createIcons(); } catch (_) {}
+            }
+
+            function renderNavByCommunity(container) {
+                const list = state.availableCommunities || [];
+                container.innerHTML = `
+                    <div class="p-4 space-y-3">
+                        <div class="text-sm text-gray-500">可選社區：${list.length} 個</div>
+                        ${list.length === 0 ? '<div class="text-gray-500">目前無可選擇的社區</div>' : list.map(c => `
+                            <div class="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border">
+                                <div>
+                                    <p class="font-medium text-gray-800">${c.name || '(未命名社區)'}</p>
+                                    ${(Number.isFinite(c.lat) && Number.isFinite(c.lng)) ? `<p class="text-xs text-gray-500">(${c.lat}, ${c.lng}) 半徑 ${c.radius ?? '—'} m</p>` : '<p class="text-xs text-gray-400">未設定座標</p>'}
+                                </div>
+                                <button class="enter-community px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700" data-id="${c.id}">進入</button>
+                            </div>
+                        `).join('')}
+                    </div>`;
+                container.querySelectorAll('.enter-community').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const id = e.currentTarget.getAttribute('data-id');
+                        enterCommunityMainPage(id);
+                    });
+                });
+            }
+
+            function renderNavByName(container) {
+                const { collection, getDocs } = window.__fs || {};
+                const db = window.__db;
+                container.innerHTML = `<div class="p-4"><div class="text-gray-500">載入中...</div></div>`;
+                if (!db || !collection || !getDocs) {
+                    container.innerHTML = `<div class="p-4 text-red-600">資料庫尚未就緒</div>`;
+                    return;
+                }
+                getDocs(collection(db, 'users')).then((snap) => {
+                    const users = [];
+                    snap.forEach(d => users.push({ id: d.id, ...d.data() }));
+                    users.sort((a,b) => (a?.name||'').localeCompare(b?.name||'', 'zh-Hant'));
+                    container.innerHTML = `
+                        <div class="p-4 space-y-2">
+                            ${users.map(u => `
+                                <div class="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border">
+                                    <div>
+                                        <p class="font-medium text-gray-800">${u.name || '(未命名)'}</p>
+                                        <p class="text-xs text-gray-500">${roleLabel(u.role)}</p>
+                                    </div>
+                                    <button class="view-att px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700" data-id="${u.id}">出勤</button>
+                                </div>
+                            `).join('')}
+                        </div>`;
+                    container.querySelectorAll('.view-att').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const id = e.currentTarget.getAttribute('data-id');
+                            showPage('tracking', 'attendance', { selectedUserId: id });
+                        });
+                    });
+                    try { lucide.createIcons(); } catch (_) {}
+                }).catch((err) => {
+                    console.warn('載入人員失敗', err);
+                    container.innerHTML = `<div class="p-4 text-red-600">載入人員失敗</div>`;
+                });
+            }
+
+            function renderNavSettings(container) {
+                container.innerHTML = `
+                    <div class="p-4">
+                        <div class="bg-white rounded-md border p-4">
+                            <h3 class="font-bold text-gray-800 mb-2">導覽設定</h3>
+                            <p class="text-sm text-gray-600">此區域將提供導覽顯示、社區可見性等管理設定。</p>
+                        </div>
+                    </div>
+                `;
+                try { lucide.createIcons(); } catch (_) {}
             }
 
             // --- Page Render Functions ---
@@ -3098,7 +3320,7 @@
                 }
             }
             
-            function renderTracking(subPage) {
+            function renderTracking(subPage, params = {}) {
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
                         <button data-subtab="map" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'map' || !subPage ? 'active' : ''}">人員地圖</button>
@@ -3110,7 +3332,7 @@
                 
                 const subPageContent = document.getElementById('sub-page-content');
                 if (subPage === 'attendance') {
-                    renderTrackingAttendance(subPageContent);
+                    renderTrackingAttendance(subPageContent, params);
                 } else if (subPage === 'leave') {
                     renderTrackingLeave(subPageContent);
                 } else if (subPage === 'retro') {
@@ -3984,7 +4206,7 @@
                 listenForUserLocations();
             }
             
-            function renderTrackingAttendance(container) {
+            function renderTrackingAttendance(container, params = {}) {
                 container.innerHTML = `
                     <div class="p-4 space-y-4">
                         <div class="flex flex-wrap items-center gap-4 mb-4">
@@ -4007,8 +4229,14 @@
                 `;
                 
                 // 載入所有用戶
-                const usersRef = collection(db, "users");
+                const { collection, getDocs } = window.__fs || {};
+                const db = window.__db;
+                const usersRef = db && collection ? collection(db, "users") : null;
                 const userSelect = document.getElementById('user-select');
+                if (!usersRef || !getDocs) {
+                    document.getElementById('attendance-records-list').innerHTML = '<div class="p-4 text-red-600">資料庫尚未就緒</div>';
+                    return;
+                }
                 
                 getDocs(usersRef).then((querySnapshot) => {
                     const users = [];
@@ -4022,6 +4250,10 @@
                         option.textContent = user.name;
                         userSelect.appendChild(option);
                     });
+                    // 若帶入 selectedUserId 參數，預選該使用者
+                    if (params && params.selectedUserId) {
+                        userSelect.value = params.selectedUserId;
+                    }
                     
                     // 初始載入記錄
                     loadAttendanceRecords();
