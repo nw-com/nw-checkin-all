@@ -207,10 +207,11 @@ service cloud.firestore {
       // 僅社區維護角色可新增社區；限制欄位與型別
       allow create: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
-          'name','address','region','code','location','radius','createdAt','updatedAt'
+          'name','address','region','code','shortName','location','radius','createdAt','updatedAt'
         ]) &&
         request.resource.data.name is string &&
         (request.resource.data.address == null || request.resource.data.address is string) &&
+        (request.resource.data.shortName == null || request.resource.data.shortName is string) &&
         request.resource.data.region in ['台北','新北','桃園'] &&
         request.resource.data.code is string &&
         request.resource.data.location is latlng &&
@@ -221,10 +222,11 @@ service cloud.firestore {
       // 僅社區維護角色可更新社區；限制欄位與型別
       allow update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
-          'name','address','region','code','location','radius','createdAt','updatedAt'
+          'name','address','region','code','shortName','location','radius','createdAt','updatedAt'
         ]) &&
         request.resource.data.name is string &&
         (request.resource.data.address == null || request.resource.data.address is string) &&
+        (request.resource.data.shortName == null || request.resource.data.shortName is string) &&
         request.resource.data.region in ['台北','新北','桃園'] &&
         request.resource.data.code is string &&
         request.resource.data.location is latlng &&

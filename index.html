@@ -5257,13 +5257,8 @@
                         <div class="bg-white p-3 rounded-md shadow-sm border space-y-2">
                             <div class="flex items-center justify-between">
                                 <h3 class="font-bold text-lg">帳號列表</h3>
-                                <div class="flex items-center gap-2">
-                                    <button id="export-users-json" class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 flex items-center"><i data-lucide="download" class="w-4 h-4 mr-1"></i>匯出 JSON</button>
-                                    <button id="import-users-json" class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 flex items-center"><i data-lucide="upload" class="w-4 h-4 mr-1"></i>匯入 JSON</button>
-                                    <input id="import-users-file" type="file" accept="application/json" class="hidden" />
-                                </div>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div class="grid grid-cols-1 gap-3">
                                 <div>
                                     <label class="block text-sm text-gray-600 mb-1">角色</label>
                                     <select id="filter-role" class="w-full px-3 py-2 border rounded-md">
@@ -5276,14 +5271,6 @@
                                         <option value="field">${roleLabel('field')}</option>
                                         <option value="user">${roleLabel('user')}</option>
                                     </select>
-                                </div>
-                                <div class="md:col-span-2">
-                                    <label class="block text-sm text-gray-600 mb-1">服務社區 (可複選)</label>
-                                    <div class="flex items-center gap-3 mb-2">
-                                        <label class="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" id="filter-sc-select-all" class="rounded" /> 全選</label>
-                                        <button id="reset-filters" class="text-sm text-blue-600 hover:text-blue-800">重置篩選</button>
-                                    </div>
-                                    <div id="filter-sc-list" class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto border rounded-md p-2"></div>
                                 </div>
                             </div>
                         </div>
@@ -5304,50 +5291,8 @@
                 let allUsers = [];
                 let lastRendered = [];
                 const roleSelect = document.getElementById('filter-role');
-                const scListEl = document.getElementById('filter-sc-list');
-                const scSelectAllEl = document.getElementById('filter-sc-select-all');
-                const resetBtn = document.getElementById('reset-filters');
-                const exportBtn = document.getElementById('export-users-json');
-                const importBtn = document.getElementById('import-users-json');
-                const importFileInput = document.getElementById('import-users-file');
-
-                // 載入社區供篩選
-                (async () => {
-                    try {
-                        const communitiesSnap = await getDocs(collection(db, 'communities'));
-                        const communities = [];
-                        communitiesSnap.forEach(docSnap => communities.push({ id: docSnap.id, ...docSnap.data() }));
-                        communities.sort((a,b) => (a.name||'').localeCompare(b.name||''));
-                        scListEl.innerHTML = communities.map(c => {
-                            const label = `${c.region ? `[${c.region}] ` : ''}${c.code ? `[${c.code}] ` : ''}${c.name || ''}`;
-                            return `
-                                <label class="flex items-center gap-2">
-                                    <input type="checkbox" name="filter-sc" value="${c.id}" class="rounded">
-                                    <span class="text-sm text-gray-700">${label}</span>
-                                </label>
-                            `;
-                        }).join('');
-                        scSelectAllEl?.addEventListener('change', (e) => {
-                            const checked = e.target.checked;
-                            scListEl.querySelectorAll('input[name="filter-sc"]').forEach(chk => { chk.checked = checked; });
-                            renderUserList();
-                        });
-                        scListEl.querySelectorAll('input[name="filter-sc"]').forEach(chk => {
-                            chk.addEventListener('change', renderUserList);
-                        });
-                    } catch (err) {
-                        console.error('載入社區篩選清單失敗', err);
-                        scListEl.innerHTML = '<p class="text-sm text-red-500">社區篩選載入失敗</p>';
-                    }
-                })();
 
                 roleSelect.addEventListener('change', renderUserList);
-                resetBtn.addEventListener('click', () => {
-                    roleSelect.value = '';
-                    scSelectAllEl.checked = false;
-                    scListEl.querySelectorAll('input[name="filter-sc"]').forEach(chk => { chk.checked = false; });
-                    renderUserList();
-                });
 
                 const unsubscribe = onSnapshot(q, (querySnapshot) => {
                     allUsers = [];
@@ -5363,14 +5308,7 @@
                         return;
                     }
                     const selectedRole = roleSelect.value || '';
-                    const selectedSc = Array.from(scListEl.querySelectorAll('input[name="filter-sc"]')).filter(c => c.checked).map(c => c.value);
-                    const selectedScSet = new Set(selectedSc);
-
-                    const filtered = allUsers.filter(u => {
-                        const roleOk = selectedRole ? (u.role === selectedRole) : true;
-                        const scOk = selectedScSet.size > 0 ? Array.isArray(u.serviceCommunities) && u.serviceCommunities.some(id => selectedScSet.has(id)) : true;
-                        return roleOk && scOk;
-                    });
+                    const filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : true);
 
                     filtered.forEach(user => {
                         const userElement = document.createElement('div');
@@ -5419,91 +5357,6 @@
                         }
                     }));
                 }
-
-                // 匯出 JSON
-                exportBtn.addEventListener('click', () => {
-                    try {
-                        const data = lastRendered.map(u => ({
-                            id: u.id,
-                            name: u.name || '',
-                            email: u.email || '',
-                            phone: u.phone || '',
-                            role: u.role || 'user',
-                            lineId: u.lineId || '',
-                            avatarUrl: u.avatarUrl || '',
-                            serviceCommunities: Array.isArray(u.serviceCommunities) ? u.serviceCommunities : []
-                        }));
-                        const blob = new Blob([JSON.stringify({ users: data }, null, 2)], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        const ts = new Date().toISOString().replace(/[:.]/g,'-');
-                        a.download = `users-export-${ts}.json`;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        URL.revokeObjectURL(url);
-                        showToast('已匯出目前篩選的帳號為 JSON');
-                    } catch (err) {
-                        console.error('匯出 JSON 失敗', err);
-                        showToast('匯出 JSON 失敗', true);
-                    }
-                });
-
-                // 匯入 JSON
-                importBtn.addEventListener('click', async () => {
-                    const isAdmin = await window.checkAdminStatus?.();
-                    if (!isAdmin) {
-                        showToast('僅管理員可匯入帳號資料', true);
-                        return;
-                    }
-                    importFileInput.value = '';
-                    importFileInput.click();
-                });
-                importFileInput.addEventListener('change', async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    try {
-                        const text = await file.text();
-                        const json = JSON.parse(text);
-                        const items = Array.isArray(json) ? json : (Array.isArray(json.users) ? json.users : []);
-                        if (!Array.isArray(items) || items.length === 0) {
-                            showToast('匯入檔案中無有效使用者資料', true);
-                            return;
-                        }
-                        showLoading(true);
-                        let successCount = 0;
-                        for (const it of items) {
-                            try {
-                                const payload = {
-                                    name: it.name || '',
-                                    email: it.email || '',
-                                    phone: it.phone || '',
-                                    role: it.role || 'user',
-                                    lineId: it.lineId || '',
-                                    avatarUrl: it.avatarUrl || '',
-                                    serviceCommunities: Array.isArray(it.serviceCommunities) ? it.serviceCommunities : [],
-                                };
-                                let targetId = it.id && typeof it.id === 'string' ? it.id : null;
-                                if (targetId) {
-                                    await setDoc(doc(db, 'users', targetId), payload, { merge: true });
-                                } else {
-                                    const newRef = doc(collection(db, 'users'));
-                                    await setDoc(newRef, payload, { merge: false });
-                                }
-                                successCount++;
-                            } catch (writeErr) {
-                                console.warn('匯入單筆失敗', writeErr);
-                            }
-                        }
-                        showToast(`匯入完成，成功 ${successCount} 筆`);
-                    } catch (err) {
-                        console.error('匯入 JSON 解析失敗', err);
-                        showToast('匯入失敗：JSON 格式錯誤', true);
-                    } finally {
-                        showLoading(false);
-                    }
-                });
 
                 state.activeListeners.push(unsubscribe);
             }
@@ -6320,7 +6173,7 @@
                                     <input id="filter-community-code" type="text" class="w-full px-3 py-2 border rounded-md" placeholder="例如：A" />
                                 </div>
                                 <div class="flex items-end">
-                                    <button id="reset-community-filters" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200">重置篩選</button>
+                                    <button id="reset-community-filters" class="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 flex items-center justify-center">重置篩選</button>
                                 </div>
                                 <div class="flex items-end">
                                     <button id="add-community-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 flex items-center justify-center">
@@ -6447,6 +6300,7 @@
                 const addrVal = community?.address || '';
                 const regionVal = community?.region || '';
                 const codeVal = community?.code || '';
+                const shortNameVal = community?.shortName || '';
                 const modalHTML = `
                     <div id="${modalId}" class="modal-backdrop">
                         <div class="modal-content w-[90%] max-w-md bg-white rounded-lg shadow-xl flex flex-col" style="max-height: 90vh;">
@@ -6478,6 +6332,10 @@
                                         <label class="block text-sm font-medium text-gray-700">社區編號 (不可重複)</label>
                                         <input id="community-code" type="text" value="${codeVal}" class="w-full mt-1 px-3 py-2 border rounded-md" placeholder="例如：A001" required />
                                     </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">社區簡稱</label>
+                                    <input id="community-short" type="text" value="${shortNameVal}" class="w-full mt-1 px-3 py-2 border rounded-md" placeholder="例如：A社、青園" />
                                 </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
@@ -6516,6 +6374,7 @@
                 const addrInput = document.getElementById('community-address');
                 const regionInput = document.getElementById('community-region');
                 const codeInput = document.getElementById('community-code');
+                const shortNameInput = document.getElementById('community-short');
                 const latInput = document.getElementById('community-lat');
                 const lngInput = document.getElementById('community-lng');
                 const errorEl = document.getElementById('community-form-error');
@@ -6620,6 +6479,7 @@
                         const address = addrInput.value.trim();
                         const region = regionInput.value.trim();
                         const code = codeInput.value.trim();
+                        const shortName = shortNameInput.value.trim();
                         const lat = parseFloat(latInput.value);
                         const lng = parseFloat(lngInput.value);
                         const radiusInput = document.getElementById('community-radius');
@@ -6653,6 +6513,7 @@
                             address,
                             region,
                             code,
+                            shortName: shortName || null,
                             location: new GeoPoint(lat, lng),
                             radius: (Number.isFinite(radiusVal) && radiusVal >= 0) ? Math.floor(radiusVal) : 0,
                             updatedAt: serverTimestamp()
