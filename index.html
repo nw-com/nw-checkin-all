@@ -438,6 +438,8 @@
             const appContainer = document.getElementById('app-container');
             const mainContent = document.getElementById('main-content');
             const mainNav = document.getElementById('main-nav');
+            // 保存容器頁尾（全域底部導覽）的預設內容，便於導覽頁切換時復原
+            state.defaultMainNavHtml = mainNav ? mainNav.innerHTML : '';
             const profileAvatarBtn = document.getElementById('profile-avatar-btn');
             const modalContainer = document.getElementById('modal-container');
             const toast = document.getElementById('toast');
@@ -790,11 +792,10 @@
                 if (shouldShowNavigationPage()) {
                     initialPage = 'navigation';
                     initialSub = 'community';
-                    mainNav && mainNav.classList.add('hide');
+                    // 顯示容器頁尾為導覽子分頁
+                    renderFooterNavForNavigation(initialSub);
                 } else {
-                    mainNav && mainNav.classList.remove('hide');
-                    const navDashboard = document.querySelector('.tab-btn[data-tab="dashboard"]');
-                    navDashboard && navDashboard.classList.add('active');
+                    restoreFooterMainTabs('dashboard');
                 }
                 showPage(initialPage, initialSub);
                 showLoading(false);
@@ -984,6 +985,91 @@
                 }
             });
 
+            // 導覽頁使用容器頁尾（Footer）作為子分頁切換，非內嵌於頁面內容
+            function renderFooterNavForNavigation(activeSubTab) {
+                if (!mainNav) return;
+                const role = state.currentUserData?.role || '';
+                const showSettings = role === 'admin';
+                mainNav.innerHTML = `
+                    <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${!activeSubTab || activeSubTab==='community' ? 'border-red-600' : 'border-transparent'} pt-2">
+                        <i data-lucide="building-2" class="text-red-600"></i><span class="text-xs mt-1">依社區</span>
+                    </button>
+                    <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${activeSubTab==='name' ? 'border-red-600' : 'border-transparent'} pt-2">
+                        <i data-lucide="user" class="text-red-600"></i><span class="text-xs mt-1">依姓名</span>
+                    </button>
+                    ${showSettings ? `
+                    <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${activeSubTab==='settings' ? 'border-red-600' : 'border-transparent'} pt-2">
+                        <i data-lucide="settings" class="text-red-600"></i><span class="text-xs mt-1">設定</span>
+                    </button>` : ''}
+                `;
+                // 綁定容器頁尾子分頁切換
+                mainNav.querySelectorAll('.nav-sub-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        // 切換紅色邊框樣式
+                        mainNav.querySelectorAll('.nav-sub-btn').forEach(b => {
+                            b.classList.remove('border-red-600');
+                            b.classList.add('border-transparent');
+                        });
+                        btn.classList.add('border-red-600');
+                        btn.classList.remove('border-transparent');
+                        showPage('navigation', btn.dataset.subtab);
+                    });
+                });
+                try { lucide.createIcons(); } catch (_) {}
+            }
+
+            function applyRoleNavVisibility() {
+                const role = state.currentUserData?.role || '';
+                const navTracking = document.getElementById('nav-tracking');
+                const navSchedule = document.getElementById('nav-schedule');
+                const navSettings = document.getElementById('nav-settings');
+                const navHr = document.getElementById('nav-hr');
+                const navGroup = document.getElementById('nav-group');
+
+                // 預設隱藏進階分頁
+                navTracking && navTracking.classList.add('hide');
+                navSchedule && navSchedule.classList.add('hide');
+                navSettings && navSettings.classList.add('hide');
+                navHr && navHr.classList.add('hide');
+                navGroup && navGroup.classList.add('hide');
+
+                if (role === 'admin') {
+                    navTracking && navTracking.classList.remove('hide');
+                    navSchedule && navSchedule.classList.remove('hide');
+                    // 全域設定已移至導覽頁設定，保持隱藏
+                    navSettings && navSettings.classList.add('hide');
+                    // 人事保持隱藏
+                    navHr && navHr.classList.add('hide');
+                } else if (role === 'manager') {
+                    navTracking && navTracking.classList.remove('hide');
+                    navSchedule && navSchedule.classList.remove('hide');
+                    navSettings && navSettings.classList.add('hide');
+                } else if (role === 'junior_manager') {
+                    navGroup && navGroup.classList.remove('hide');
+                    navSettings && navSettings.classList.add('hide');
+                } else if (role === '總幹事') {
+                    navTracking && navTracking.classList.remove('hide');
+                    navSettings && navSettings.classList.add('hide');
+                } else if (['秘書','保全','清潔','機電'].includes(role)) {
+                    navSettings && navSettings.classList.add('hide');
+                } else {
+                    navSettings && navSettings.classList.add('hide');
+                }
+            }
+
+            function restoreFooterMainTabs(activeTab) {
+                if (!mainNav) return;
+                if (state.defaultMainNavHtml) {
+                    mainNav.innerHTML = state.defaultMainNavHtml;
+                }
+                applyRoleNavVisibility();
+                // 設定目前分頁為 active 樣式
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                const target = document.querySelector(`.tab-btn[data-tab="${activeTab || 'dashboard'}"]`);
+                target && target.classList.add('active');
+                try { lucide.createIcons(); } catch (_) {}
+            }
+
             // 確保在任何時候點擊頭像按鈕都能打開個人資料
             document.getElementById('profile-avatar-btn').addEventListener('click', renderProfileModal);
 
@@ -992,9 +1078,13 @@
                 state.currentLocation = null;
                 state.trackingMap = null;
                 state.trackingMarkers = [];
-                // 導覽頁不顯示底部導覽列
+                // 導覽頁改用容器頁尾作為子分頁切換；非導覽頁復原容器頁尾
                 if (mainNav) {
-                    mainNav.classList.toggle('hide', pageName === 'navigation');
+                    if (pageName === 'navigation') {
+                        renderFooterNavForNavigation(subPage || 'community');
+                    } else {
+                        restoreFooterMainTabs(pageName);
+                    }
                 }
                 mainContent.innerHTML = `<div class="flex justify-center items-center h-full"><div class="loader"></div></div>`;
                 const router = {
@@ -1033,23 +1123,9 @@
             function renderNavigation(subPage) {
                 const role = state.currentUserData?.role || '';
                 const showSettings = role === 'admin';
-                // 導覽頁：將子分頁改為底部按鈕列
+                // 導覽頁：子分頁切換移至容器頁尾（Footer），內容區全高顯示
                 mainContent.innerHTML = `
-                    <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 70px);"></div>
-                    <div class="h-[70px] border-t border-gray-200 bg-white">
-                        <nav id="nav-bottom" class="flex justify-around h-full items-center">
-                            <button data-subtab="community" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${!subPage || subPage==='community' ? 'border-red-600' : 'border-transparent'} pt-2">
-                                <i data-lucide="building-2" class="text-red-600"></i><span class="text-xs mt-1">依社區</span>
-                            </button>
-                            <button data-subtab="name" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${subPage==='name' ? 'border-red-600' : 'border-transparent'} pt-2">
-                                <i data-lucide="user" class="text-red-600"></i><span class="text-xs mt-1">依姓名</span>
-                            </button>
-                            ${showSettings ? `
-                            <button data-subtab="settings" class="nav-sub-btn flex flex-col items-center text-red-600 border-t-2 ${subPage==='settings' ? 'border-red-600' : 'border-transparent'} pt-2">
-                                <i data-lucide="settings" class="text-red-600"></i><span class="text-xs mt-1">設定</span>
-                            </button>` : ''}
-                        </nav>
-                    </div>`;
+                    <div id="sub-page-content" class="overflow-y-auto h-full"></div>`;
 
                 const subPageContent = document.getElementById('sub-page-content');
                 if (subPage === 'name') {
@@ -1059,19 +1135,6 @@
                 } else {
                     renderNavByCommunity(subPageContent);
                 }
-                // 綁定底部按鈕事件
-                mainContent.querySelectorAll('.nav-sub-btn').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        // 切換紅色邊框樣式
-                        mainContent.querySelectorAll('.nav-sub-btn').forEach(b => {
-                            b.classList.remove('border-red-600');
-                            b.classList.add('border-transparent');
-                        });
-                        btn.classList.add('border-red-600');
-                        btn.classList.remove('border-transparent');
-                        showPage('navigation', btn.dataset.subtab);
-                    });
-                });
                 try { lucide.createIcons(); } catch (_) {}
             }
 
