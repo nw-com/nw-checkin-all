@@ -408,6 +408,42 @@
             }
         }
 
+        // 排序輔助：社區編號（字母前綴 + 數字）
+        function parseCommunityCode(code) {
+            const c = (code || '').toString().trim();
+            const m = c.match(/^([A-Za-z]+)(\d+)/);
+            if (m) {
+                return { prefix: m[1].toUpperCase(), num: parseInt(m[2], 10) };
+            }
+            // 無法解析，使用整體字串作為前綴，數字設為極大避免干擾排序
+            return { prefix: c.toUpperCase(), num: Number.POSITIVE_INFINITY };
+        }
+        function compareCommunitiesByCode(a, b) {
+            const ca = parseCommunityCode(a?.code || '');
+            const cb = parseCommunityCode(b?.code || '');
+            if (ca.prefix !== cb.prefix) return ca.prefix.localeCompare(cb.prefix);
+            if (ca.num !== cb.num) return ca.num - cb.num;
+            // 前綴與數字相同時，以完整字串穩定排序
+            return (a?.code || '').localeCompare(b?.code || '');
+        }
+
+        // 排序輔助：人員依姓氏筆畫（少 → 多）
+        const collStroke = (typeof Intl !== 'undefined' && typeof Intl.Collator === 'function')
+            ? new Intl.Collator('zh-Hant-u-co-stroke', { sensitivity: 'base' })
+            : null;
+        function compareUsersBySurnameStroke(a, b) {
+            const an = (a?.name || '').trim();
+            const bn = (b?.name || '').trim();
+            const ac = an.charAt(0);
+            const bc = bn.charAt(0);
+            if (collStroke) {
+                const r = collStroke.compare(ac || '', bc || '');
+                if (r !== 0) return r;
+            }
+            // Fallback：同筆畫或無法比較時，改用中文語系字典序
+            return an.localeCompare(bn, 'zh-Hant');
+        }
+
         // 新增輔助：判斷是否為「外勤及其子角色」
         function isFieldLikeRole(role) {
             const fieldRoles = new Set(['field','總幹事','保全','秘書','清潔','機電']);
@@ -501,9 +537,13 @@
                         const lat = gp && typeof gp.latitude === 'number' ? gp.latitude : null;
                         const lng = gp && typeof gp.longitude === 'number' ? gp.longitude : null;
                         const radius = (typeof data.radius === 'number' && data.radius >= 0) ? data.radius : null;
+                        const region = typeof data.region === 'string' ? data.region : '';
+                        const code = typeof data.code === 'string' ? data.code : '';
                         map[d.id] = {
                             id: d.id,
                             name: data.name || '',
+                            region,
+                            code,
                             lat,
                             lng,
                             radius,
@@ -533,7 +573,8 @@
                 if (!list || list.length === 0) {
                     list = Object.values(byId);
                 }
-                list.sort((a,b) => (a?.name||'').localeCompare(b?.name||'', 'zh-Hant'));
+                // 預設依社區編號排序（如 A101, A102, ... B209）
+                list.sort(compareCommunitiesByCode);
                 state.availableCommunities = list;
                 if (!state.currentCommunity && list.length === 1) {
                     state.currentCommunity = list[0];
@@ -1182,24 +1223,43 @@
                     return;
                 }
 
-                container.innerHTML = `
-                    <div class="p-4 space-y-3">
-                        ${list.map(c => `
-                            <div class="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border">
-                                <div>
-                                    <p class="font-medium text-gray-800">${c.name || '(未命名社區)'}</p>
-                                    ${(Number.isFinite(c.lat) && Number.isFinite(c.lng)) ? `<p class="text-xs text-gray-500">(${c.lat}, ${c.lng}) 半徑 ${c.radius ?? '—'} m</p>` : '<p class="text-xs text-gray-400">未設定座標</p>'}
-                                </div>
-                                <button class="enter-community px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700" data-id="${c.id}">進入</button>
+                let selectedRegion = null; // '台北' | '新北' | '桃園' | null
+                const renderList = () => {
+                    const sorted = [...list].sort(compareCommunitiesByCode);
+                    const filtered = selectedRegion ? sorted.filter(c => (c?.region || '') === selectedRegion) : sorted;
+                    container.innerHTML = `
+                        <div class="p-4 space-y-3">
+                            <div class="flex items-center gap-2 mb-2">
+                                <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='台北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="台北">台北</button>
+                                <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='新北'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="新北">新北</button>
+                                <button class="region-btn px-3 py-1 rounded border ${selectedRegion==='桃園'?'bg-red-600 text-white border-red-600':'bg-white'}" data-region="桃園">桃園</button>
                             </div>
-                        `).join('')}
-                    </div>`;
-                container.querySelectorAll('.enter-community').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        const id = e.currentTarget.getAttribute('data-id');
-                        enterCommunityMainPage(id);
+                            ${filtered.map(c => `
+                                <div class="flex items-center justify-between bg-white p-3 rounded-md shadow-sm border">
+                                    <div>
+                                        <p class="font-medium text-gray-800">${c.name || '(未命名社區)'}</p>
+                                        ${(Number.isFinite(c.lat) && Number.isFinite(c.lng)) ? `<p class="text-xs text-gray-500">(${c.lat}, ${c.lng}) 半徑 ${c.radius ?? '—'} m</p>` : '<p class="text-xs text-gray-400">未設定座標</p>'}
+                                    </div>
+                                    <button class="enter-community px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700" data-id="${c.id}">進入</button>
+                                </div>
+                            `).join('')}
+                        </div>`;
+                    container.querySelectorAll('.enter-community').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const id = e.currentTarget.getAttribute('data-id');
+                            enterCommunityMainPage(id);
+                        });
                     });
-                });
+                    container.querySelectorAll('.region-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const r = e.currentTarget.getAttribute('data-region');
+                            selectedRegion = (selectedRegion === r) ? null : r;
+                            renderList();
+                        });
+                    });
+                    try { lucide.createIcons(); } catch (_) {}
+                };
+                renderList();
                 try { lucide.createIcons(); } catch (_) {}
             }
 
@@ -1214,7 +1274,8 @@
                 getDocs(collection(db, 'users')).then((snap) => {
                     const users = [];
                     snap.forEach(d => users.push({ id: d.id, ...d.data() }));
-                    users.sort((a,b) => (a?.name||'').localeCompare(b?.name||'', 'zh-Hant'));
+                    // 人員依姓氏筆畫少→多
+                    users.sort(compareUsersBySurnameStroke);
                     container.innerHTML = `
                         <div class="p-4 space-y-2">
                             ${users.map(u => `
@@ -5308,7 +5369,9 @@
                         return;
                     }
                     const selectedRole = roleSelect.value || '';
-                    const filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : true);
+                    let filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : true);
+                    // 人員依姓氏筆畫少→多
+                    filtered = filtered.slice().sort(compareUsersBySurnameStroke);
 
                     filtered.forEach(user => {
                         const userElement = document.createElement('div');
@@ -6209,12 +6272,14 @@
                     }
                     const region = regionSelect.value || '';
                     const codePrefix = (codeInput.value || '').trim();
-                    const filtered = allCommunities.filter(c => {
+                    let filtered = allCommunities.filter(c => {
                         const rOk = region ? (c.region === region) : true;
                         const codeVal = (c.code || '').toString();
                         const cOk = codePrefix ? codeVal.toUpperCase().startsWith(codePrefix.toUpperCase()) : true;
                         return rOk && cOk;
                     });
+                    // 預設依社區編號排序（A101, A102, ... B209）
+                    filtered = filtered.slice().sort((a,b) => compareCommunitiesByCode(a, b));
 
                     filtered.forEach(c => {
                         const lat = c.location?.latitude ?? '';
