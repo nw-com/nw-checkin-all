@@ -1432,10 +1432,13 @@
                 const renderList = () => {
                     const sorted = [...list].sort(compareCommunitiesByCode);
                     const filtered = selectedRegion ? sorted.filter(c => (c?.region || '') === selectedRegion) : sorted;
-                    // 固定字級，限制文字最多兩列、每列最多三字
-                    const twoLines = (text) => {
-                        const cleaned = (text || '').replace(/\s+/g, '');
-                        return [cleaned.slice(0, 3), cleaned.slice(3, 6)];
+                    // 依社區簡稱內容顯示，支援多行（顯示至多兩行），置中顯示
+                    const toTwoLines = (text) => {
+                        const raw = (text || '').toString();
+                        const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                        if (lines.length === 0) return ['未命名', ''];
+                        if (lines.length === 1) return [lines[0], ''];
+                        return [lines[0], lines[1]];
                     };
                     container.innerHTML = `
                         <div class="p-4 space-y-3">
@@ -1451,13 +1454,12 @@
                             <div class="text-sm text-gray-500">總社區數：${filtered.length}</div>
                             <div class="grid grid-cols-5 gap-2">
                                 ${filtered.map(c => {
-                                    const raw = (c.shortName || c.name || c.code || '未命名') + '';
-                                    const [line1, line2] = twoLines(raw);
+                                    const [line1, line2] = toTwoLines(c.shortName || c.name || c.code || '');
                                     const title = (c.name || '').replace(/"/g,'&quot;');
                                     return `
-                                    <button class="enter-community px-3 py-2 rounded-md border bg-white hover:bg-red-50 text-gray-800 font-medium text-sm text-center" data-id="${c.id}" title="${title}">
-                                        <span class="block leading-tight text-base whitespace-nowrap">${line1 || '&nbsp;'}</span>
-                                        <span class="block leading-tight text-base whitespace-nowrap">${line2 || '&nbsp;'}</span>
+                                    <button class="enter-community px-3 py-2 rounded-md border bg-white hover:bg-red-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" data-id="${c.id}" title="${title}">
+                                        <span class="block leading-tight text-base text-center">${line1 || '&nbsp;'}</span>
+                                        <span class="block leading-tight text-base text-center">${line2 || '&nbsp;'}</span>
                                     </button>`;
                                 }).join('')}
                             </div>
@@ -1543,13 +1545,15 @@
                                     ${filtered.map(u => {
                                         const rawName = (u.name || u.displayName || u.email || '(未命名)') + '';
                                         const cleaned = rawName.replace(/\s+/g,'');
-                                        const line1 = cleaned.slice(0,3);
-                                        const line2 = cleaned.slice(3,6);
+                                        const nameLine = cleaned || '(未命名)';
+                                        const age = computeAge(u.birth || u.birthday || u.birthDate);
+                                        const ageText = (typeof age === 'number' && age >= 0) ? `(${age})` : '';
+                                        const ageClass = (typeof age === 'number' && age >= 70) ? 'font-bold text-red-600' : '';
                                         const title = rawName.replace(/"/g,'&quot;');
                                         return `
-                                        <button class="view-att px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm text-center" data-id="${u.id}" title="${title}">
-                                            <span class="block leading-tight text-base whitespace-nowrap">${line1 || '&nbsp;'}</span>
-                                            <span class="block leading-tight text-base whitespace-nowrap">${line2 || '&nbsp;'}</span>
+                                        <button class="view-att px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" data-id="${u.id}" title="${title}">
+                                            <span class="block leading-tight text-base whitespace-nowrap text-center">${nameLine}</span>
+                                            <span class="block leading-tight text-base whitespace-nowrap text-center ${ageClass}">${ageText || '&nbsp;'}</span>
                                         </button>`;
                                     }).join('')}
                                 </div>
@@ -6908,8 +6912,9 @@
                                     </div>
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700">社區簡稱</label>
-                                    <input id="community-short" type="text" value="${shortNameVal}" class="w-full mt-1 px-3 py-2 border rounded-md" placeholder="例如：A社、青園" />
+                                    <label class="block text-sm font-medium text-gray-700">社區簡稱（可多行）</label>
+                                    <textarea id="community-short" rows="3" class="w-full mt-1 px-3 py-2 border rounded-md" placeholder="可輸入多行，顯示於『依社區』按鈕中置中顯示">${shortNameVal}</textarea>
+                                    <p class="text-xs text-gray-500 mt-1">每一行會對應按鈕中的一列（最多顯示前兩行）。</p>
                                 </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
