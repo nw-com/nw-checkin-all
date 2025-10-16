@@ -159,7 +159,7 @@
         <div class="text-center mb-8">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
             <h1 class="text-2xl font-bold text-gray-800 mt-4">西北社區打卡系統</h1>
-            <p class="text-gray-500">社區版V0.1.1</p>
+            <p class="text-gray-500">社區版V1.1.1</p>
         </div>
         <form id="login-form">
             <div class="mb-4">
@@ -181,9 +181,14 @@
                     </button>
                 </div>
             </div>
-            <button type="submit" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition duration-150">
-                登入
-            </button>
+            <div class="space-y-4">
+                <button type="submit" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition duration-150">
+                    登入
+                </button>
+                <button type="button" id="apply-account-btn" class="w-full bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 transition duration-150">
+                    申請帳號
+                </button>
+            </div>
             <p id="login-error" class="text-red-500 text-sm mt-4 text-center"></p>
         </form>
     </div>
@@ -491,6 +496,7 @@
             const emailInput = document.getElementById('email');
             const togglePasswordBtn = document.getElementById('toggle-password');
             const passwordInput = document.getElementById('password');
+            const applyAccountBtn = document.getElementById('apply-account-btn');
 
             // 解析查詢參數：支援社區模式與指定初始頁
             try {
@@ -511,6 +517,174 @@
                 return R * c;
             }
 
+            function openApplyAccountModal() {
+                const modalId = `apply-account-modal-${Date.now()}`;
+                const defaultAvatar = 'https://placehold.co/80x80/EFEFEF/333333?text=頭像';
+                const close = () => document.getElementById(modalId)?.remove();
+
+                const modalHTML = `
+                    <div id="${modalId}" class="modal-backdrop">
+                        <div class="modal-content w-[90%] max-w-md bg-white rounded-lg shadow-xl flex flex-col" style="max-height: 90vh;">
+                            <div class="flex justify-between items-center p-4 border-b flex-shrink-0">
+                                <h3 class="font-bold text-lg">申請新帳號</h3>
+                                <button class="close-btn text-gray-500 hover:text-gray-700"><i data-lucide="x" class="w-5 h-5"></i></button>
+                            </div>
+                            <form id="apply-account-form" class="p-4 space-y-4 overflow-y-auto">
+                                <!-- Avatar -->
+                                <div class="flex flex-col items-center space-y-2">
+                                    <img id="apply-avatar-preview" src="${defaultAvatar}" class="w-20 h-20 rounded-full object-cover">
+                                    <input type="file" id="apply-avatar-upload" class="hidden" accept="image/*">
+                                    <button type="button" id="apply-upload-avatar-btn" class="text-sm px-3 py-1 bg-gray-200 rounded-md">上傳照片</button>
+                                </div>
+
+                                <div>
+                                    <label for="apply-name" class="block text-sm font-medium text-gray-700">姓名 (必填)</label>
+                                    <input type="text" id="apply-name" class="w-full mt-1 px-3 py-2 border rounded-md" required>
+                                </div>
+                                <div>
+                                    <label for="apply-phone" class="block text-sm font-medium text-gray-700">手機號碼</label>
+                                    <input type="tel" id="apply-phone" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件 (必填)</label>
+                                    <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md" required>
+                                </div>
+                                <div>
+                                    <label for="apply-password" class="block text-sm font-medium text-gray-700">設定密碼 (至少6位)</label>
+                                    <input type="password" id="apply-password" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-confirm-password" class="block text-sm font-medium text-gray-700">再次確認密碼</label>
+                                    <input type="password" id="apply-confirm-password" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-address" class="block text-sm font-medium text-gray-700">住家地址</label>
+                                    <input type="text" id="apply-address" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-birthdate" class="block text-sm font-medium text-gray-700">出生年月日</label>
+                                    <input type="date" id="apply-birthdate" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-idnumber" class="block text-sm font-medium text-gray-700">身分證號</label>
+                                    <input type="text" id="apply-idnumber" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-license" class="block text-sm font-medium text-gray-700">專業證照</label>
+                                    <select id="apply-license" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="無">無</option>
+                                        <option value="職業安全衛生業務主管證照">職業安全衛生業務主管證照</option>
+                                        <option value="職業安全衛生管理員證照">職業安全衛生管理員證照</option>
+                                        <option value="防火避難設施管理人員證照">防火避難設施管理人員證照</option>
+                                        <option value="設備安全管理人員證照">設備安全管理人員證照</option>
+                                        <option value="救生員證照">救生員證照</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="apply-criminal" class="block text-sm font-medium text-gray-700">有無前科</label>
+                                    <select id="apply-criminal" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="無">無</option>
+                                        <option value="有">有</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="apply-service-code" class="block text-sm font-medium text-gray-700">服務社區代號 (手動輸入)</label>
+                                    <input type="text" id="apply-service-code" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+
+                                <p id="apply-form-error" class="text-red-500 text-sm text-center"></p>
+                                <div class="flex justify-end space-x-2 pt-2 flex-shrink-0">
+                                     <button type="button" class="cancel-btn px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">取消</button>
+                                     <button type="submit" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700">送出申請</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>`;
+
+                modalContainer.innerHTML = modalHTML;
+                lucide.createIcons();
+
+                const modal = document.getElementById(modalId);
+                const form = document.getElementById('apply-account-form');
+                const errorEl = document.getElementById('apply-form-error');
+                const avatarPreview = document.getElementById('apply-avatar-preview');
+                const avatarUploadInput = document.getElementById('apply-avatar-upload');
+
+                // 壓縮圖片為 Base64
+                const compressToBase64 = async (file, maxW = 320, maxH = 320, quality = 0.8) => {
+                    return await new Promise((resolve, reject) => {
+                        const img = new Image();
+                        const reader = new FileReader();
+                        reader.onload = () => { img.src = reader.result; };
+                        reader.onerror = () => reject(new Error('讀取檔案失敗'));
+                        img.onload = () => {
+                            let { width, height } = img;
+                            const ratio = Math.min(maxW / width, maxH / height, 1);
+                            width = Math.round(width * ratio); height = Math.round(height * ratio);
+                            const canvas = document.createElement('canvas');
+                            canvas.width = width; canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            try {
+                                const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                                resolve(dataUrl);
+                            } catch (e) { reject(e); }
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                };
+
+                document.getElementById('apply-upload-avatar-btn').addEventListener('click', () => avatarUploadInput.click());
+                avatarUploadInput.addEventListener('change', async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    try { avatarPreview.src = await compressToBase64(file); } catch (_) {}
+                });
+
+                modal.querySelector('.close-btn').addEventListener('click', close);
+                modal.querySelector('.cancel-btn').addEventListener('click', close);
+
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    showLoading(true);
+                    errorEl.textContent = '';
+                    try {
+                        const name = document.getElementById('apply-name').value.trim();
+                        const phone = document.getElementById('apply-phone').value.trim();
+                        const email = document.getElementById('apply-email').value.trim();
+                        const password = document.getElementById('apply-password').value;
+                        const confirmPassword = document.getElementById('apply-confirm-password').value;
+                        const homeAddress = document.getElementById('apply-address').value.trim();
+                        const birthDate = document.getElementById('apply-birthdate').value.trim();
+                        const idNumber = document.getElementById('apply-idnumber').value.trim();
+                        const license = document.getElementById('apply-license').value;
+                        const hasCriminalRecord = document.getElementById('apply-criminal').value === '有';
+                        const serviceCommunityCode = document.getElementById('apply-service-code').value.trim();
+
+                        if (!name || !email) throw new Error('請填寫姓名與電子郵件');
+                        if (password || confirmPassword) {
+                            if (password.length < 6) throw new Error('密碼至少 6 位數');
+                            if (password !== confirmPassword) throw new Error('兩次密碼不一致');
+                        }
+
+                        const data = {
+                            name, phone, email, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode,
+                            avatarUrl: (avatarPreview?.src && !avatarPreview.src.includes('placehold.co')) ? avatarPreview.src : null,
+                            status: 'pending',
+                            createdAt: serverTimestamp()
+                        };
+                        const { collection, addDoc } = window.__fs || {};
+                        await addDoc(collection(window.__db, 'accountApplications'), data);
+                        showToast('申請已送出，待後端審核');
+                        close();
+                    } catch (err) {
+                        console.error('apply account error', err);
+                        errorEl.textContent = err.message || '送出失敗，請稍後再試';
+                    } finally {
+                        showLoading(false);
+                    }
+                });
+            }
             async function ensureAbnormalMarkingConfig() {
                 if (state._markSettingLoaded) return;
                 try {
@@ -554,6 +728,13 @@
                     state.communitiesById = map;
                 } catch (e) { /* noop */ }
                 state._communitiesLoaded = true;
+            }
+
+            // 申請帳號按鈕事件
+            if (applyAccountBtn) {
+                applyAccountBtn.addEventListener('click', () => {
+                    try { openApplyAccountModal(); } catch (e) { console.error('openApplyAccountModal error', e); }
+                });
             }
 
             // --- 社區導覽與切換輔助 ---
@@ -1143,7 +1324,7 @@
                     'features': () => renderFeatures(subPage || 'news'),
                     'calendar': () => renderCalendar(subPage || 'overview'),
                     'schedule': () => ['admin','manager'].includes(state.currentUserData.role) ? renderCalendar('schedule') : renderAccessDenied(),
-                    'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'accounts') : renderAccessDenied(),
+                    'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
                     'hr': () => (state.currentUserData.role === 'admin') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
                     'navigation': () => renderNavigation(subPage || 'community'),
                     'group': () => state.currentUserData.role === 'junior_manager' ? renderGroup(subPage || 'map') : renderAccessDenied()
@@ -5231,16 +5412,19 @@
 
 
             function renderSettings(subPage) {
-                // 僅保留「帳號列表」與「社區列表」兩個子分頁
+                // 新增「帳號申請」子分頁，提供管理員審核
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
+                        <button data-subtab="applications" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'applications' ? 'active' : ''}">帳號申請</button>
                         <button data-subtab="accounts" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'accounts' ? 'active' : ''}">帳號列表</button>
                         <button data-subtab="community" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'community' ? 'active' : ''}">社區列表</button>
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
 
                 const subPageContent = document.getElementById('sub-page-content');
-                if (subPage === 'accounts') {
+                if (subPage === 'applications') {
+                    renderSettingsApplications(subPageContent);
+                } else if (subPage === 'accounts') {
                     renderSettingsAccounts(subPageContent);
                 } else {
                     renderSettingsCommunity(subPageContent);
@@ -5426,6 +5610,207 @@
                 }
 
                 state.activeListeners.push(unsubscribe);
+            }
+
+            // 設定分頁：帳號申請（審核）
+            function renderSettingsApplications(container) {
+                container.innerHTML = `
+                    <div class="p-4 space-y-4">
+                        <div class="bg-white p-3 rounded-md shadow-sm border space-y-2">
+                            <div class="flex items-center justify-between">
+                                <h3 class="font-bold text-lg">帳號申請審核</h3>
+                                <div class="flex items-center space-x-2">
+                                    <button data-status="" class="status-filter-btn px-3 py-1 rounded-md text-sm font-medium text-gray-600 active">全部</button>
+                                    <button data-status="pending" class="status-filter-btn px-3 py-1 rounded-md text-sm font-medium text-gray-600">待審</button>
+                                    <button data-status="approved" class="status-filter-btn px-3 py-1 rounded-md text-sm font-medium text-gray-600">已核准</button>
+                                    <button data-status="rejected" class="status-filter-btn px-3 py-1 rounded-md text-sm font-medium text-gray-600">已拒絕</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="applications-list" class="space-y-2"></div>
+                    </div>`;
+                if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+                    lucide.createIcons();
+                }
+
+                const listEl = document.getElementById('applications-list');
+                const statusButtons = container.querySelectorAll('.status-filter-btn');
+                let allApps = [];
+                let currentStatus = '';
+
+                statusButtons.forEach(btn => btn.addEventListener('click', () => {
+                    container.querySelectorAll('.status-filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentStatus = btn.dataset.status || '';
+                    renderList();
+                }));
+
+                const { collection: fsCollection, query: fsQuery, orderBy: fsOrderBy, onSnapshot: fsOnSnapshot, doc: fsDoc, getDoc: fsGetDoc, setDoc: fsSetDoc, updateDoc: fsUpdateDoc, where: fsWhere, getDocs: fsGetDocs, serverTimestamp: fsServerTimestamp } = window.__fs || {};
+                const appsCol = fsCollection(db, 'accountApplications');
+                const q = fsQuery(appsCol, fsOrderBy('createdAt', 'desc'));
+                const unsubscribe = fsOnSnapshot(q, (snap) => {
+                    allApps = [];
+                    snap.forEach(ds => allApps.push({ id: ds.id, ...ds.data() }));
+                    renderList();
+                });
+                state.activeListeners.push(unsubscribe);
+
+                function renderList() {
+                    listEl.innerHTML = '';
+                    const filtered = currentStatus ? allApps.filter(a => (a.status || 'pending') === currentStatus) : allApps;
+                    if (filtered.length === 0) {
+                        listEl.innerHTML = `<p class="text-center text-gray-500 p-4">目前沒有申請</p>`;
+                        return;
+                    }
+                    filtered.forEach(app => {
+                        const el = document.createElement('div');
+                        el.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
+                        const licenseStr = app.license || '無';
+                        const hasCriminalStr = app.hasCriminalRecord ? '有' : '無';
+                        let createdAtText = '';
+                        try {
+                            const dt = app.createdAt?.toDate ? app.createdAt.toDate() : (app.createdAt ? new Date(app.createdAt) : null);
+                            if (dt) createdAtText = formatDateTime(dt);
+                        } catch (_) {}
+
+                        el.innerHTML = `
+                            <div class="flex items-center">
+                                <img src="${app.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(app.name||'?').charAt(0)}`}" class="w-10 h-10 rounded-full mr-3 object-cover">
+                                <div>
+                                    <p class="font-medium text-gray-800">${app.name || '(未填姓名)'}</p>
+                                    <p class="text-sm text-gray-500">${app.email || ''}</p>
+                                    <div class="text-xs text-gray-500 mt-1">
+                                        <span class="mr-2">${app.phone || ''}</span>
+                                        <span class="mr-2">地址：${app.homeAddress || ''}</span>
+                                        <span class="mr-2">生日：${app.birthDate || ''}</span>
+                                        <span class="mr-2">身分證：${app.idNumber || ''}</span>
+                                        <span class="mr-2">證照：${licenseStr}</span>
+                                        <span class="mr-2">前科：${hasCriminalStr}</span>
+                                        <span class="mr-2">社區代號：${app.serviceCommunityCode || ''}</span>
+                                    </div>
+                                    ${createdAtText ? `<p class="text-xs text-gray-400 mt-1">申請時間：${createdAtText}</p>` : ''}
+                                    ${app.status && app.status !== 'pending' ? `<p class="text-xs mt-1 ${app.status==='approved' ? 'text-green-600' : 'text-red-600'}">狀態：${app.status === 'approved' ? '已核准' : '已拒絕'}</p>` : ''}
+                                </div>
+                            </div>
+                            <div class="flex space-x-2">
+                                ${app.status === 'pending' ? `
+                                <button data-id="${app.id}" class="approve-btn p-2 text-gray-500 hover:text-green-600"><i data-lucide="check" class="w-4 h-4"></i></button>
+                                <button data-id="${app.id}" class="reject-btn p-2 text-gray-500 hover:text-red-600"><i data-lucide="x" class="w-4 h-4"></i></button>
+                                ` : ''}
+                            </div>`;
+                        listEl.appendChild(el);
+                    });
+                    if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+                        lucide.createIcons();
+                    }
+                    container.querySelectorAll('.approve-btn').forEach(btn => btn.addEventListener('click', () => handleApprove(btn.dataset.id)));
+                    container.querySelectorAll('.reject-btn').forEach(btn => btn.addEventListener('click', () => handleReject(btn.dataset.id)));
+                }
+
+                async function handleApprove(appId) {
+                    try {
+                        showLoading(true);
+                        const appRef = fsDoc(db, 'accountApplications', appId);
+                        const appSnap = await fsGetDoc(appRef);
+                        if (!appSnap.exists()) {
+                            showToast('申請不存在', true);
+                            return;
+                        }
+                        const app = appSnap.data();
+                        const email = (app.email || '').trim();
+                        if (!email) { showToast('申請缺少電子郵件', true); return; }
+
+                        // 建立 Auth 帳號（隨機暫時密碼），若 email 已存在則嘗試掛接既有使用者
+                        let targetUserId = null;
+                        let createdAuthUser = false;
+                        try {
+                            const { initializeApp: initializeAppSecondary, deleteApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+                            const secondaryApp = initializeAppSecondary(firebaseConfig, `secondary-app-${Date.now()}`);
+                            const secondaryAuth = getAuth(secondaryApp);
+                            const tempPassword = `Temp${Math.random().toString(36).slice(2, 10)}!1`;
+                            const cred = await createUserWithEmailAndPassword(secondaryAuth, email, tempPassword);
+                            targetUserId = cred.user.uid;
+                            createdAuthUser = true;
+                            await signOut(secondaryAuth);
+                            await deleteApp(secondaryApp);
+                        } catch (creationError) {
+                            if (creationError?.code === 'auth/email-already-in-use') {
+                                try {
+                                    const usersRef = fsCollection(db, 'users');
+                                    const q = fsQuery(usersRef, fsWhere('email', '==', email));
+                                    const qs = await fsGetDocs(q);
+                                    if (!qs.empty) {
+                                        targetUserId = qs.docs[0].id;
+                                    } else {
+                                        throw creationError;
+                                    }
+                                } catch (_) {
+                                    throw creationError;
+                                }
+                            } else {
+                                throw creationError;
+                            }
+                        }
+
+                        // 依代號映射服務社區
+                        let serviceCommunities = [];
+                        try {
+                            const communitiesRef = fsCollection(db, 'communities');
+                            const qs = await fsGetDocs(fsQuery(communitiesRef, fsWhere('code', '==', app.serviceCommunityCode || '')));
+                            qs.forEach(docSnap => serviceCommunities.push(docSnap.id));
+                        } catch (_) {}
+
+                        const userDoc = {
+                            name: app.name || '',
+                            phone: app.phone || '',
+                            email,
+                            role: 'user',
+                            serviceCommunities,
+                            homeAddress: app.homeAddress || '',
+                            birthDate: app.birthDate || '',
+                            idNumber: app.idNumber || '',
+                            license: app.license || '無',
+                            hasCriminalRecord: !!app.hasCriminalRecord,
+                            serviceCommunityCode: app.serviceCommunityCode || '',
+                            avatarUrl: app.avatarUrl || null,
+                            points: 0,
+                            status: '未打卡',
+                            createdAt: fsServerTimestamp(),
+                        };
+                        if (targetUserId) {
+                            await fsSetDoc(fsDoc(db, 'users', targetUserId), userDoc, { merge: true });
+                        }
+
+                        const adminInfo = { uid: auth.currentUser?.uid || null, name: state.currentUserData?.name || '' };
+                        await fsUpdateDoc(appRef, { status: 'approved', approvedAt: fsServerTimestamp(), approvedBy: adminInfo });
+
+                        if (createdAuthUser) { try { await sendPasswordResetEmail(auth, email); } catch (_) {} }
+                        showToast('已核准並建立帳號');
+                    } catch (err) {
+                        console.error('approve application error', err);
+                        const msg = err?.code === 'auth/email-already-in-use' ? 'Email 已存在於系統，請確認' : (err.message || '核准失敗');
+                        showToast(msg, true);
+                    } finally {
+                        showLoading(false);
+                    }
+                }
+
+                async function handleReject(appId) {
+                    try {
+                        const reason = prompt('請輸入拒絕原因（可留空）') || '';
+                        showLoading(true);
+                        const appRef = fsDoc(db, 'accountApplications', appId);
+                        const adminInfo = { uid: auth.currentUser?.uid || null, name: state.currentUserData?.name || '' };
+                        await fsUpdateDoc(appRef, { status: 'rejected', rejectionReason: reason, updatedAt: fsServerTimestamp(), rejectedBy: adminInfo });
+                        showToast('已拒絕此申請');
+                    } catch (err) {
+                        console.error('reject application error', err);
+                        showToast('拒絕失敗', true);
+                    } finally {
+                        showLoading(false);
+                    }
+                }
             }
 
             function renderSettingsGeneral(container) {
@@ -6974,6 +7359,41 @@
                                     <input type="password" id="user-confirm-password" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
                                 ` : ''}
+                                <!-- 新增欄位：住家地址 / 生日 / 身分證號 / 證照 / 前科 / 服務社區代號 -->
+                                <div>
+                                    <label for="user-address" class="block text-sm font-medium text-gray-700">住家地址</label>
+                                    <input type="text" id="user-address" value="${isEditing ? (user.homeAddress || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="user-birthdate" class="block text-sm font-medium text-gray-700">出生年月日</label>
+                                    <input type="date" id="user-birthdate" value="${isEditing ? (user.birthDate || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="user-idnumber" class="block text-sm font-medium text-gray-700">身分證號</label>
+                                    <input type="text" id="user-idnumber" value="${isEditing ? (user.idNumber || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="user-license" class="block text-sm font-medium text-gray-700">專業證照</label>
+                                    <select id="user-license" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="無" ${isEditing && user.license === '無' ? 'selected' : ''}>無</option>
+                                        <option value="職業安全衛生業務主管證照" ${isEditing && user.license === '職業安全衛生業務主管證照' ? 'selected' : ''}>職業安全衛生業務主管證照</option>
+                                        <option value="職業安全衛生管理員證照" ${isEditing && user.license === '職業安全衛生管理員證照' ? 'selected' : ''}>職業安全衛生管理員證照</option>
+                                        <option value="防火避難設施管理人員證照" ${isEditing && user.license === '防火避難設施管理人員證照' ? 'selected' : ''}>防火避難設施管理人員證照</option>
+                                        <option value="設備安全管理人員證照" ${isEditing && user.license === '設備安全管理人員證照' ? 'selected' : ''}>設備安全管理人員證照</option>
+                                        <option value="救生員證照" ${isEditing && user.license === '救生員證照' ? 'selected' : ''}>救生員證照</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="user-criminal" class="block text-sm font-medium text-gray-700">有無前科</label>
+                                    <select id="user-criminal" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="無" ${isEditing && (user.hasCriminalRecord === false) ? 'selected' : ''}>無</option>
+                                        <option value="有" ${isEditing && (user.hasCriminalRecord === true) ? 'selected' : ''}>有</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="user-service-code" class="block text-sm font-medium text-gray-700">服務社區代號 (手動輸入)</label>
+                                    <input type="text" id="user-service-code" value="${isEditing ? (user.serviceCommunityCode || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
                                 <div>
                                     <label for="user-role" class="block text-sm font-medium text-gray-700">角色 (必填)</label>
                                     <select id="user-role" class="w-full mt-1 px-3 py-2 border rounded-md">
@@ -7151,11 +7571,17 @@
                     const lineId = document.getElementById('user-lineid').value;
                     const email = document.getElementById('user-email').value;
                     const role = document.getElementById('user-role').value;
+                    const homeAddress = document.getElementById('user-address')?.value || '';
+                    const birthDate = document.getElementById('user-birthdate')?.value || '';
+                    const idNumber = document.getElementById('user-idnumber')?.value || '';
+                    const license = document.getElementById('user-license')?.value || '';
+                    const hasCriminalRecord = (document.getElementById('user-criminal')?.value || '無') === '有';
+                    const serviceCommunityCode = document.getElementById('user-service-code')?.value || '';
                     
                     // 收集服務社區
                     const scChecks = modal.querySelectorAll('input[name="service-community"]');
                     const serviceCommunities = Array.from(scChecks).filter(c => c.checked).map(c => c.value);
-                    const updateData = { name, phone, lineId, role, email, serviceCommunities };
+                    const updateData = { name, phone, lineId, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode };
 
                     try {
                         let targetUserId = isEditing ? user.id : null;
@@ -8496,7 +8922,6 @@
     </script>
 </body>
 </html>
-
 
 
 

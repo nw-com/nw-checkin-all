@@ -236,5 +236,43 @@ service cloud.firestore {
       // 僅社區維護角色可刪除社區
       allow delete: if isCommunityEditor();
     }
+
+    // 帳號申請：任何人可提交（未登入也可），僅管理端可讀取與審核
+    match /accountApplications/{appId} {
+      // 允許未登入者或登入者提交申請；嚴格限制欄位與型別
+      allow create: if
+        request.resource.data.keys().hasOnly([
+          'name','phone','email','homeAddress','birthDate','idNumber','license','hasCriminalRecord','serviceCommunityCode','avatarUrl','status','createdAt'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.phone == null || request.resource.data.phone is string) &&
+        request.resource.data.email is string &&
+        (request.resource.data.homeAddress == null || request.resource.data.homeAddress is string) &&
+        (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
+        (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&
+        request.resource.data.license in ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照'] &&
+        (request.resource.data.hasCriminalRecord == null || request.resource.data.hasCriminalRecord is bool) &&
+        (request.resource.data.serviceCommunityCode == null || request.resource.data.serviceCommunityCode is string) &&
+        (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.createdAt is timestamp;
+
+      // 僅管理端（管理員、人事、主管）可讀取所有申請（用於審核）
+      allow read: if isReviewer();
+
+      // 僅管理端可更新審核狀態；限制可更新欄位與型別
+      allow update: if isReviewer() &&
+        request.resource.data.keys().hasOnly([
+          'name','phone','email','homeAddress','birthDate','idNumber','license','hasCriminalRecord','serviceCommunityCode','avatarUrl','status','createdAt','reviewerId','reviewedAt','convertedUserId','reviewNotes'
+        ]) &&
+        request.resource.data.status in ['approved','rejected','pending'] &&
+        (request.resource.data.reviewerId == null || request.resource.data.reviewerId is string) &&
+        (request.resource.data.reviewedAt == null || request.resource.data.reviewedAt is timestamp) &&
+        (request.resource.data.convertedUserId == null || request.resource.data.convertedUserId is string) &&
+        (request.resource.data.reviewNotes == null || request.resource.data.reviewNotes is string);
+
+      // 禁止刪除申請（保留審核紀錄）
+      allow delete: if false;
+    }
   }
 }
