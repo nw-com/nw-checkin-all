@@ -6218,6 +6218,7 @@
 
             // --- Settings: 社區列表 ---
             function renderSettingsCommunity(container) {
+                const canEditCommunity = (state.currentUserData?.role === 'admin');
                 container.innerHTML = `
                     <div class="p-4 space-y-4">
                         <div class="bg-white p-3 rounded-md shadow-sm border">
@@ -6239,17 +6240,23 @@
                                     <button id="reset-community-filters" class="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 flex items-center justify-center">重置篩選</button>
                                 </div>
                                 <div class="flex items-end">
-                                    <button id="add-community-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 flex items-center justify-center">
+                                    <button id="add-community-btn" ${canEditCommunity ? '' : 'disabled'} class="w-full ${canEditCommunity ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-200 text-gray-500 cursor-not-allowed'} font-semibold py-2 px-4 rounded-md flex items-center justify-center">
                                         <i data-lucide="plus-circle" class="w-4 h-4 mr-2"></i>新增社區
                                     </button>
                                 </div>
                             </div>
+                            ${canEditCommunity ? '' : '<div class="mt-3 bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-md px-3 py-2 text-sm">您目前沒有權限新增或編輯社區，請聯絡管理員。</div>'}
                         </div>
                         <div id="community-list" class="space-y-2">讀取中...</div>
                     </div>`;
                 lucide.createIcons();
                 const listEl = document.getElementById('community-list');
-                document.getElementById('add-community-btn').addEventListener('click', () => openCommunityModal());
+                const addBtn = document.getElementById('add-community-btn');
+                if (canEditCommunity) {
+                    addBtn.addEventListener('click', () => openCommunityModal());
+                } else {
+                    addBtn.addEventListener('click', () => showToast('您目前沒有權限新增或編輯社區，請聯絡管理員。', true));
+                }
                 const regionSelect = document.getElementById('filter-community-region');
                 const codeInput = document.getElementById('filter-community-code');
                 const resetFilterBtn = document.getElementById('reset-community-filters');
@@ -6301,8 +6308,8 @@
                             </div>
                             <div class="flex items-center gap-2">
                                 <button class="view-map-btn px-2 py-1 text-gray-600 hover:text-red-600" data-lat="${lat}" data-lng="${lng}"><i data-lucide="map-pin" class="w-4 h-4"></i></button>
-                                <button class="edit-community-btn px-2 py-1 text-gray-600 hover:text-red-600" data-id="${c.id}"><i data-lucide="edit" class="w-4 h-4"></i></button>
-                                <button class="delete-community-btn px-2 py-1 text-gray-600 hover:text-red-600" data-id="${c.id}"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                ${canEditCommunity ? `<button class=\"edit-community-btn px-2 py-1 text-gray-600 hover:text-red-600\" data-id=\"${c.id}\"><i data-lucide=\"edit\" class=\"w-4 h-4\"></i></button>` : ''}
+                                ${canEditCommunity ? `<button class=\"delete-community-btn px-2 py-1 text-gray-600 hover:text-red-600\" data-id=\"${c.id}\"><i data-lucide=\"trash-2\" class=\"w-4 h-4\"></i></button>` : ''}
                             </div>`;
                         listEl.appendChild(row);
                     });
@@ -6321,28 +6328,30 @@
                         openMapModal(lat, lng);
                     }));
 
-                    listEl.querySelectorAll('.edit-community-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-                        const id = e.currentTarget.dataset.id;
-                        try {
-                            const d = await getDoc(doc(db, 'communities', id));
-                            if (d.exists()) openCommunityModal({ id, ...d.data() });
-                        } catch (err) {
-                            console.error('讀取社區資料失敗', err);
-                            showToast('讀取社區資料失敗', true);
-                        }
-                    }));
+                    if (canEditCommunity) {
+                        listEl.querySelectorAll('.edit-community-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+                            const id = e.currentTarget.dataset.id;
+                            try {
+                                const d = await getDoc(doc(db, 'communities', id));
+                                if (d.exists()) openCommunityModal({ id, ...d.data() });
+                            } catch (err) {
+                                console.error('讀取社區資料失敗', err);
+                                showToast('讀取社區資料失敗', true);
+                            }
+                        }));
 
-                    listEl.querySelectorAll('.delete-community-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-                        const id = e.currentTarget.dataset.id;
-                        if (!confirm('確定要刪除此社區嗎？')) return;
-                        try {
-                            await deleteDoc(doc(db, 'communities', id));
-                            showToast('社區已刪除');
-                        } catch (err) {
-                            console.error('刪除社區失敗', err);
-                            showToast('刪除社區失敗', true);
-                        }
-                    }));
+                        listEl.querySelectorAll('.delete-community-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+                            const id = e.currentTarget.dataset.id;
+                            if (!confirm('確定要刪除此社區嗎？')) return;
+                            try {
+                                await deleteDoc(doc(db, 'communities', id));
+                                showToast('社區已刪除');
+                            } catch (err) {
+                                console.error('刪除社區失敗', err);
+                                showToast('刪除社區失敗', true);
+                            }
+                        }));
+                    }
                 }
 
                 regionSelect.addEventListener('change', renderCommunityList);
@@ -6356,6 +6365,11 @@
             }
 
             function openCommunityModal(community = null) {
+                const role = state.currentUserData?.role || '';
+                if (role !== 'admin') {
+                    showToast('您目前沒有權限新增或編輯社區，請聯絡管理員。', true);
+                    return;
+                }
                 const modalId = `community-modal-${Date.now()}`;
                 const isEditing = !!community;
                 const title = isEditing ? '編輯社區' : '新增社區';
