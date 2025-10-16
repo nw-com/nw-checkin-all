@@ -352,6 +352,8 @@
             communitiesById: {},
             availableCommunities: [],
             currentCommunity: null,
+            appMode: 'default',
+            communityIdFromQuery: null,
         };
         
         // 初始化本機裝置ID（用於打卡紀錄與首次打卡裝置標記）
@@ -449,6 +451,13 @@
             const togglePasswordBtn = document.getElementById('toggle-password');
             const passwordInput = document.getElementById('password');
 
+            // 解析查詢參數：支援社區模式
+            try {
+                const params = new URLSearchParams(window.location.search);
+                state.appMode = params.get('mode') || 'default';
+                state.communityIdFromQuery = params.get('communityId') || null;
+            } catch (_) {}
+
             // ---- 距離與異常判定輔助（供多處渲染共用）----
             function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
                 const toRad = (v) => (v * Math.PI) / 180;
@@ -531,9 +540,14 @@
 
             function shouldShowNavigationPage() {
                 const role = state.currentUserData?.role || '';
-                if (!['admin','manager','junior_manager'].includes(role)) return false;
-                const list = state.availableCommunities || [];
-                return (!state.currentCommunity && list.length > 1);
+                // 管理員登入後一律顯示導覽頁
+                if (role === 'admin') return true;
+                // 其餘管理階層：當未選定社區且有多社區可選時顯示導覽頁
+                if (['manager','junior_manager'].includes(role)) {
+                    const list = state.availableCommunities || [];
+                    return (!state.currentCommunity && list.length > 1);
+                }
+                return false;
             }
 
             function openCommunitySwitchModal() {
@@ -718,6 +732,14 @@
                     communityBtn.addEventListener('click', openCommunitySwitchModal);
                 }
                 
+                // 社區模式：隱藏內部標頭與底部導覽，並固定由外層控制
+                const appHeaderEl = appContainer.querySelector('header');
+                const appFooterEl = appContainer.querySelector('footer');
+                if (state.appMode === 'community') {
+                    appHeaderEl && appHeaderEl.classList.add('hide');
+                    appFooterEl && appFooterEl.classList.add('hide');
+                }
+                
                 const navTracking = document.getElementById('nav-tracking');
                 const navSettings = document.getElementById('nav-settings');
                 const navHr = document.getElementById('nav-hr');
@@ -759,7 +781,21 @@
                 
                 loginPage.classList.add('hide');
                 appContainer.classList.remove('hide');
-                
+
+                // 若為社區模式且帶入 communityId，直接進入儀表板，不顯示導覽頁
+                if (state.appMode === 'community' && state.communityIdFromQuery) {
+                    // 設定當前社區
+                    const cid = state.communityIdFromQuery;
+                    state.currentCommunity = state.communitiesById?.[cid] || state.currentCommunity;
+                    try {
+                        const cname = state.currentCommunity?.name || '';
+                        window.parent && window.parent.postMessage({ type: 'community-info', id: cid, name: cname }, '*');
+                    } catch (_) {}
+                    showPage('dashboard');
+                    showLoading(false);
+                    return;
+                }
+
                 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
                 let initialPage = 'dashboard';
                 if (shouldShowNavigationPage()) {

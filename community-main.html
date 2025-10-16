@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>社區主頁</title>
+  <link rel="icon" type="image/png" href="https://static.wixstatic.com/ficons/6148f9_bb3f0e3c08bd4a3e83840553497fd866~mv2.ico" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body { font-family: 'Inter', 'Noto Sans TC', sans-serif; }
+    .hide { display: none !important; }
+    .tab-btn.active { color: #ef4444; border-color: #ef4444; }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-100 flex flex-col">
+  <!-- Header -->
+  <header class="h-[64px] bg-white border-b border-gray-200 flex-shrink-0">
+    <div class="max-w-5xl mx-auto px-4 h-full flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <i data-lucide="home" class="w-5 h-5 text-red-600"></i>
+        <h1 id="community-title" class="text-lg font-semibold text-gray-800">社區名稱 社區</h1>
+      </div>
+      <div class="text-sm text-gray-500">社區專用主頁</div>
+    </div>
+  </header>
+
+  <!-- Main Content: embed existing app -->
+  <main class="flex-1 bg-gray-50">
+    <div class="max-w-5xl mx-auto h-full">
+      <div id="auth-blocker" class="hide p-4 text-center text-red-600">請先登入以瀏覽此社區主頁</div>
+      <iframe id="app-frame" title="社區應用" class="w-full" style="height: calc(100vh - 64px - 70px);"></iframe>
+    </div>
+  </main>
+
+  <!-- Footer Navigation -->
+  <footer class="h-[70px] border-t border-gray-200 flex-shrink-0 bg-white">
+    <nav id="community-nav" class="flex justify-around h-full items-center max-w-5xl mx-auto">
+      <button data-tab="dashboard" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 active">
+        <i data-lucide="layout-dashboard"></i><span class="text-xs mt-1">儀表板</span>
+      </button>
+      <button data-tab="clock-in" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
+        <i data-lucide="fingerprint"></i><span class="text-xs mt-1">打卡</span>
+      </button>
+      <button data-tab="tracking" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
+        <i data-lucide="map-pin"></i><span class="text-xs mt-1">追蹤</span>
+      </button>
+      <button data-tab="schedule" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
+        <i data-lucide="calendar-days"></i><span class="text-xs mt-1">排班</span>
+      </button>
+      <button data-tab="features" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
+        <i data-lucide="layers"></i><span class="text-xs mt-1">功能</span>
+      </button>
+    </nav>
+  </footer>
+
+  <script>
+    // 將此常數替換為該社區的 ID
+    // 例如：const COMMUNITY_ID = 'xinbei-a';
+    const COMMUNITY_ID = 'REPLACE_COMMUNITY_ID';
+
+    function init() {
+      const appFrame = document.getElementById('app-frame');
+      const authBlocker = document.getElementById('auth-blocker');
+      // 載入內部應用，啟用社區模式
+      const url = new URL(window.location.origin + window.location.pathname);
+      // 使用 index.html 為核心應用
+      const base = 'index.html';
+      const src = `${base}?mode=community&communityId=${encodeURIComponent(COMMUNITY_ID)}`;
+      appFrame.src = src;
+
+      // 監聽內部應用訊息以更新標頭（社區名稱）
+      window.addEventListener('message', (ev) => {
+        if (!ev || !ev.data) return;
+        const data = ev.data || {};
+        if (data.type === 'community-info') {
+          const titleEl = document.getElementById('community-title');
+          const name = (data.name || '').trim();
+          titleEl.textContent = name ? `${name} 社區` : '社區名稱 社區';
+        }
+      });
+
+      // 導覽按鈕事件：委派到內部應用的 showPage
+      const nav = document.getElementById('community-nav');
+      nav.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          nav.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          try {
+            const page = btn.dataset.tab;
+            if (appFrame && appFrame.contentWindow && typeof appFrame.contentWindow.showPage === 'function') {
+              appFrame.contentWindow.showPage(page);
+            }
+          } catch (e) { /* noop */ }
+        });
+      });
+
+      // 定時檢查登入狀態（依內部應用）
+      const checkAuth = () => {
+        try {
+          const win = appFrame.contentWindow;
+          const isLoggedIn = !!(win && win.state && win.state.currentUser);
+          authBlocker.classList.toggle('hide', isLoggedIn);
+        } catch (_) { /* noop */ }
+      };
+      setInterval(checkAuth, 1000);
+
+      // 初始化圖示
+      if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        try { window.lucide.createIcons(); } catch (_) {}
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
