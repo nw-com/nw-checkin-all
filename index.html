@@ -456,11 +456,12 @@
             const togglePasswordBtn = document.getElementById('toggle-password');
             const passwordInput = document.getElementById('password');
 
-            // 解析查詢參數：支援社區模式
+            // 解析查詢參數：支援社區模式與指定初始頁
             try {
                 const params = new URLSearchParams(window.location.search);
                 state.appMode = params.get('mode') || 'default';
                 state.communityIdFromQuery = params.get('communityId') || null;
+                state.gotoPage = params.get('goto') || null; // e.g., 'navigation'
             } catch (_) {}
 
             // ---- 距離與異常判定輔助（供多處渲染共用）----
@@ -793,7 +794,12 @@
                 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
                 let initialPage = 'dashboard';
                 let initialSub = null;
-                if (shouldShowNavigationPage()) {
+                // 若 URL 指定導覽頁，優先顯示導覽頁
+                if (state.gotoPage === 'navigation') {
+                    initialPage = 'navigation';
+                    initialSub = 'community';
+                    renderFooterNavForNavigation(initialSub);
+                } else if (shouldShowNavigationPage()) {
                     initialPage = 'navigation';
                     initialSub = 'community';
                     // 顯示容器頁尾為導覽子分頁
