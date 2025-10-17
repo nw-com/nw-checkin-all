@@ -2,10 +2,36 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+function sendRedirect(res, targetUrl) {
+  res.writeHead(302, {
+    Location: targetUrl,
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    'Surrogate-Control': 'no-store'
+  });
+  res.end();
+}
+
 const server = http.createServer((req, res) => {
-  let filePath = '.' + req.url;
-  if (filePath === './') {
-    filePath = './index.html';
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  // Pretty URL rewrites
+  // /community -> /index.html?goto=navigation&sub=community
+  // /community/:id -> /index.html?goto=navigation&sub=community&communityId=:id
+  if (url.pathname === '/community' || url.pathname.startsWith('/community/')) {
+    const parts = url.pathname.split('/').filter(Boolean); // [ 'community', ':id' ]
+    const id = parts[1] ? decodeURIComponent(parts[1]) : null;
+    const params = new URLSearchParams(url.search);
+    params.set('goto', 'navigation');
+    params.set('sub', 'community');
+    if (id) params.set('communityId', id);
+    return sendRedirect(res, '/index.html?' + params.toString());
+  }
+
+  let filePath = '.' + url.pathname + (url.search || '');
+  if (url.pathname === '/' || url.pathname === '') {
+    filePath = './index.html' + (url.search || '');
   }
 
   const extname = String(path.extname(filePath)).toLowerCase();
@@ -29,11 +55,27 @@ const server = http.createServer((req, res) => {
 
   const contentType = mimeTypes[extname] || 'application/octet-stream';
 
-  fs.readFile(filePath, (error, content) => {
+  // Strip query for filesystem read
+  const cleanFilePath = filePath.split('?')[0];
+  fs.readFile(cleanFilePath, (error, content) => {
     if (error) {
       if (error.code === 'ENOENT') {
-        res.writeHead(404);
-        res.end('File not found');
+        // SPA fallback: serve index.html for unknown paths
+        fs.readFile('./index.html', (err2, indexContent) => {
+          if (err2) {
+            res.writeHead(404);
+            res.end('File not found');
+          } else {
+            res.writeHead(200, {
+              'Content-Type': 'text/html',
+              'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0',
+              'Surrogate-Control': 'no-store'
+            });
+            res.end(indexContent, 'utf-8');
+          }
+        });
       } else {
         res.writeHead(500);
         res.end('Server error: ' + error.code);
