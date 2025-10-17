@@ -18,9 +18,11 @@
   <header class="h-[64px] bg-white border-b border-gray-200 flex-shrink-0">
     <div class="max-w-5xl mx-auto px-4 h-full flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <i data-lucide="home" class="w-5 h-5 text-red-600"></i>
+        <a href="index.html?goto=navigation" class="flex items-center hover:opacity-80" title="返回導覽頁">
+          <i data-lucide="home" class="w-5 h-5 text-red-600"></i>
+        </a>
         <a href="index.html?goto=navigation" class="inline-flex items-center px-2 py-1 rounded border hover:bg-red-50 text-gray-800 whitespace-nowrap" title="返回導覽頁">
-          <span id="community-title" class="text-sm font-medium">社區名稱 社區</span>
+          <span id="community-title" class="text-sm font-medium">社區名稱</span>
         </a>
       </div>
       <div class="text-sm text-gray-500">社區專用主頁</div>
@@ -78,7 +80,7 @@
         if (data.type === 'community-info') {
           const titleEl = document.getElementById('community-title');
           const name = (data.name || '').trim();
-          titleEl.textContent = name ? `${name} 社區` : '社區名稱 社區';
+          titleEl.textContent = name || '社區名稱';
         }
       });
 
