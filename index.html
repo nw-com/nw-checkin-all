@@ -9045,7 +9045,9 @@
                         }
                         
                         try {
-                            await addDoc(collection(db, "clockInRecords"), recordData);
+                            const { addDoc, collection } = window.__fs;
+                            const db2 = window.__db;
+                            await addDoc(collection(db2, "clockInRecords"), recordData);
                         } catch (e) {
                             console.error('新增 clockInRecords 失敗：', e?.code, e?.message || e, { keys: Object.keys(recordData), type: recordData.type, locationIsGeoPoint: recordData.location instanceof GeoPoint, photosLen: recordData.photoUrls.length, descLen: recordData.descriptions.length });
                             throw e;
@@ -9053,8 +9055,10 @@
 
                         // 首次打卡裝置ID寫入：僅當使用者尚未有 firstClockInDeviceId
                         try {
+                            const { doc, getDoc, updateDoc } = window.__fs;
+                            const db2 = window.__db;
                             const uid3 = window.__auth?.currentUser?.uid || state.currentUser?.uid;
-                            const userRef = doc(db, "users", uid3);
+                            const userRef = doc(db2, "users", uid3);
                             const userSnap = await getDoc(userRef);
                             const hasFirst = userSnap.exists() && userSnap.data().firstClockInDeviceId;
                             if (!hasFirst && type === '上班') {
@@ -9085,8 +9089,10 @@
                         }
                         
                         try {
+                            const { updateDoc, doc } = window.__fs;
+                            const db2 = window.__db;
                             const uid2 = window.__auth?.currentUser?.uid || state.currentUser?.uid;
-                            await updateDoc(doc(db, "users", uid2), userUpdateData);
+                            await updateDoc(doc(db2, "users", uid2), userUpdateData);
                         } catch (e) {
                             console.error('更新 users 狀態失敗：', e?.code, e?.message || e, { keys: Object.keys(userUpdateData) });
                             throw e;
