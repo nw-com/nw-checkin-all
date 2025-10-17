@@ -8986,7 +8986,7 @@
                         const uploadTargets = capturedPhotos.slice(0, 3);
                         let photoUrls = [];
                         let descriptions = [];
-                        const isGithubPages = /\.github\.io$/i.test(location.hostname);
+                        const isGithubPages = /\.github\.io$/i.test(window.location.hostname);
                         const compressBlobToDataURL = async (blob, maxWidth = 800, quality = 0.6) => {
                             try {
                                 const imgBitmap = await createImageBitmap(blob);
