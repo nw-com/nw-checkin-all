@@ -1339,6 +1339,8 @@
 
             function showPage(pageName, subPage = null, params = {}) {
                 cleanupListeners();
+                // 記錄目前頁面，供其他互動判斷
+                state.currentPage = pageName;
                 state.currentLocation = null;
                 state.trackingMap = null;
                 state.trackingMarkers = [];
@@ -1350,6 +1352,24 @@
                         restoreFooterMainTabs(pageName);
                     }
                 }
+                // 依頁面調整頁首標題與返回導覽的連結行為
+                try {
+                    const headerLogo = document.getElementById('header-logo');
+                    const headerTitle = document.getElementById('header-title');
+                    if (headerLogo && headerTitle) {
+                        if (pageName === 'navigation') {
+                            // 導覽頁：顯示系統標題，關閉返回導覽的點擊行為
+                            headerTitle.textContent = '西北社區打卡系統';
+                            headerLogo.classList.add('pointer-events-none', 'cursor-default');
+                            headerLogo.removeAttribute('href');
+                        } else {
+                            // 其他頁：顯示社區名稱（若有），啟用返回導覽的點擊行為
+                            headerLogo.classList.remove('pointer-events-none', 'cursor-default');
+                            headerLogo.setAttribute('href', 'index.html?goto=navigation&sub=community');
+                            try { updateHeaderCommunity(); } catch (e) { /* noop */ }
+                        }
+                    }
+                } catch (_) {}
                 mainContent.innerHTML = `<div class="flex justify-center items-center h-full"><div class="loader"></div></div>`;
                 const router = {
                     'dashboard': renderDashboard,
