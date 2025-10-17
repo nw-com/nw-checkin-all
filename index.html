@@ -805,8 +805,8 @@
                 const c = state.currentCommunity;
                 if (c?.name) {
                     const code = c.code || '';
-                    // 顯示社區名稱，並在下方以較小字體顯示社區編號
-                    titleEl.innerHTML = `${c.name} 社區${code ? '<br><span class="text-xs text-gray-500">' + code + '</span>' : ''}`;
+                    // 顯示社區名稱，並在下方以較小字體顯示社區編號（縮小間距）
+                    titleEl.innerHTML = `${c.name} 社區${code ? '<div class="text-xs text-gray-500" style="margin-top: 2px; line-height: 1;">' + code + '</div>' : ''}`;
                 } else {
                     titleEl.textContent = '西北社區打卡系統';
                 }
@@ -1748,7 +1748,7 @@
                 if (isManagerial) {
                     contentHtml = `
                         <div id="all-users-summary-card" class="bg-white p-4 rounded-lg mb-4 shadow-sm border cursor-pointer">
-                            <h3 class="font-bold text-gray-800 mb-3 flex items-center"><i data-lucide="users" class="w-4 h-4 mr-2"></i>所有該社區人員狀態</h3>
+                            <h3 class="font-bold text-gray-800 mb-3 flex items-center"><i data-lucide="users" class="w-4 h-4 mr-2"></i>所有社區人員狀態</h3>
                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 <div class="flex items-center justify-between p-3 rounded bg-green-50 border border-green-100">
                                     <div class="flex items-center text-green-700 font-semibold"><i data-lucide="briefcase" class="w-4 h-4 mr-2"></i>上班</div>
@@ -1762,10 +1762,6 @@
                                     <div class="flex items-center text-yellow-700 font-semibold"><i data-lucide="plane" class="w-4 h-4 mr-2"></i>請假</div>
                                     <div id="count-leave" class="text-yellow-800 font-bold">0</div>
                                 </div>
-                                <div class="flex items-center justify-between p-3 rounded bg-blue-50 border border-blue-200">
-                                    <div class="flex items-center text-blue-700 font-semibold"><i data-lucide="route" class="w-4 h-4 mr-2"></i>外出</div>
-                                    <div id="count-outbound" class="text-blue-800 font-bold">0</div>
-                                </div>
                             </div>
                             <div class="text-xs text-gray-500 mt-2">點擊可查看詳細名單</div>
                         </div>
@@ -1778,12 +1774,6 @@
                            <div id="dashboard-anomalies-list" class="space-y-2 text-gray-700 mt-2">
                              <div class="text-gray-500">讀取中...</div>
                            </div>
-                        </div>
-                        <div class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
-                            <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="building-2" class="w-4 h-4 mr-2"></i>社區列表</h3>
-                            <div id="dashboard-community-list" class="space-y-2 text-gray-700">
-                                <div class="text-gray-500">讀取中...</div>
-                            </div>
                         </div>`;
                 } else {
                     contentHtml = `
@@ -1816,10 +1806,8 @@
                 }, 1000);
                 state.activeListeners.push(() => clearInterval(timerInterval));
                 
-                // 管理階層載入社區列表
+                // 管理階層：渲染異常通知（社區列表顯示已移除）
                 if (isManagerial) {
-                    loadDashboardCommunityList();
-                    // 管理者異常通知
                     try { renderManagerAnomalies(); } catch (e) { console.warn('渲染異常通知失敗', e); }
                 }
                 
@@ -2233,6 +2221,20 @@
                     
                     // 過濾掉不顯示的使用者
                     const visibleUsersList = users.filter(user => visibleUsers[user.id] !== false);
+                    // 進一步過濾：僅顯示服務「目前社區」的外勤相關角色（總幹事、秘書、保全、清潔、機電）
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || null;
+                    const filteredUsersList = visibleUsersList.filter(u => {
+                        // 角色過濾（排除管理員、人事、主管）
+                        if (!isFieldLikeRole(u.role)) return false;
+                        // 社區服務過濾（支援以 id 或 code 表示的欄位）
+                        const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const codeSingle = u.serviceCommunityCode || null;
+                        const matchById = currentCommId ? ids.includes(currentCommId) : false;
+                        const matchByCode = currentCommCode ? (codesArr.includes(currentCommCode) || codeSingle === currentCommCode) : false;
+                        return matchById || matchByCode;
+                    });
                     
                     // 狀態優先級（自訂）：
                     // 1) 上班中-辦公室 2) 返回-辦公室 3) 外出-項目-地點 4) 抵達-項目-地點
@@ -2266,7 +2268,7 @@
                         return 8;
                     };
 
-                    visibleUsersList.sort((a, b) => {
+                    filteredUsersList.sort((a, b) => {
                         const prA = statusPriority(a);
                         const prB = statusPriority(b);
                         if (prA !== prB) return prA - prB;
@@ -2322,11 +2324,11 @@
                     const now = new Date();
                     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
                     const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                   visibleUsersList.forEach(user => {
+                   filteredUsersList.forEach(user => {
                        const s = user.clockInStatus || '';
                        const leave = user.leaveStatus || '';
                        if (s === '上班' || s === '返回') countWork++;
-                       else if (s === '外出' || s === '抵達' || s === '離開') countOutbound++;
+                       // 排除外出/抵達/離開於摘要顯示
                        else if (s === '下班' || s === '已下班-未打卡') countOff++;
                         
                         // 檢查請假狀態：臨時請假或當天有效的請假申請
@@ -2430,7 +2432,7 @@
                     (async () => {
                         const latestMap = {};
                         try {
-                            await Promise.all(visibleUsersList.map(async (u) => {
+                            await Promise.all(filteredByRoleAndCommunity.map(async (u) => {
                                 try {
                                     const qLatest = query(collection(db, 'clockInRecords'), where('userId', '==', u.id), orderBy('timestamp', 'desc'), limit(1));
                                     const latestSnap = await getDocs(qLatest);
@@ -2449,7 +2451,34 @@
                             console.warn('建立最新打卡時間對應表失敗:', e);
                         }
 
-                    visibleUsersList.sort((a, b) => {
+                    // 狀態過濾：僅保留上班、下班、請假（排除外出/抵達/離開）
+                    const filteredByStatus = filteredByRoleAndCommunity.filter(u => {
+                        const latest = latestMap[u.id] || null;
+                        const locText = latest?.locationName || (u.clockInStatus === '外出' && u.outboundLocation ? u.outboundLocation : (u.lastLocation?.address || null));
+                        const display = latest ? getStatusDisplayText(latest.type || '未知', latest.locationName || null, latest.dutyType || null)
+                                              : getStatusDisplayText(u.clockInStatus || '未打卡', locText, u.dutyType);
+                        // 請假判定
+                        let isLeave = (u.clockInStatus === '臨時請假') || display.includes('請假');
+                        if (!isLeave) {
+                            const leave = u.leaveStatus || '';
+                            if (leave === 'approved' || leave === 'pending') {
+                                const now = new Date();
+                                const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                                const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                                if (u.leaveStartTime && u.leaveEndTime) {
+                                    const leaveStart = u.leaveStartTime.toDate ? u.leaveStartTime.toDate() : new Date(u.leaveStartTime);
+                                    const leaveEnd = u.leaveEndTime.toDate ? u.leaveEndTime.toDate() : new Date(u.leaveEndTime);
+                                    isLeave = leaveStart <= todayEnd && leaveEnd >= todayStart;
+                                }
+                            }
+                        }
+                        if (isLeave) return true;
+                        if (display.includes('已下班') || (u.clockInStatus === '下班')) return true;
+                        if (display.includes('上班') || (u.clockInStatus === '返回')) return true;
+                        return false;
+                    });
+
+                    filteredByStatus.sort((a, b) => {
                             const latestA = latestMap[a.id] || null;
                             const latestB = latestMap[b.id] || null;
                             const locA = latestA?.locationName || (a.clockInStatus === '外出' && a.outboundLocation ? a.outboundLocation : (a.lastLocation?.address || null));
@@ -2538,7 +2567,7 @@
                         });
                         // 重新以最新 clockInRecords 更新每位使用者的時間（避免快照時序不同步）
                         try {
-                            Promise.all(visibleUsersList.map(async (u) => {
+                            Promise.all(filteredByStatus.map(async (u) => {
                                 try {
                                     const qLatest = query(collection(db, 'clockInRecords'), where('userId', '==', u.id), orderBy('timestamp', 'desc'), limit(1));
                                     const latestSnap = await getDocs(qLatest);
