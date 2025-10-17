@@ -227,7 +227,7 @@
                     <i data-lucide="map-pin"></i><span class="text-xs mt-1">追蹤</span>
                 </button>
                 <button id="nav-hr" data-tab="hr" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 hide">
-                    <i data-lucide="users"></i><span class="text-xs mt-1">人事</span>
+                    <i data-lucide="users"></i><span class="text-xs mt-1">人員</span>
                 </button>
                 <button id="nav-features" data-tab="features" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
                     <i data-lucide="layers"></i><span class="text-xs mt-1">功能</span>
@@ -242,7 +242,7 @@
                     <i data-lucide="settings"></i><span class="text-xs mt-1">設定</span>
                 </button>
                 <button id="nav-group" data-tab="group" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 hide">
-                    <i data-lucide="git-branch"></i><span class="text-xs mt-1">群組</span>
+                    <i data-lucide="git-branch"></i><span class="text-xs mt-1">巡邏</span>
                 </button>
             </nav>
         </footer>
@@ -581,7 +581,11 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="apply-emergency-relation" class="block text-sm font-medium text-gray-700">緊急聯絡人(關係)</label>
+                                    <label for="apply-emergency-name" class="block text-sm font-medium text-gray-700">緊急聯絡人姓名</label>
+                                    <input type="text" id="apply-emergency-name" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-emergency-relation" class="block text-sm font-medium text-gray-700">與聯絡人關係</label>
                                     <input type="text" id="apply-emergency-relation" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
                                 <div>
@@ -677,6 +681,7 @@
                         const birthDate = document.getElementById('apply-birthdate').value.trim();
                         const idNumber = document.getElementById('apply-idnumber').value.trim();
                         const bloodType = document.getElementById('apply-blood-type').value;
+                        const emergencyName = document.getElementById('apply-emergency-name').value.trim();
                         const emergencyRelation = document.getElementById('apply-emergency-relation').value.trim();
                         const emergencyPhone = document.getElementById('apply-emergency-phone').value.trim();
                         const license = document.getElementById('apply-license').value;
@@ -691,7 +696,7 @@
 
                         const data = {
                             name, phone, email, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode,
-                            bloodType, emergencyRelation, emergencyPhone,
+                            bloodType, emergencyName, emergencyRelation, emergencyPhone,
                             avatarUrl: (avatarPreview?.src && !avatarPreview.src.includes('placehold.co')) ? avatarPreview.src : null,
                             status: 'pending',
                             createdAt: serverTimestamp()
@@ -1349,14 +1354,67 @@
 
             function restoreFooterMainTabs(activeTab) {
                 if (!mainNav) return;
-                if (state.defaultMainNavHtml) {
-                    mainNav.innerHTML = state.defaultMainNavHtml;
+                const role = state.currentUserData?.role || '';
+
+                // 根據角色群組動態重建主頁頁尾導覽按鈕
+                const isManagement = new Set(['admin','hr','manager','junior_manager']).has(role);
+                const isStaff = new Set(['總幹事','秘書','保全','清潔','機電']).has(role);
+
+                const items = [];
+                const pushItem = (tab, icon, label) => items.push({ tab, icon, label });
+                const idForTab = (tab) => {
+                    switch (tab) {
+                        case 'tracking': return 'nav-tracking';
+                        case 'hr': return 'nav-hr';
+                        case 'features': return 'nav-features';
+                        case 'calendar': return 'nav-calendar';
+                        case 'schedule': return 'nav-schedule';
+                        case 'settings': return 'nav-settings';
+                        case 'group': return 'nav-group';
+                        default: return '';
+                    }
+                };
+
+                if (isManagement) {
+                    // 管理員、人事、高階主管、初階主管：依權限顯示並依指定順序排列
+                    pushItem('dashboard', 'layout-dashboard', '儀表板');
+                    if (['admin','manager'].includes(role)) {
+                        pushItem('tracking', 'map-pin', '追蹤');
+                    }
+                    if (['admin','manager'].includes(role)) {
+                        pushItem('schedule', 'calendar-days', '排班');
+                    }
+                    pushItem('features', 'layers', '功能');
+                    // 巡邏：目前對 junior_manager 必定顯示，管理員/高階主管/人事若具權限也顯示
+                    if (['admin','manager','junior_manager','hr'].includes(role)) {
+                        pushItem('group', 'git-branch', '巡邏');
+                    }
+                    if (['admin','hr'].includes(role)) {
+                        pushItem('hr', 'users', '人員');
+                    }
+                } else if (isStaff) {
+                    // 總幹事、秘書、保全、清潔、機電
+                    pushItem('dashboard', 'layout-dashboard', '儀表板');
+                    pushItem('clock-in', 'fingerprint', '打卡');
+                    pushItem('features', 'layers', '功能');
+                    pushItem('group', 'git-branch', '巡邏');
+                } else {
+                    // 其他未定義角色：保守呈現基本功能
+                    pushItem('dashboard', 'layout-dashboard', '儀表板');
+                    pushItem('clock-in', 'fingerprint', '打卡');
+                    pushItem('features', 'layers', '功能');
                 }
-                applyRoleNavVisibility();
-                // 設定目前分頁為 active 樣式
-                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-                const target = document.querySelector(`.tab-btn[data-tab="${activeTab || 'dashboard'}"]`);
-                target && target.classList.add('active');
+
+                const html = items.map(({ tab, icon, label }) => {
+                    const idAttr = idForTab(tab);
+                    const activeClass = (activeTab || 'dashboard') === tab ? 'active' : '';
+                    return `
+                        <button ${idAttr ? `id="${idAttr}"` : ''} data-tab="${tab}" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 ${activeClass}">
+                            <i data-lucide="${icon}"></i><span class="text-xs mt-1">${label}</span>
+                        </button>`;
+                }).join('\n');
+
+                mainNav.innerHTML = html;
                 try { lucide.createIcons(); } catch (_) {}
             }
 
@@ -1405,9 +1463,9 @@
                     'calendar': () => renderCalendar(subPage || 'overview'),
                     'schedule': () => ['admin','manager'].includes(state.currentUserData.role) ? renderCalendar('schedule') : renderAccessDenied(),
                     'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
-                    'hr': () => (state.currentUserData.role === 'admin') ? renderHR(subPage || 'attendance') : renderAccessDenied(),
+                    'hr': () => (['admin','hr'].includes(state.currentUserData.role)) ? renderHR(subPage || 'attendance') : renderAccessDenied(),
                     'navigation': () => isNavigationAllowed(state.currentUserData) ? renderNavigation(subPage || 'community') : renderAccessDenied(),
-                    'group': () => state.currentUserData.role === 'junior_manager' ? renderGroup(subPage || 'map') : renderAccessDenied()
+                    'group': () => ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'].includes(state.currentUserData.role) ? renderGroup(subPage || 'map') : renderAccessDenied()
                 };
                 const renderFunction = router[pageName] || renderAccessDenied;
                 try {
@@ -7554,7 +7612,11 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="user-emergency-relation" class="block text-sm font-medium text-gray-700">緊急聯絡人(關係)</label>
+                                    <label for="user-emergency-name" class="block text-sm font-medium text-gray-700">緊急聯絡人姓名</label>
+                                    <input type="text" id="user-emergency-name" value="${isEditing ? (user.emergencyName || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="user-emergency-relation" class="block text-sm font-medium text-gray-700">與聯絡人關係</label>
                                     <input type="text" id="user-emergency-relation" value="${isEditing ? (user.emergencyRelation || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
                                 <div>
@@ -7764,6 +7826,7 @@
                     const birthDate = document.getElementById('user-birthdate')?.value || '';
                     const idNumber = document.getElementById('user-idnumber')?.value || '';
                     const bloodType = document.getElementById('user-blood-type')?.value || '';
+                    const emergencyName = document.getElementById('user-emergency-name')?.value || '';
                     const emergencyRelation = document.getElementById('user-emergency-relation')?.value || '';
                     const emergencyPhone = document.getElementById('user-emergency-phone')?.value || '';
                     const license = document.getElementById('user-license')?.value || '';
@@ -7773,7 +7836,7 @@
                     // 收集服務社區
                     const scChecks = modal.querySelectorAll('input[name="service-community"]');
                     const serviceCommunities = Array.from(scChecks).filter(c => c.checked).map(c => c.value);
-                    const updateData = { name, phone, lineId, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode, bloodType, emergencyRelation, emergencyPhone };
+                    const updateData = { name, phone, lineId, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode, bloodType, emergencyName, emergencyRelation, emergencyPhone };
 
                     try {
                         let targetUserId = isEditing ? user.id : null;
