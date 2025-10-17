@@ -8981,11 +8981,12 @@
                             }
                         }
 
-                        // 上傳照片到 Cloud Storage 並僅在 Firestore 存儲下載 URL（避免超過文件大小限制）
+                        // 上傳照片到 Cloud Storage；若在 GitHub Pages 或遇到 CORS/網路問題則回退為壓縮後的 Data URL 寫入 Firestore
                         const storageInst = window.__storage;
                         const uploadTargets = capturedPhotos.slice(0, 3);
                         let photoUrls = [];
                         let descriptions = [];
+                        const isGithubPages = /\.github\.io$/i.test(location.hostname);
                         const compressBlobToDataURL = async (blob, maxWidth = 800, quality = 0.6) => {
                             try {
                                 const imgBitmap = await createImageBitmap(blob);
@@ -9004,22 +9005,33 @@
                                 });
                             }
                         };
-                        try {
-                            const uploadedPhotos = await Promise.all(uploadTargets.map(async (photo, idx) => {
-                                const nowMs = Date.now();
-                                const ext = (photo.blob && typeof photo.blob.type === 'string' && photo.blob.type.includes('png')) ? 'png' : 'jpg';
-                                const uidForPath = window.__auth?.currentUser?.uid || state.currentUser?.uid || 'unknown-user';
-                                const path = `clock-in/${uidForPath}/${nowMs}_${idx}.${ext}`;
-                                const storageRef = ref(storageInst, path);
-                                const metadata = (photo.blob && photo.blob.type) ? { contentType: photo.blob.type } : undefined;
-                                await uploadBytes(storageRef, photo.blob, metadata);
-                                const url = await getDownloadURL(storageRef);
-                                return { url, description: photo.description };
-                            }));
-                            photoUrls = uploadedPhotos.map(p => p.url);
-                            descriptions = uploadedPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
-                        } catch (uploadErr) {
-                            console.warn('照片上傳至 Storage 失敗，改用壓縮後的 Data URL：', uploadErr);
+                        const useStorage = !!storageInst && !isGithubPages;
+                        if (useStorage) {
+                            try {
+                                const uploadedPhotos = await Promise.all(uploadTargets.map(async (photo, idx) => {
+                                    const nowMs = Date.now();
+                                    const ext = (photo.blob && typeof photo.blob.type === 'string' && photo.blob.type.includes('png')) ? 'png' : 'jpg';
+                                    const uidForPath = window.__auth?.currentUser?.uid || state.currentUser?.uid || 'unknown-user';
+                                    const path = `clock-in/${uidForPath}/${nowMs}_${idx}.${ext}`;
+                                    const storageRef = ref(storageInst, path);
+                                    const metadata = (photo.blob && photo.blob.type) ? { contentType: photo.blob.type } : undefined;
+                                    await uploadBytes(storageRef, photo.blob, metadata);
+                                    const url = await getDownloadURL(storageRef);
+                                    return { url, description: photo.description };
+                                }));
+                                photoUrls = uploadedPhotos.map(p => p.url);
+                                descriptions = uploadedPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
+                            } catch (uploadErr) {
+                                console.warn('照片上傳至 Storage 失敗，改用壓縮後的 Data URL：', uploadErr);
+                                const fallbackPhotos = await Promise.all(uploadTargets.map(async (photo) => {
+                                    const url = await compressBlobToDataURL(photo.blob, 800, 0.6);
+                                    return { url, description: photo.description };
+                                }));
+                                photoUrls = fallbackPhotos.map(p => p.url);
+                                descriptions = fallbackPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
+                            }
+                        } else {
+                            console.info('偵測到 GitHub Pages 網域或缺少 Storage，直接使用壓縮後的 Data URL。');
                             const fallbackPhotos = await Promise.all(uploadTargets.map(async (photo) => {
                                 const url = await compressBlobToDataURL(photo.blob, 800, 0.6);
                                 return { url, description: photo.description };
