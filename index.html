@@ -8965,26 +8965,23 @@
                             }
                         }
 
-                        // 將照片轉換為 Data URL 並儲存（恢復原行為）
-                        const photoPromises = capturedPhotos.map(async (photo) => {
-                            return new Promise((resolve) => {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                    resolve({
-                                        url: reader.result,
-                                        description: photo.description
-                                    });
-                                };
-                                reader.readAsDataURL(photo.blob);
-                            });
-                        });
-
-                        const uploadedPhotos = await Promise.all(photoPromises);
-                        // Firestore 規則：最多 3 張照片，描述數量需一致
-                        const limitedPhotos = uploadedPhotos.slice(0, 3);
-                        const photoUrls = limitedPhotos.map(p => p.url);
+                        // 上傳照片到 Cloud Storage 並僅在 Firestore 存儲下載 URL（避免超過文件大小限制）
+                        const storageInst = window.__storage;
+                        const uploadTargets = capturedPhotos.slice(0, 3);
+                        const uploadedPhotos = await Promise.all(uploadTargets.map(async (photo, idx) => {
+                            const nowMs = Date.now();
+                            const ext = (photo.blob && typeof photo.blob.type === 'string' && photo.blob.type.includes('png')) ? 'png' : 'jpg';
+                            const uidForPath = window.__auth?.currentUser?.uid || state.currentUser?.uid || 'unknown-user';
+                            const path = `clock-in/${uidForPath}/${nowMs}_${idx}.${ext}`;
+                            const storageRef = ref(storageInst, path);
+                            const metadata = (photo.blob && photo.blob.type) ? { contentType: photo.blob.type } : undefined;
+                            await uploadBytes(storageRef, photo.blob, metadata);
+                            const url = await getDownloadURL(storageRef);
+                            return { url, description: photo.description };
+                        }));
+                        const photoUrls = uploadedPhotos.map(p => p.url);
                         // Firestore 不允許 undefined：將非字串說明轉為空字串
-                        const descriptions = limitedPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
+                        const descriptions = uploadedPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
 
                         // 安全座標處理：若缺少或為後備，使用 (0,0)
                         const safeLat = (location && typeof location.lat === 'number') ? location.lat : 0;
