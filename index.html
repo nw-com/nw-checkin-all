@@ -8741,9 +8741,18 @@
                         Promise.resolve(video.play()).catch(err => {
                             console.warn("avatar video.play() failed:", err);
                         });
-                    }).catch(err => {
-                        showToast("無法開啟相機", true);
-                        close();
+                    }).catch(async err => {
+                        console.warn("avatar camera first attempt failed:", err);
+                        try {
+                            const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                            videoStream = fallbackStream;
+                            video.muted = true;
+                            video.srcObject = fallbackStream;
+                            try { await Promise.resolve(video.play()); } catch (e) { console.warn("avatar fallback video.play() failed:", e); }
+                        } catch (err2) {
+                            showToast("無法開啟相機，請授權或檢查裝置", true);
+                            close();
+                        }
                     });
 
                 document.getElementById('avatar-capture-btn').addEventListener('click', () => {
@@ -8820,47 +8829,54 @@
                 const captureControls = document.getElementById('capture-controls');
                 const confirmControls = document.getElementById('confirm-controls');
 
-                navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
-                    .then(stream => {
-                        videoStream = stream;
-                        video.muted = true;
-                        video.srcObject = stream;
-                        Promise.resolve(video.play()).catch(err => {
-                            console.warn("camera video.play() failed:", err);
-                        });
-                        document.getElementById('camera-loader').classList.add('hide');
-                        
-                        lucide.createIcons();
-                        
-                        let currentFacingMode = "environment";
-                        document.getElementById('switch-camera-btn').addEventListener('click', async () => {
-                            stopCamera();
-                            document.getElementById('camera-loader').classList.remove('hide');
-                            currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
-                            
+                // 以偏好後鏡頭開始，失敗時回退到前鏡頭，再回退為任何相機
+                let currentFacingMode = "environment";
+                const setupStream = async (stream) => {
+                    videoStream = stream;
+                    video.muted = true;
+                    video.srcObject = stream;
+                    try { await Promise.resolve(video.play()); } catch (e) { console.warn("camera video.play() failed:", e); }
+                    document.getElementById('camera-loader').classList.add('hide');
+                    lucide.createIcons();
+                };
+
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode }, audio: false })
+                    .then(stream => setupStream(stream))
+                    .catch(async err => {
+                        console.warn("Camera first attempt failed:", err);
+                        // 回退：前鏡頭
+                        try {
+                            currentFacingMode = "user";
+                            const stream2 = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode }, audio: false });
+                            await setupStream(stream2);
+                        } catch (err2) {
+                            console.warn("Camera second attempt failed (user):", err2);
+                            // 最終回退：任意可用相機
                             try {
-                                const newStream = await navigator.mediaDevices.getUserMedia({ 
-                                    video: { facingMode: currentFacingMode }, 
-                                    audio: false 
-                                });
-                                
-                                videoStream = newStream;
-                                video.muted = true;
-                                video.srcObject = newStream;
-                                try { await Promise.resolve(video.play()); } catch (e) { console.warn("camera switch video.play() failed:", e); }
-                                document.getElementById('camera-loader').classList.add('hide');
-                            } catch (error) {
-                                console.error("切換相機失敗:", error);
-                                showToast("切換相機失敗，請重試", true);
-                                document.getElementById('camera-loader').classList.add('hide');
+                                const stream3 = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                                await setupStream(stream3);
+                            } catch (err3) {
+                                console.error("Camera failed after all fallbacks:", err, err2, err3);
+                                showToast("無法開啟相機，請授權或檢查裝置", true);
+                                close();
+                                return;
                             }
-                        });
-                    })
-                    .catch(err => {
-                        console.error("Camera error:", err);
-                        showToast("無法開啟相機", true);
-                        close();
+                        }
                     });
+
+                document.getElementById('switch-camera-btn').addEventListener('click', async () => {
+                    stopCamera();
+                    document.getElementById('camera-loader').classList.remove('hide');
+                    currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
+                    try {
+                        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode }, audio: false });
+                        await setupStream(newStream);
+                    } catch (error) {
+                        console.error("切換相機失敗:", error);
+                        showToast("切換相機失敗，請重試", true);
+                        document.getElementById('camera-loader').classList.add('hide');
+                    }
+                });
 
                 document.getElementById('capture-btn').addEventListener('click', () => {
                     const context = canvas.getContext('2d');
