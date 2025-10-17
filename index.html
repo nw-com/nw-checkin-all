@@ -8968,20 +8968,49 @@
                         // 上傳照片到 Cloud Storage 並僅在 Firestore 存儲下載 URL（避免超過文件大小限制）
                         const storageInst = window.__storage;
                         const uploadTargets = capturedPhotos.slice(0, 3);
-                        const uploadedPhotos = await Promise.all(uploadTargets.map(async (photo, idx) => {
-                            const nowMs = Date.now();
-                            const ext = (photo.blob && typeof photo.blob.type === 'string' && photo.blob.type.includes('png')) ? 'png' : 'jpg';
-                            const uidForPath = window.__auth?.currentUser?.uid || state.currentUser?.uid || 'unknown-user';
-                            const path = `clock-in/${uidForPath}/${nowMs}_${idx}.${ext}`;
-                            const storageRef = ref(storageInst, path);
-                            const metadata = (photo.blob && photo.blob.type) ? { contentType: photo.blob.type } : undefined;
-                            await uploadBytes(storageRef, photo.blob, metadata);
-                            const url = await getDownloadURL(storageRef);
-                            return { url, description: photo.description };
-                        }));
-                        const photoUrls = uploadedPhotos.map(p => p.url);
-                        // Firestore 不允許 undefined：將非字串說明轉為空字串
-                        const descriptions = uploadedPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
+                        let photoUrls = [];
+                        let descriptions = [];
+                        const compressBlobToDataURL = async (blob, maxWidth = 800, quality = 0.6) => {
+                            try {
+                                const imgBitmap = await createImageBitmap(blob);
+                                const ratio = imgBitmap.height / imgBitmap.width;
+                                const canvasEl = document.createElement('canvas');
+                                canvasEl.width = maxWidth;
+                                canvasEl.height = Math.round(maxWidth * ratio);
+                                const ctx = canvasEl.getContext('2d');
+                                ctx.drawImage(imgBitmap, 0, 0, canvasEl.width, canvasEl.height);
+                                return canvasEl.toDataURL('image/jpeg', quality);
+                            } catch (_) {
+                                return await new Promise((resolve) => {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => resolve(reader.result);
+                                    reader.readAsDataURL(blob);
+                                });
+                            }
+                        };
+                        try {
+                            const uploadedPhotos = await Promise.all(uploadTargets.map(async (photo, idx) => {
+                                const nowMs = Date.now();
+                                const ext = (photo.blob && typeof photo.blob.type === 'string' && photo.blob.type.includes('png')) ? 'png' : 'jpg';
+                                const uidForPath = window.__auth?.currentUser?.uid || state.currentUser?.uid || 'unknown-user';
+                                const path = `clock-in/${uidForPath}/${nowMs}_${idx}.${ext}`;
+                                const storageRef = ref(storageInst, path);
+                                const metadata = (photo.blob && photo.blob.type) ? { contentType: photo.blob.type } : undefined;
+                                await uploadBytes(storageRef, photo.blob, metadata);
+                                const url = await getDownloadURL(storageRef);
+                                return { url, description: photo.description };
+                            }));
+                            photoUrls = uploadedPhotos.map(p => p.url);
+                            descriptions = uploadedPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
+                        } catch (uploadErr) {
+                            console.warn('照片上傳至 Storage 失敗，改用壓縮後的 Data URL：', uploadErr);
+                            const fallbackPhotos = await Promise.all(uploadTargets.map(async (photo) => {
+                                const url = await compressBlobToDataURL(photo.blob, 800, 0.6);
+                                return { url, description: photo.description };
+                            }));
+                            photoUrls = fallbackPhotos.map(p => p.url);
+                            descriptions = fallbackPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
+                        }
 
                         // 安全座標處理：若缺少或為後備，使用 (0,0)
                         const safeLat = (location && typeof location.lat === 'number') ? location.lat : 0;
