@@ -571,6 +571,24 @@
                                     <input type="text" id="apply-idnumber" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
                                 <div>
+                                    <label for="apply-blood-type" class="block text-sm font-medium text-gray-700">血型</label>
+                                    <select id="apply-blood-type" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="">未選擇</option>
+                                        <option value="A">A</option>
+                                        <option value="B">B</option>
+                                        <option value="O">O</option>
+                                        <option value="AB">AB</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="apply-emergency-relation" class="block text-sm font-medium text-gray-700">緊急聯絡人(關係)</label>
+                                    <input type="text" id="apply-emergency-relation" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="apply-emergency-phone" class="block text-sm font-medium text-gray-700">緊急連絡人手機號碼</label>
+                                    <input type="tel" id="apply-emergency-phone" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
                                     <label for="apply-license" class="block text-sm font-medium text-gray-700">專業證照</label>
                                     <select id="apply-license" class="w-full mt-1 px-3 py-2 border rounded-md">
                                         <option value="無">無</option>
@@ -658,6 +676,9 @@
                         const homeAddress = document.getElementById('apply-address').value.trim();
                         const birthDate = document.getElementById('apply-birthdate').value.trim();
                         const idNumber = document.getElementById('apply-idnumber').value.trim();
+                        const bloodType = document.getElementById('apply-blood-type').value;
+                        const emergencyRelation = document.getElementById('apply-emergency-relation').value.trim();
+                        const emergencyPhone = document.getElementById('apply-emergency-phone').value.trim();
                         const license = document.getElementById('apply-license').value;
                         const hasCriminalRecord = document.getElementById('apply-criminal').value === '有';
                         const serviceCommunityCode = document.getElementById('apply-service-code').value.trim();
@@ -670,6 +691,7 @@
 
                         const data = {
                             name, phone, email, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode,
+                            bloodType, emergencyRelation, emergencyPhone,
                             avatarUrl: (avatarPreview?.src && !avatarPreview.src.includes('placehold.co')) ? avatarPreview.src : null,
                             status: 'pending',
                             createdAt: serverTimestamp()
@@ -7480,14 +7502,16 @@
                                     <label for="user-name" class="block text-sm font-medium text-gray-700">姓名 (必填)</label>
                                     <input type="text" id="user-name" value="${isEditing ? user.name : ''}" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
-                                 <div>
+                                <div>
                                     <label for="user-phone" class="block text-sm font-medium text-gray-700">手機號碼</label>
                                     <input type="tel" id="user-phone" value="${isEditing ? user.phone || '' : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
-                                 <div>
+                                ${isEditing ? `
+                                <div>
                                     <label for="user-lineid" class="block text-sm font-medium text-gray-700">Line ID</label>
-                                    <input type="text" id="user-lineid" value="${isEditing ? user.lineId || '' : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                    <input type="text" id="user-lineid" value="${user.lineId || ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
+                                ` : ''}
                                 <div>
                                     <label for="user-email" class="block text-sm font-medium text-gray-700">電子郵件 / 帳號 (必填)</label>
                                     <input type="email" id="user-email" value="${isEditing ? user.email : ''}" ${isEditing ? 'disabled' : ''} class="w-full mt-1 px-3 py-2 border rounded-md ${isEditing ? 'bg-gray-100' : ''}" required>
@@ -7514,6 +7538,24 @@
                                 <div>
                                     <label for="user-idnumber" class="block text-sm font-medium text-gray-700">身分證號</label>
                                     <input type="text" id="user-idnumber" value="${isEditing ? (user.idNumber || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="user-blood-type" class="block text-sm font-medium text-gray-700">血型</label>
+                                    <select id="user-blood-type" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="" ${isEditing && !user.bloodType ? 'selected' : ''}>未選擇</option>
+                                        <option value="A" ${isEditing && user.bloodType === 'A' ? 'selected' : ''}>A</option>
+                                        <option value="B" ${isEditing && user.bloodType === 'B' ? 'selected' : ''}>B</option>
+                                        <option value="O" ${isEditing && user.bloodType === 'O' ? 'selected' : ''}>O</option>
+                                        <option value="AB" ${isEditing && user.bloodType === 'AB' ? 'selected' : ''}>AB</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="user-emergency-relation" class="block text-sm font-medium text-gray-700">緊急聯絡人(關係)</label>
+                                    <input type="text" id="user-emergency-relation" value="${isEditing ? (user.emergencyRelation || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                </div>
+                                <div>
+                                    <label for="user-emergency-phone" class="block text-sm font-medium text-gray-700">緊急連絡人手機號碼</label>
+                                    <input type="tel" id="user-emergency-phone" value="${isEditing ? (user.emergencyPhone || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
                                 <div>
                                     <label for="user-license" class="block text-sm font-medium text-gray-700">專業證照</label>
@@ -7711,12 +7753,15 @@
                     // --- Form Data Collection ---
                     const name = document.getElementById('user-name').value;
                     const phone = document.getElementById('user-phone').value;
-                    const lineId = document.getElementById('user-lineid').value;
+                    const lineId = document.getElementById('user-lineid')?.value || '';
                     const email = document.getElementById('user-email').value;
                     const role = document.getElementById('user-role').value;
                     const homeAddress = document.getElementById('user-address')?.value || '';
                     const birthDate = document.getElementById('user-birthdate')?.value || '';
                     const idNumber = document.getElementById('user-idnumber')?.value || '';
+                    const bloodType = document.getElementById('user-blood-type')?.value || '';
+                    const emergencyRelation = document.getElementById('user-emergency-relation')?.value || '';
+                    const emergencyPhone = document.getElementById('user-emergency-phone')?.value || '';
                     const license = document.getElementById('user-license')?.value || '';
                     const hasCriminalRecord = (document.getElementById('user-criminal')?.value || '無') === '有';
                     const serviceCommunityCode = document.getElementById('user-service-code')?.value || '';
@@ -7724,7 +7769,7 @@
                     // 收集服務社區
                     const scChecks = modal.querySelectorAll('input[name="service-community"]');
                     const serviceCommunities = Array.from(scChecks).filter(c => c.checked).map(c => c.value);
-                    const updateData = { name, phone, lineId, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode };
+                    const updateData = { name, phone, lineId, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode, bloodType, emergencyRelation, emergencyPhone };
 
                     try {
                         let targetUserId = isEditing ? user.id : null;
