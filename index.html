@@ -791,10 +791,14 @@
 
             function updateHeaderCommunity() {
                 const titleEl = document.getElementById('header-title');
-                const c = state.currentCommunity;
-                if (titleEl) {
-                    titleEl.textContent = c?.name ? `${c.name} 社區` : '西北社區打卡系統';
+                if (!titleEl) return;
+                // 若目前在導覽頁，固定顯示系統標題，避免被上一個社區狀態覆蓋
+                if (state.currentPage === 'navigation') {
+                    titleEl.textContent = '西北社區打卡系統';
+                    return;
                 }
+                const c = state.currentCommunity;
+                titleEl.textContent = c?.name ? `${c.name} 社區` : '西北社區打卡系統';
             }
 
             function isNavigationAllowed(user = null) {
