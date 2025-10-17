@@ -803,7 +803,13 @@
                     return;
                 }
                 const c = state.currentCommunity;
-                titleEl.textContent = c?.name ? `${c.name} 社區` : '西北社區打卡系統';
+                if (c?.name) {
+                    const code = c.code || '';
+                    // 顯示社區名稱，並在下方以較小字體顯示社區編號
+                    titleEl.innerHTML = `${c.name} 社區${code ? '<br><span class="text-xs text-gray-500">' + code + '</span>' : ''}`;
+                } else {
+                    titleEl.textContent = '西北社區打卡系統';
+                }
             }
 
             function isNavigationAllowed(user = null) {
@@ -1741,6 +1747,38 @@
                 let contentHtml = '';
                 if (isManagerial) {
                     contentHtml = `
+                        <div id="all-users-summary-card" class="bg-white p-4 rounded-lg mb-4 shadow-sm border cursor-pointer">
+                            <h3 class="font-bold text-gray-800 mb-3 flex items-center"><i data-lucide="users" class="w-4 h-4 mr-2"></i>所有該社區人員狀態</h3>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div class="flex items-center justify-between p-3 rounded bg-green-50 border border-green-100">
+                                    <div class="flex items-center text-green-700 font-semibold"><i data-lucide="briefcase" class="w-4 h-4 mr-2"></i>上班</div>
+                                    <div id="count-work" class="text-green-800 font-bold">0</div>
+                                </div>
+                                <div class="flex items-center justify-between p-3 rounded bg-gray-50 border border-gray-200">
+                                    <div class="flex items-center text-gray-700 font-semibold"><i data-lucide="moon" class="w-4 h-4 mr-2"></i>下班</div>
+                                    <div id="count-off" class="text-gray-800 font-bold">0</div>
+                                </div>
+                                <div class="flex items-center justify-between p-3 rounded bg-yellow-50 border border-yellow-200">
+                                    <div class="flex items-center text-yellow-700 font-semibold"><i data-lucide="plane" class="w-4 h-4 mr-2"></i>請假</div>
+                                    <div id="count-leave" class="text-yellow-800 font-bold">0</div>
+                                </div>
+                                <div class="flex items-center justify-between p-3 rounded bg-blue-50 border border-blue-200">
+                                    <div class="flex items-center text-blue-700 font-semibold"><i data-lucide="route" class="w-4 h-4 mr-2"></i>外出</div>
+                                    <div id="count-outbound" class="text-blue-800 font-bold">0</div>
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-2">點擊可查看詳細名單</div>
+                        </div>
+                        <div id="dashboard-notifications" class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
+                           <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="bell" class="w-4 h-4 mr-2"></i>通知</h3>
+                           <div id="dashboard-duty-list" class="space-y-2 text-gray-700">
+                             <div class="text-gray-500">讀取中...</div>
+                           </div>
+                           <div class="mt-2 border-t border-gray-100"></div>
+                           <div id="dashboard-anomalies-list" class="space-y-2 text-gray-700 mt-2">
+                             <div class="text-gray-500">讀取中...</div>
+                           </div>
+                        </div>
                         <div class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
                             <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="building-2" class="w-4 h-4 mr-2"></i>社區列表</h3>
                             <div id="dashboard-community-list" class="space-y-2 text-gray-700">
@@ -1755,7 +1793,11 @@
                         </div>
                         <div id="dashboard-notifications" class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
                            <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="bell" class="w-4 h-4 mr-2"></i>通知</h3>
-                           <div id="dashboard-notifications-list" class="space-y-2 text-gray-700">
+                           <div id="dashboard-duty-list" class="space-y-2 text-gray-700">
+                             <div class="text-gray-500">讀取中...</div>
+                           </div>
+                           <div class="mt-2 border-t border-gray-100"></div>
+                           <div id="dashboard-anomalies-list" class="space-y-2 text-gray-700 mt-2">
                              <div class="text-gray-500">讀取中...</div>
                            </div>
                         </div>`;
@@ -1777,6 +1819,8 @@
                 // 管理階層載入社區列表
                 if (isManagerial) {
                     loadDashboardCommunityList();
+                    // 管理者異常通知
+                    try { renderManagerAnomalies(); } catch (e) { console.warn('渲染異常通知失敗', e); }
                 }
                 
                 // 檢查是否顯示員工狀態
@@ -1846,6 +1890,7 @@
                             listEl.innerHTML = '<div class="text-gray-500">暫無社區資料</div>';
                             return;
                         }
+                        const isAdmin = state.currentUserData?.role === 'admin';
                         snap.forEach(docSnap => {
                             const c = docSnap.data();
                             const lat = c.location?.latitude;
@@ -1866,6 +1911,7 @@
                                 </div>
                                 <div class="flex items-center gap-2">
                                     ${(Number.isFinite(lat) && Number.isFinite(lng)) ? `<button class="view-map-btn px-2 py-1 text-gray-600 hover:text-red-600" data-lat="${lat}" data-lng="${lng}"><i data-lucide="map-pin" class="w-4 h-4"></i></button>` : ''}
+                                    ${isAdmin ? `<button class="delete-community-btn px-2 py-1 text-gray-600 hover:text-red-600" data-id="${docSnap.id}"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
                                 </div>`;
                             listEl.appendChild(row);
                         });
@@ -1876,12 +1922,167 @@
                             if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
                             openMapModal(lat, lng);
                         }));
+                        listEl.querySelectorAll('.delete-community-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+                            const id = e.currentTarget.dataset.id;
+                            if (!id) return;
+                            const ok = confirm('確定要刪除此社區？此操作不可逆。');
+                            if (!ok) return;
+                            try {
+                                const { doc, deleteDoc } = window.__fs; const db = window.__db;
+                                await deleteDoc(doc(db, 'communities', id));
+                                e.currentTarget.closest('.flex.items-center.justify-between')?.remove();
+                                try { if (state.communitiesById) { delete state.communitiesById[id]; } } catch (_) {}
+                                showToast('已刪除社區');
+                            } catch (err) {
+                                console.error('刪除社區失敗', err);
+                                showToast('刪除社區失敗', true);
+                            }
+                        }));
                     }).catch((err) => {
                         console.error('讀取社區列表失敗', err);
                         listEl.innerHTML = '<div class="text-red-500">讀取社區列表失敗</div>';
                     });
                 } catch (e) {
                     console.warn('初始化社區列表失敗', e);
+                }
+            }
+
+            // 管理者異常通知（未打卡、定位異常、提早下班）
+            async function renderManagerAnomalies() {
+                try {
+                    const listEl = document.getElementById('dashboard-anomalies-list');
+                    if (!listEl) return;
+                    const fs = window.__fs || {}; const db = window.__db;
+                    const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                    // 取得所有使用者（套用可見性設定）
+                    const usersSnap = await getDocs(collection(db, 'users'));
+                    let users = [];
+                    usersSnap.forEach(d => users.push({ id: d.id, ...d.data() }));
+                    let visibleUsers = {};
+                    try {
+                        const savedSettings = localStorage.getItem('app_general_settings');
+                        if (savedSettings) { visibleUsers = JSON.parse(savedSettings).visibleUsers || {}; }
+                    } catch (_) {}
+                    users = users.filter(u => visibleUsers[u.id] !== false);
+
+                    // 依當前社區過濾（若有）
+                    const currentCode = state.currentCommunity?.code || state.currentCommunity?.id || null;
+                    if (currentCode) {
+                        users = users.filter(u => Array.isArray(u.serviceCommunities) ? u.serviceCommunities.includes(currentCode) : (u.serviceCommunityCode === currentCode));
+                    }
+
+                    // 今日範圍
+                    const now = new Date();
+                    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                    const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
+                    const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
+
+                    // 取全日打卡紀錄（前端過濾所屬使用者）
+                    const recSnap = await getDocs(query(collection(db, 'clockInRecords'), where('timestamp', '>=', tsStart), where('timestamp', '<=', tsEnd)));
+                    const records = [];
+                    recSnap.forEach(d => records.push({ id: d.id, ...d.data() }));
+
+                    const byUser = {};
+                    users.forEach(u => { byUser[u.id] = []; });
+                    records.forEach(r => { if (byUser[r.userId]) byUser[r.userId].push(r); });
+                    Object.keys(byUser).forEach(uid => {
+                        byUser[uid].sort((a,b)=>{
+                            const ta = a.timestamp?.toDate?.() ? a.timestamp.toDate() : (a.timestamp ? new Date(a.timestamp) : new Date(0));
+                            const tb = b.timestamp?.toDate?.() ? b.timestamp.toDate() : (b.timestamp ? new Date(b.timestamp) : new Date(0));
+                            return ta - tb;
+                        });
+                    });
+
+                    // 讀取今日預期上下班時間（全域+個人覆蓋）
+                    const ymKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}`;
+                    const { doc, getDoc } = fs;
+                    let daysMap = {};
+                    try {
+                        const sSnap = await getDoc(doc(db, 'settings', `workdays_${ymKey}`));
+                        if (sSnap.exists()) { const sd = sSnap.data(); daysMap = sd?.days || {}; }
+                    } catch (_) {}
+                    // 簡化：個人覆蓋僅在有資料時讀取
+                    await Promise.all(users.map(async (u) => {
+                        try {
+                            const uSnap = await getDoc(doc(db, 'users', u.id, 'workdays', ymKey));
+                            if (uSnap.exists()) {
+                                const ud = uSnap.data();
+                                daysMap = { ...daysMap, ...(ud?.days || {}) };
+                            }
+                        } catch (_) {}
+                    }));
+
+                    const holidays = window.__holidaySettingsCache || { weekendIsHoliday: false, holidays: [] };
+                    const holidaysSet = new Set(holidays.holidays || []);
+                    const isHoliday = (date) => {
+                        const ymd = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+                        const weekend = date.getDay() === 0 || date.getDay() === 6;
+                        return holidaysSet.has(ymd) || (holidays.weekendIsHoliday && weekend);
+                    };
+
+                    const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+                    const expectedEndTimeOf = (u) => {
+                        const d = daysMap[ymdToday] || {};
+                        return d.end || (!isHoliday(start) && (start.getDay()>=1 && start.getDay()<=5) ? '17:30' : '');
+                    };
+                    const expectedStartTimeOf = (u) => {
+                        const d = daysMap[ymdToday] || {};
+                        return d.start || (!isHoliday(start) && (start.getDay()>=1 && start.getDay()<=5) ? '09:00' : '');
+                    };
+
+                    const anomalies = [];
+                    users.forEach(u => {
+                        const recs = byUser[u.id] || [];
+                        // 未打卡（有預期上班時間且當日無任何紀錄）
+                        const expStart = expectedStartTimeOf(u);
+                        if (expStart && recs.length === 0) {
+                            anomalies.push({ type: '未打卡', user: u, detail: '今日尚未有任何打卡紀錄' });
+                        }
+                        // 位置異常（任何紀錄標記異常）
+                        for (const r of recs) {
+                            const abnormal = computeRecordAbnormal(r, Array.isArray(u.serviceCommunities) ? u.serviceCommunities : (u.serviceCommunityCode ? [u.serviceCommunityCode] : []));
+                            if (abnormal && abnormal.isAbnormal) {
+                                anomalies.push({ type: '打卡定位異常', user: u, detail: abnormal.detail || '' });
+                                break;
+                            }
+                        }
+                        // 提早下班（最後一筆為下班且早於預期）
+                        const last = recs[recs.length-1] || null;
+                        const expEnd = expectedEndTimeOf(u);
+                        if (last && (last.type === '下班' || last.type === '自動下班') && expEnd) {
+                            const ts = last.timestamp?.toDate?.() ? last.timestamp.toDate() : (last.timestamp ? new Date(last.timestamp) : null);
+                            if (ts) {
+                                const [eh, em] = expEnd.split(':').map(x=>parseInt(x,10));
+                                const endDt = new Date(start.getFullYear(), start.getMonth(), start.getDate(), eh||17, em||30, 0, 0);
+                                if (ts < endDt) {
+                                    anomalies.push({ type: '提早下班打卡', user: u, detail: `下班時間 ${ts.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}，早於預期 ${expEnd}` });
+                                }
+                            }
+                        }
+                    });
+
+                    // 顯示通知
+                    let html = '';
+                    anomalies.forEach(a => {
+                        const name = a.user.name || a.user.displayName || '未命名';
+                        const icon = a.type === '未打卡' ? 'alert-triangle' : (a.type === '打卡定位異常' ? 'map-pin' : 'log-out');
+                        const color = a.type === '未打卡' ? 'text-red-700' : (a.type === '打卡定位異常' ? 'text-yellow-700' : 'text-orange-700');
+                        const bg = a.type === '未打卡' ? 'bg-red-50 border-red-200' : (a.type === '打卡定位異常' ? 'bg-yellow-50 border-yellow-200' : 'bg-orange-50 border-orange-200');
+                        html += `
+                            <div class="p-3 ${bg} border rounded-md">
+                                <div class="flex items-center">
+                                    <i data-lucide="${icon}" class="w-4 h-4 mr-2 ${color}"></i>
+                                    <span class="font-medium text-gray-800">${a.type}</span>
+                                </div>
+                                <div class="mt-1 text-sm text-gray-700">${name}</div>
+                                ${a.detail ? `<div class="mt-1 text-xs text-gray-500">${a.detail}</div>` : ''}
+                            </div>`;
+                    });
+                    listEl.innerHTML = html || '<div class="text-gray-500">暫無異常通知</div>';
+                    try { lucide.createIcons(); } catch (_) {}
+                } catch (e) {
+                    console.warn('載入管理者異常通知失敗', e);
                 }
             }
 
@@ -1899,7 +2100,7 @@
                     const fs = window.__fs || {};
                     const db = window.__db;
                     const user = window.__auth?.currentUser;
-                    const listEl = document.getElementById('dashboard-notifications-list');
+                    const listEl = document.getElementById('dashboard-duty-list');
                     if (!db || !user || !listEl) return;
 
                     const { doc, getDoc, collection, query, where, onSnapshot, Timestamp } = fs;
@@ -1939,8 +2140,10 @@
 
                         const shouldShow = (day === 1 && names.length > 0) || (day === 5 && names.length > 0 && !cleared);
                         if (shouldShow) {
-                            listEl.innerHTML = `
-                                <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                            // 建立或更新週五值班提醒卡片
+                            let card = document.getElementById('duty-reminder-card');
+                            const html = `
+                                <div id="duty-reminder-card" class="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                                   <div class="flex items-center justify-between">
                                     <div class="flex items-center"><i data-lucide="alert-circle" class="w-4 h-4 mr-2 text-yellow-600"></i><span class="font-medium text-yellow-800">本週五值班</span></div>
                                     <button id="view-calendar" class="text-blue-600 hover:underline text-sm">查看月曆</button>
@@ -1948,11 +2151,23 @@
                                   <div class="mt-2 text-sm text-gray-700">值班人員：${names.join('、')}</div>
                                   <div class="mt-1 text-xs text-gray-500">星期五（${isoFriday}）值班提醒</div>
                                 </div>`;
+                            if (card) {
+                                card.outerHTML = html;
+                                card = document.getElementById('duty-reminder-card');
+                            } else {
+                                listEl.insertAdjacentHTML('afterbegin', html);
+                                card = document.getElementById('duty-reminder-card');
+                            }
                             const btn = document.getElementById('view-calendar');
                             btn?.addEventListener('click', () => showPage('calendar', 'overview'));
                             lucide.createIcons();
                         } else {
-                            listEl.innerHTML = '<div class="text-gray-500">暫無通知</div>';
+                            // 移除值班提醒卡片，不影響其他通知
+                            const card = document.getElementById('duty-reminder-card');
+                            if (card) card.remove();
+                            if (!listEl.children.length) {
+                                listEl.innerHTML = '<div class="text-gray-500">暫無提醒</div>';
+                            }
                         }
 
                         // 週五當天監聽打卡紀錄以清除提醒
@@ -1977,7 +2192,11 @@
                                 });
                                 if (clearedNow) {
                                     localStorage.setItem(clearedKey, '1');
-                                    listEl.innerHTML = '<div class="text-gray-500">暫無通知</div>';
+                                    const card = document.getElementById('duty-reminder-card');
+                                    if (card) card.remove();
+                                    if (!listEl.children.length) {
+                                        listEl.innerHTML = '<div class="text-gray-500">暫無提醒</div>';
+                                    }
                                 }
                             });
                             state.activeListeners.push(unsubDuty);
@@ -7812,23 +8031,8 @@
                         const communitiesSnap = await getDocs(collection(db, 'communities'));
                         const communities = [];
                         communitiesSnap.forEach(docSnap => communities.push({ id: docSnap.id, ...docSnap.data() }));
-                        // 依社區編號排序（優先以數字排序，無編號或非數字編號者排在後並以字母排序）
-                        communities.sort((a, b) => {
-                            const ax = a.code ?? '';
-                            const bx = b.code ?? '';
-                            const an = parseInt(String(ax).replace(/[^0-9]/g, ''), 10);
-                            const bn = parseInt(String(bx).replace(/[^0-9]/g, ''), 10);
-                            const aHasNum = !Number.isNaN(an);
-                            const bHasNum = !Number.isNaN(bn);
-                            if (aHasNum && bHasNum) {
-                                if (an !== bn) return an - bn;
-                                return String(ax).localeCompare(String(bx));
-                            }
-                            if (aHasNum) return -1;
-                            if (bHasNum) return 1;
-                            // 都沒有數字編號時，改以 code 字母排序，再以名稱排序
-                            return String(ax).localeCompare(String(bx)) || (a.name || '').localeCompare(b.name || '');
-                        });
+                        // 依社區編號排序（如 A101、A102、...、B207、B208）
+                        communities.sort(compareCommunitiesByCode);
                         const selectedIds = isEditing && Array.isArray(user.serviceCommunities) ? new Set(user.serviceCommunities) : new Set();
                         serviceCommunityListEl.innerHTML = communities.map(c => {
                             const label = `${c.region ? `[${c.region}] ` : ''}${c.code ? `[${c.code}] ` : ''}${c.name || ''}`;
