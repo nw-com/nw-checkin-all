@@ -198,10 +198,10 @@
         <!-- Header -->
         <header class="h-[70px] flex items-center justify-between px-4 border-b border-gray-200 flex-shrink-0">
             <div class="flex items-center space-x-2">
-                <div id="header-logo" class="flex items-center space-x-2">
+                <a id="header-logo" href="index.html?goto=navigation&sub=community" title="返回導覽頁" class="flex items-center space-x-2">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
-                    <span id="header-title" class="text-lg font-bold text-gray-800">西北社區打卡系統</span>
-                </div>
+                    <span id="header-title" class="text-lg font-bold text-gray-800 whitespace-nowrap">西北社區打卡系統</span>
+                </a>
                 <span id="welcome-message" class="text-sm text-gray-600 ml-2"></span>
             </div>
             <button id="profile-avatar-btn">
@@ -771,7 +771,7 @@
                 const titleEl = document.getElementById('header-title');
                 const c = state.currentCommunity;
                 if (titleEl) {
-                    titleEl.textContent = c?.name ? `${c.name}` : '西北社區打卡系統';
+                    titleEl.textContent = c?.name ? `${c.name} 社區` : '西北社區打卡系統';
                 }
             }
 
@@ -959,6 +959,18 @@
                 updateHeaderAvatar();
                 // 準備社區資料與標頭顯示
                 try { ensureCommunitiesCache().then(() => { computeAvailableCommunities(); updateHeaderCommunity(); }); } catch (_) {}
+                // 加入頁首 LOGO/標題的點擊事件，直接回導覽頁（依社區）
+                try {
+                    const headerLogo = document.getElementById('header-logo');
+                    if (headerLogo) {
+                        headerLogo.addEventListener('click', (ev) => {
+                            // 若存在 SPA 環境，避免整頁重載，直接切換到導覽頁
+                            ev.preventDefault();
+                            try { renderFooterNavForNavigation('community'); } catch (e) { /* noop */ }
+                            try { showPage('navigation', 'community'); } catch (e) { /* noop */ }
+                        });
+                    }
+                } catch (_) {}
                 // 取消頁首連結與按鈕行為（不再提供點擊導覽或社區切換）
                 
                 // 社區模式：隱藏內部標頭與底部導覽，並固定由外層控制
