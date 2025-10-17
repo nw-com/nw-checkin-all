@@ -1378,10 +1378,10 @@
                 if (isManagement) {
                     // 管理員、人事、高階主管、初階主管：依權限顯示並依指定順序排列
                     pushItem('dashboard', 'layout-dashboard', '儀表板');
-                    if (['admin','manager'].includes(role)) {
+                    if (['admin','hr','manager','junior_manager'].includes(role)) {
                         pushItem('tracking', 'map-pin', '追蹤');
                     }
-                    if (['admin','manager'].includes(role)) {
+                    if (['admin','hr','manager','junior_manager'].includes(role)) {
                         pushItem('schedule', 'calendar-days', '排班');
                     }
                     pushItem('features', 'layers', '功能');
@@ -1389,7 +1389,7 @@
                     if (['admin','manager','junior_manager','hr'].includes(role)) {
                         pushItem('group', 'git-branch', '巡邏');
                     }
-                    if (['admin','hr'].includes(role)) {
+                    if (['admin','hr','manager','junior_manager'].includes(role)) {
                         pushItem('hr', 'users', '人員');
                     }
                 } else if (isStaff) {
@@ -1455,17 +1455,18 @@
                     }
                 } catch (_) {}
                 mainContent.innerHTML = `<div class="flex justify-center items-center h-full"><div class="loader"></div></div>`;
+                const role = state.currentUserData?.role || '';
                 const router = {
                     'dashboard': renderDashboard,
                     'clock-in': () => renderClockIn(subPage || 'location'),
-                    'tracking': () => ['admin','manager','總幹事'].includes(state.currentUserData.role) ? renderTracking(subPage || 'map', params) : renderAccessDenied(),
+                    'tracking': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderTracking(subPage || 'map', params) : renderAccessDenied(),
                     'features': () => renderFeatures(subPage || 'news'),
                     'calendar': () => renderCalendar(subPage || 'overview'),
-                    'schedule': () => ['admin','manager'].includes(state.currentUserData.role) ? renderCalendar('schedule') : renderAccessDenied(),
-                    'settings': () => state.currentUserData.role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
-                    'hr': () => (['admin','hr'].includes(state.currentUserData.role)) ? renderHR(subPage || 'attendance') : renderAccessDenied(),
+                    'schedule': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderCalendar('schedule') : renderAccessDenied(),
+                    'settings': () => role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
+                    'hr': () => (['admin','hr','manager','junior_manager'].includes(role)) ? renderHR(subPage || 'applications') : renderAccessDenied(),
                     'navigation': () => isNavigationAllowed(state.currentUserData) ? renderNavigation(subPage || 'community') : renderAccessDenied(),
-                    'group': () => ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'].includes(state.currentUserData.role) ? renderGroup(subPage || 'map') : renderAccessDenied()
+                    'group': () => ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'].includes(role) ? renderGroup(subPage || 'map') : renderAccessDenied()
                 };
                 const renderFunction = router[pageName] || renderAccessDenied;
                 try {
@@ -2365,15 +2366,32 @@
             }
 
             function renderClockIn(subPage) {
+                const role = state.currentUserData?.role || '';
+                const isStaff = new Set(['總幹事','秘書','保全','清潔','機電']).has(role);
+                const tabs = isStaff
+                    ? [
+                        { key: 'location', label: '定位打卡' },
+                        { key: 'records', label: '打卡紀錄' },
+                        { key: 'workdays', label: '我的班表' },
+                        { key: 'leaves', label: '請假紀錄' }
+                      ]
+                    : [
+                        { key: 'location', label: '定位打卡' },
+                        { key: 'records', label: '打卡紀錄' },
+                        { key: 'retro', label: '補打卡' },
+                        { key: 'leaves', label: '請假紀錄' }
+                      ];
+
+                const tabsHtml = tabs.map(t => `
+                    <button data-subtab="${t.key}" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === t.key ? 'active' : ''}">${t.label}</button>
+                `).join('');
+
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
-                        <button data-subtab="location" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'location' ? 'active' : ''}">定位打卡</button>
-                        <button data-subtab="records" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'records' ? 'active' : ''}">打卡紀錄</button>
-                        <button data-subtab="retro" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'retro' ? 'active' : ''}">補打卡</button>
-                        <button data-subtab="leaves" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'leaves' ? 'active' : ''}">請假紀錄</button>
+                        ${tabsHtml}
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
-                
+
                 const subPageContent = document.getElementById('sub-page-content');
                 if (subPage === 'location') {
                     renderClockInLocation(subPageContent);
@@ -2383,8 +2401,14 @@
                     renderRetroClockRequestForm(subPageContent);
                 } else if (subPage === 'leaves') {
                     renderMyLeaveRecords(subPageContent);
+                } else if (subPage === 'workdays') {
+                    // 只讀的我的班表（月視圖）
+                    renderWorkDatesMonthView(subPageContent);
+                } else {
+                    // 預設落到定位打卡
+                    renderClockInLocation(subPageContent);
                 }
-                
+
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('clock-in', btn.dataset.subtab)));
             }
 
@@ -3948,12 +3972,13 @@
             }
             
             function renderTracking(subPage, params = {}) {
+                const role = state.currentUserData?.role || '';
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
                         <button data-subtab="map" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'map' || !subPage ? 'active' : ''}">人員地圖</button>
                         <button data-subtab="attendance" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'attendance' ? 'active' : ''}">出勤紀錄</button>
                         <button data-subtab="leave" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'leave' ? 'active' : ''}">假單審核</button>
-                        <button data-subtab="retro" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'retro' ? 'active' : ''}">補打申請</button>
+                        <button data-subtab="retro" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'retro' ? 'active' : ''}">修改申請</button>
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
                 
@@ -4359,30 +4384,36 @@
                 await renderList();
             }
 
-            // 人事分頁：出勤列表、請假列表
+            // 人員分頁：帳號申請、帳號列表（各社區獨立內容）
             function renderHR(subPage) {
+                const role = state.currentUserData?.role || '';
+                // 依需求：人員頁只提供帳號申請、帳號列表
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
-                        <button data-subtab="attendance" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'attendance' ? 'active' : ''}">出勤列表</button>
-                        <button data-subtab="leave" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'leave' ? 'active' : ''}">請假列表</button>
+                        <button data-subtab="applications" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'applications' ? 'active' : ''}">帳號申請</button>
+                        <button data-subtab="accounts" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'accounts' ? 'active' : ''}">帳號列表</button>
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
 
                 const subPageContent = document.getElementById('sub-page-content');
-                if (subPage === 'leave') {
-                    renderTrackingLeave(subPageContent);
+                if (subPage === 'accounts') {
+                    renderSettingsAccounts(subPageContent);
                 } else {
-                    renderTrackingAttendance(subPageContent);
+                    renderSettingsApplications(subPageContent);
                 }
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('hr', btn.dataset.subtab)));
             }
 
             // 群組分頁：人員地圖、出勤紀錄（僅顯示指定成員）
             function renderGroup(subPage) {
+                const role = state.currentUserData?.role || '';
+                const isManagement = new Set(['admin','hr','manager','junior_manager']).has(role);
+                const firstLabel = isManagement ? '巡邏任務' : '開始巡邏';
+                const secondLabel = '巡邏紀錄';
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
-                        <button data-subtab="map" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'map' || !subPage ? 'active' : ''}">人員地圖</button>
-                        <button data-subtab="attendance" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'attendance' ? 'active' : ''}">出勤紀錄</button>
+                        <button data-subtab="map" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'map' || !subPage ? 'active' : ''}">${firstLabel}</button>
+                        <button data-subtab="attendance" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'attendance' ? 'active' : ''}">${secondLabel}</button>
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
 
@@ -7781,7 +7812,23 @@
                         const communitiesSnap = await getDocs(collection(db, 'communities'));
                         const communities = [];
                         communitiesSnap.forEach(docSnap => communities.push({ id: docSnap.id, ...docSnap.data() }));
-                        communities.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+                        // 依社區編號排序（優先以數字排序，無編號或非數字編號者排在後並以字母排序）
+                        communities.sort((a, b) => {
+                            const ax = a.code ?? '';
+                            const bx = b.code ?? '';
+                            const an = parseInt(String(ax).replace(/[^0-9]/g, ''), 10);
+                            const bn = parseInt(String(bx).replace(/[^0-9]/g, ''), 10);
+                            const aHasNum = !Number.isNaN(an);
+                            const bHasNum = !Number.isNaN(bn);
+                            if (aHasNum && bHasNum) {
+                                if (an !== bn) return an - bn;
+                                return String(ax).localeCompare(String(bx));
+                            }
+                            if (aHasNum) return -1;
+                            if (bHasNum) return 1;
+                            // 都沒有數字編號時，改以 code 字母排序，再以名稱排序
+                            return String(ax).localeCompare(String(bx)) || (a.name || '').localeCompare(b.name || '');
+                        });
                         const selectedIds = isEditing && Array.isArray(user.serviceCommunities) ? new Set(user.serviceCommunities) : new Set();
                         serviceCommunityListEl.innerHTML = communities.map(c => {
                             const label = `${c.region ? `[${c.region}] ` : ''}${c.code ? `[${c.code}] ` : ''}${c.name || ''}`;
