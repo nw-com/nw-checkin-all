@@ -9040,13 +9040,16 @@
                             descriptions = fallbackPhotos.map(p => (typeof p.description === 'string' ? p.description : ''));
                         }
 
-                        // 安全座標處理：若缺少或為後備，使用 (0,0)
-                        const safeLat = (location && typeof location.lat === 'number') ? location.lat : 0;
-                        const safeLng = (location && typeof location.lng === 'number') ? location.lng : 0;
+                        // 安全座標處理：僅接受有限數值，否則回退 (0,0)
+                        const toFinite = (n) => (typeof n === 'number' && Number.isFinite(n)) ? n : 0;
+                        const safeLat = toFinite(location?.lat);
+                        const safeLng = toFinite(location?.lng);
 
                         const uid = window.__auth?.currentUser?.uid || state.currentUser?.uid;
-                        if (!uid) {
-                            throw new Error('未登入或找不到使用者，無法寫入打卡記錄');
+                        if (!uid || !window.__auth?.currentUser) {
+                            showToast('尚未登入或登入逾時，請重新登入', true);
+                            showLoading(false);
+                            return;
                         }
                         const recordData = {
                             userId: uid,
