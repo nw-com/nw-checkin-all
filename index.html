@@ -159,7 +159,7 @@
         <div class="text-center mb-8">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
             <h1 class="text-2xl font-bold text-gray-800 mt-4">西北社區打卡系統</h1>
-            <p class="text-gray-500">社區版V1.1.1</p>
+            <p class="text-gray-500">社區版V1.2.1</p>
         </div>
         <form id="login-form">
             <div class="mb-4">
@@ -1800,6 +1800,12 @@
                     <div class="p-4 overflow-y-auto" style="height: calc(100% - 50px);">${contentHtml}</div>
                 `;
                 lucide.createIcons();
+                // 初始更新「我的狀態」以確保立即顯示（僅非管理視圖）
+                try {
+                    if (!isManagerial && typeof updateDashboardStatus === 'function') {
+                        updateDashboardStatus();
+                    }
+                } catch (e) { console.warn('updateDashboardStatus 初始執行失敗', e); }
                 const timeEl = document.getElementById('current-time');
                 const timerInterval = setInterval(() => {
                     if(timeEl){ timeEl.textContent = new Date().toLocaleString('zh-TW', { dateStyle: 'long', timeStyle: 'medium' }); }
@@ -3707,7 +3713,10 @@
                                         recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
                                     }
                                 } catch (e) {
-                                    recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗，請稍後再試。</div>`;
+                                    const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
+                                    const logFn = expectedCodes.includes(e?.code) ? console.warn : console.error;
+                                    logFn('讀取使用者狀態快照失敗:', e?.code, e?.message || e);
+                                    recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
                                 }
                             })();
                             return;
@@ -3901,7 +3910,7 @@
                                 try {
                                     const { doc, getDoc } = window.__fs; const db2 = window.__db;
                                     const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
-                                    if (!uid) { recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗。</div>`; return; }
+                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`; return; }
                                     const userRef = doc(db2, 'users', uid);
                                     const userSnap = await getDoc(userRef);
                                     if (userSnap.exists() && userSnap.data().clockInStatus) {
@@ -3922,11 +3931,11 @@
                                         try { lucide.createIcons(); } catch(e){}
                                     } else {
                                         const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
-                                        recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗。${hint}</div>`;
+                                        recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄 ${hint}</p>`;
                                     }
                                 } catch (e2) {
                                     const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
-                                    recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗。${hint}</div>`;
+                                    recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄 ${hint}</p>`;
                                 }
                             })();
                         }
