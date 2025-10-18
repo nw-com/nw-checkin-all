@@ -9165,6 +9165,10 @@
                         
                         // 更新頁面顯示
                         updateStatusDisplay();
+                        // 保險：直接刷新儀表板狀態（即使打卡頁區塊不存在也更新）
+                        if (typeof updateDashboardStatus === 'function') {
+                            try { updateDashboardStatus(); } catch (e) { console.warn('updateDashboardStatus 執行失敗', e); }
+                        }
                         // 立即更新按鈕狀態，確保離開/返回等循環按鈕文字與樣式正確
                         if (typeof updateButtonStatus === 'function') {
                             try { updateButtonStatus(); } catch (e) { console.warn('updateButtonStatus 執行失敗', e); }
