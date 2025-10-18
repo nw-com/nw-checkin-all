@@ -9131,7 +9131,7 @@
                         const recordData = {
                             userId: uid,
                             type: type,
-                            timestamp: Timestamp.now(),
+                            timestamp: serverTimestamp(),
                             location: new GeoPoint(safeLat, safeLng),
                             photoUrls,
                             descriptions,
