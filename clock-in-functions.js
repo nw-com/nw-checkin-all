@@ -220,7 +220,51 @@ function updateDashboardStatus() {
                     }
                 }
             } catch (e) {
-                console.error('讀取最新打卡紀錄失敗:', e);
+                const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
+                const logFn = expectedCodes.includes(e?.code) ? console.warn : console.error;
+                logFn('讀取最新打卡紀錄失敗:', e?.code, e?.message || e);
+                try {
+                    const { doc, getDoc } = window.__fs;
+                    const userId = window.__auth?.currentUser?.uid || state.currentUser?.uid;
+                    if (!userId) {
+                        const statusText = '尚未打卡';
+                        const statusColor = getStatusColor(statusText);
+                        dashboardStatusElement.innerHTML = `
+                            <div class="flex items-center justify-between">
+                                <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
+                            </div>`;
+                    } else {
+                        const userRef = doc(window.__db, 'users', userId);
+                        const userDoc = await getDoc(userRef);
+                        if (userDoc.exists() && userDoc.data().clockInStatus) {
+                            const u = userDoc.data();
+                            const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
+                            const statusColor = getStatusColor(statusText);
+                            const ts = u.lastUpdated && u.lastUpdated.toDate ? u.lastUpdated.toDate() : (u.lastUpdated ? new Date(u.lastUpdated) : null);
+                            dashboardStatusElement.innerHTML = `
+                                <div class="flex items-center justify-between">
+                                    <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
+                                </div>
+                                <div class="text-sm text-gray-500 mt-1">
+                                    ${ts ? '狀態更新 ' + ts.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'}) : ''}
+                                </div>`;
+                        } else {
+                            const statusText = '尚未打卡';
+                            const statusColor = getStatusColor(statusText);
+                            dashboardStatusElement.innerHTML = `
+                                <div class="flex items中心 justify-between">
+                                    <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
+                                </div>`;
+                        }
+                    }
+                } catch (e2) {
+                    const statusText = '尚未打卡';
+                    const statusColor = getStatusColor(statusText);
+                    dashboardStatusElement.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
+                        </div>`;
+                }
             }
         })();
     }

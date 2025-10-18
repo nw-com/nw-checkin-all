@@ -3676,7 +3676,40 @@
                         if (!recordsListEl) return;
                         
                         if (querySnapshot.empty) {
-                            recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
+                            (async () => {
+                                try {
+                                    const { doc, getDoc } = window.__fs; const db2 = window.__db;
+                                    const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
+                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`; return; }
+                                    const userRef = doc(db2, 'users', uid);
+                                    const userSnap = await getDoc(userRef);
+                                    if (userSnap.exists()) {
+                                        const u = userSnap.data();
+                                        const ts = u.lastUpdated?.toDate?.() || (u.lastUpdated ? new Date(u.lastUpdated) : null);
+                                        if (u.clockInStatus && ts && ts >= startOfDay && ts <= endOfDay) {
+                                            const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
+                                            const statusColor = getStatusColor(statusText);
+                                            recordsListEl.innerHTML = `
+                                                <div class="bg-white p-3 rounded-lg shadow-sm border mb-3">
+                                                    <div class="flex justify-between items-start">
+                                                        <div>
+                                                            <p class="font-bold text-lg ${statusColor}">${statusText}</p>
+                                                            <p class="text-sm text-gray-600">${formatDate(ts)}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div class="mt-2 text-xs text-gray-400">來源：使用者狀態快照（clockInRecords 建立失敗）</div>
+                                                </div>`;
+                                            try { lucide.createIcons(); } catch(e){}
+                                        } else {
+                                            recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
+                                        }
+                                    } else {
+                                        recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
+                                    }
+                                } catch (e) {
+                                    recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗，請稍後再試。</div>`;
+                                }
+                            })();
                             return;
                         }
                         
@@ -3856,11 +3889,46 @@
                             });
                         });
                     }, (error) => {
-                        console.error("Error fetching records: ", error);
                         const recordsListEl = document.getElementById('records-list');
+                        const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
+                        if (expectedCodes.includes(error?.code)) {
+                            console.warn("讀取 clockInRecords 失敗:", error?.code, error?.message || error);
+                        } else {
+                            console.error("Error fetching records: ", error);
+                        }
                         if (recordsListEl) {
-                            const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
-                            recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗。${hint}</div>`;
+                            (async () => {
+                                try {
+                                    const { doc, getDoc } = window.__fs; const db2 = window.__db;
+                                    const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
+                                    if (!uid) { recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗。</div>`; return; }
+                                    const userRef = doc(db2, 'users', uid);
+                                    const userSnap = await getDoc(userRef);
+                                    if (userSnap.exists() && userSnap.data().clockInStatus) {
+                                        const u = userSnap.data();
+                                        const ts = u.lastUpdated?.toDate?.() || (u.lastUpdated ? new Date(u.lastUpdated) : null);
+                                        const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
+                                        const statusColor = getStatusColor(statusText);
+                                        recordsListEl.innerHTML = `
+                                            <div class="bg-white p-3 rounded-lg shadow-sm border mb-3">
+                                                <div class="flex justify-between items-start">
+                                                    <div>
+                                                        <p class="font-bold text-lg ${statusColor}">${statusText}</p>
+                                                        <p class="text-sm text-gray-600">${ts ? formatDate(ts) : ''}</p>
+                                                    </div>
+                                                </div>
+                                                <div class="mt-2 text-xs text-gray-400">來源：使用者狀態快照</div>
+                                            </div>`;
+                                        try { lucide.createIcons(); } catch(e){}
+                                    } else {
+                                        const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
+                                        recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗。${hint}</div>`;
+                                    }
+                                } catch (e2) {
+                                    const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
+                                    recordsListEl.innerHTML = `<div class="text-center text-red-500 p-4">讀取紀錄失敗。${hint}</div>`;
+                                }
+                            })();
                         }
                     });
 
@@ -9080,9 +9148,11 @@
                             const db2 = window.__db;
                             await addDoc(collection(db2, "clockInRecords"), recordData);
                         } catch (e) {
-                            console.error('新增 clockInRecords 失敗：', e?.code, e?.message || e, { keys: Object.keys(recordData), type: recordData.type, locationIsGeoPoint: recordData.location instanceof GeoPoint, photosLen: recordData.photoUrls.length, descLen: recordData.descriptions.length });
+                            const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
+                            const logFn = expectedCodes.includes(e?.code) ? console.warn : console.error;
+                            logFn('新增 clockInRecords 失敗：', e?.code, e?.message || e, { keys: Object.keys(recordData), type: recordData.type, locationIsGeoPoint: recordData.location instanceof GeoPoint, photosLen: recordData.photoUrls.length, descLen: recordData.descriptions.length });
                             // 當前架構僅上班/下班：若無法建立紀錄，回退為僅更新使用者狀態
-                            if (e?.code === 'permission-denied' || e?.code === 'failed-precondition' || e?.code === 'invalid-argument') {
+                            if (expectedCodes.includes(e?.code)) {
                                 try {
                                     const { updateDoc, doc } = window.__fs;
                                     const db2 = window.__db;
