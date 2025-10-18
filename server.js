@@ -17,15 +17,17 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   // Pretty URL rewrites
-  // /community -> /index.html?goto=navigation&sub=community
-  // /community/:id -> /index.html?goto=navigation&sub=community&communityId=:id
+  // /community -> /index.html?mode=community
+  // /community/:id -> /index.html?mode=community&communityId=:id
   if (url.pathname === '/community' || url.pathname.startsWith('/community/')) {
     const parts = url.pathname.split('/').filter(Boolean); // [ 'community', ':id' ]
     const id = parts[1] ? decodeURIComponent(parts[1]) : null;
     const params = new URLSearchParams(url.search);
-    params.set('goto', 'navigation');
-    params.set('sub', 'community');
+    params.set('mode', 'community');
     if (id) params.set('communityId', id);
+    // 移除舊版強制導覽的參數，改為儀表板預設
+    params.delete('goto');
+    params.delete('sub');
     return sendRedirect(res, '/index.html?' + params.toString());
   }
 

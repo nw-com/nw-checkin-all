@@ -9,10 +9,14 @@
     (function(){
       var url = new URL(window.location.href);
       var params = new URLSearchParams(url.search);
-      // 若已有既有參數則保留，否則預設導向導航頁的依社區分頁
-      if (!params.has('goto')) {
-        params.set('goto', 'navigation');
-        params.set('sub', 'community');
+      // 預設進入社區模式並顯示儀表板（不強制導向導覽頁）
+      if (!params.has('mode')) {
+        params.set('mode', 'community');
+      }
+      // 若舊連結帶有強制導覽的參數，移除以回到儀表板預設
+      if (params.get('goto') === 'navigation' && !params.has('communityId')) {
+        params.delete('goto');
+        params.delete('sub');
       }
       var target = 'index.html' + '?' + params.toString();
       window.location.replace(target);
@@ -20,7 +24,7 @@
   </script>
   <noscript>
     <!-- 無 JS 環境下以 meta refresh 導向 index.html -->
-    <meta http-equiv="refresh" content="0; url=index.html?goto=navigation&sub=community" />
+    <meta http-equiv="refresh" content="0; url=index.html?mode=community" />
   </noscript>
 </head>
 <body>
