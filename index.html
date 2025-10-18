@@ -2406,6 +2406,19 @@
                     }
                     const visibleUsersList = users.filter(user => visibleUsers[user.id] !== false);
                     
+                    // 進一步過濾：僅顯示服務「目前社區」的外勤相關角色（總幹事、秘書、保全、清潔、機電）
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || null;
+                    const filteredByRoleAndCommunity = visibleUsersList.filter(u => {
+                        if (!isFieldLikeRole(u.role)) return false;
+                        const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const codeSingle = u.serviceCommunityCode || null;
+                        const matchById = currentCommId ? ids.includes(currentCommId) : false;
+                        const matchByCode = currentCommCode ? (codesArr.includes(currentCommCode) || codeSingle === currentCommCode) : false;
+                        return matchById || matchByCode;
+                    });
+                    
                     // 排序：自訂狀態優先級 + 最近更新時間（新至舊） + 姓名
                     const statusPriority = (user) => {
                         const locationText = user.clockInStatus === '外出' && user.outboundLocation ? user.outboundLocation : (user.lastLocation?.address || null);
