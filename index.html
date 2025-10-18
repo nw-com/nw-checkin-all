@@ -1276,11 +1276,11 @@
 
             mainNav.addEventListener('click', (e) => {
                 const tabButton = e.target.closest('.tab-btn');
-                if (tabButton && !tabButton.classList.contains('active')) {
-                    showPage(tabButton.dataset.tab);
-                    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-                    tabButton.classList.add('active');
-                }
+                if (!tabButton) return;
+                const tab = tabButton.dataset.tab;
+                if (!tab || state.currentPage === tab) return;
+                // 交由 showPage 重建頁尾並設定正確的 active 樣式
+                showPage(tab);
             });
 
             // 導覽頁使用容器頁尾（Footer）作為子分頁切換，非內嵌於頁面內容
