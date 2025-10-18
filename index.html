@@ -3653,12 +3653,13 @@
             }
 
             function renderClockInRecords(container) {
-                const today = new Date().toISOString().split('T')[0];
+                const now = new Date();
+                const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
                 container.innerHTML = `
                     <div class="p-4 space-y-4">
                         <div class="flex items-center space-x-2">
-                            <label for="record-date" class="text-sm font-medium">篩選日期:</label>
-                            <input type="date" id="record-date" value="${today}" class="border border-gray-300 rounded-md px-2 py-1">
+                            <label for="record-month" class="text-sm font-medium">篩選月份:</label>
+                            <input type="month" id="record-month" value="${ym}" class="border border-gray-300 rounded-md px-2 py-1">
                             <button id="open-month-report" class="ml-2 px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm">月報表</button>
                         </div>
                         <div id="records-list" class="space-y-3">
@@ -3667,22 +3668,22 @@
                     </div>
                 `;
 
-                const dateInput = document.getElementById('record-date');
+                const monthInput = document.getElementById('record-month');
 
                 const loadRecords = async () => {
                     await ensureAbnormalMarkingConfig();
                     await ensureCommunitiesCache();
-                    const selectedDate = new Date(dateInput.value);
-                    const startOfDay = new Date(selectedDate);
-                    startOfDay.setHours(0, 0, 0, 0);
-                    const endOfDay = new Date(selectedDate);
-                    endOfDay.setHours(23, 59, 59, 999);
+                    const [yearStr, monthStr] = (monthInput.value || ym).split('-');
+                    const year = parseInt(yearStr, 10);
+                    const monthIdx = parseInt(monthStr, 10) - 1;
+                    const startOfMonth = new Date(year, monthIdx, 1, 0, 0, 0, 0);
+                    const endOfMonth = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
                     
                     const recordsRef = collection(db, "clockInRecords");
-                    // Firestore 端日期範圍查詢以避免時區邊界誤差（保留前端過濾作為保險）
+                    // Firestore 端月份範圍查詢以避免時區邊界誤差（保留前端過濾作為保險）
                     const { Timestamp } = window.__fs || {};
-                    const startTS = Timestamp?.fromDate ? Timestamp.fromDate(startOfDay) : startOfDay;
-                    const endTS = Timestamp?.fromDate ? Timestamp.fromDate(endOfDay) : endOfDay;
+                    const startTS = Timestamp?.fromDate ? Timestamp.fromDate(startOfMonth) : startOfMonth;
+                    const endTS = Timestamp?.fromDate ? Timestamp.fromDate(endOfMonth) : endOfMonth;
                     const q = query(
                         recordsRef,
                         where("userId", "==", state.currentUser.uid),
@@ -3699,13 +3700,13 @@
                                 try {
                                     const { doc, getDoc } = window.__fs; const db2 = window.__db;
                                     const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
-                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`; return; }
+                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`; return; }
                                     const userRef = doc(db2, 'users', uid);
                                     const userSnap = await getDoc(userRef);
                                     if (userSnap.exists()) {
                                         const u = userSnap.data();
                                         const ts = u.lastUpdated?.toDate?.() || (u.lastUpdated ? new Date(u.lastUpdated) : null);
-                                        if (u.clockInStatus && ts && ts >= startOfDay && ts <= endOfDay) {
+                                        if (u.clockInStatus && ts && ts >= startOfMonth && ts <= endOfMonth) {
                                             const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
                                             const statusColor = getStatusColor(statusText);
                                             recordsListEl.innerHTML = `
@@ -3720,16 +3721,16 @@
                                                 </div>`;
                                             try { lucide.createIcons(); } catch(e){}
                                         } else {
-                                            recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
-                                        }
-                                    } else {
-                                        recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
+                                                recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`;
+                                            }
+                                        } else {
+                                            recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`;
                                     }
                                 } catch (e) {
                                     const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
                                     const logFn = expectedCodes.includes(e?.code) ? console.warn : console.error;
                                     logFn('讀取使用者狀態快照失敗:', e?.code, e?.message || e);
-                                    recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`;
+                                    recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`;
                                 }
                             })();
                             return;
@@ -3744,7 +3745,7 @@
                         const filtered = records.filter(r => {
                             const ts = r.timestamp?.toDate?.() || (r.timestamp ? new Date(r.timestamp) : null);
                             if (!ts) return false;
-                            return ts >= startOfDay && ts <= endOfDay;
+                            return ts >= startOfMonth && ts <= endOfMonth;
                         }).sort((a, b) => {
                             const timeA = a.timestamp?.toDate?.() || (a.timestamp ? new Date(a.timestamp) : new Date(0));
                             const timeB = b.timestamp?.toDate?.() || (b.timestamp ? new Date(b.timestamp) : new Date(0));
@@ -3923,32 +3924,37 @@
                                 try {
                                     const { doc, getDoc } = window.__fs; const db2 = window.__db;
                                     const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
-                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄</p>`; return; }
+                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`; return; }
                                     const userRef = doc(db2, 'users', uid);
                                     const userSnap = await getDoc(userRef);
                                     if (userSnap.exists() && userSnap.data().clockInStatus) {
                                         const u = userSnap.data();
                                         const ts = u.lastUpdated?.toDate?.() || (u.lastUpdated ? new Date(u.lastUpdated) : null);
-                                        const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
-                                        const statusColor = getStatusColor(statusText);
-                                        recordsListEl.innerHTML = `
-                                            <div class="bg-white p-3 rounded-lg shadow-sm border mb-3">
-                                                <div class="flex justify-between items-start">
-                                                    <div>
-                                                        <p class="font-bold text-lg ${statusColor}">${statusText}</p>
-                                                        <p class="text-sm text-gray-600">${ts ? formatDate(ts) : ''}</p>
+                                        if (ts && ts >= startOfMonth && ts <= endOfMonth) {
+                                            const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
+                                            const statusColor = getStatusColor(statusText);
+                                            recordsListEl.innerHTML = `
+                                                <div class="bg-white p-3 rounded-lg shadow-sm border mb-3">
+                                                    <div class="flex justify-between items-start">
+                                                        <div>
+                                                            <p class="font-bold text-lg ${statusColor}">${statusText}</p>
+                                                            <p class="text-sm text-gray-600">${ts ? formatDate(ts) : ''}</p>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div class="mt-2 text-xs text-gray-400">來源：使用者狀態快照</div>
-                                            </div>`;
-                                        try { lucide.createIcons(); } catch(e){}
+                                                    <div class="mt-2 text-xs text-gray-400">來源：使用者狀態快照</div>
+                                                </div>`;
+                                            try { lucide.createIcons(); } catch(e){}
+                                        } else {
+                                            const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
+                                            recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄 ${hint}</p>`;
+                                        }
                                     } else {
                                         const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
-                                        recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄 ${hint}</p>`;
+                                        recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄 ${hint}</p>`;
                                     }
                                 } catch (e2) {
                                     const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
-                                    recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本日無打卡紀錄 ${hint}</p>`;
+                                    recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄 ${hint}</p>`;
                                 }
                             })();
                         }
@@ -3957,7 +3963,7 @@
                     state.activeListeners.push(unsubscribe);
                 };
 
-                dateInput.addEventListener('change', loadRecords);
+                monthInput.addEventListener('change', loadRecords);
                 loadRecords();
 
                 // 月報表：選擇月份彈窗
