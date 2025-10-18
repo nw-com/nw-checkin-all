@@ -4710,6 +4710,25 @@
                                 dutyType: null,
                                 isAutomatic: false
                             });
+                            // 同步使用者文件的狀態，讓儀表板即時顯示
+                            try {
+                                const userUpdate = {
+                                    status: type,
+                                    clockInStatus: type,
+                                    lastUpdated: Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date(),
+                                    outboundLocation: ['外出','抵達','離開'].includes(type) ? `${locationName}${reason ? '｜'+reason : ''}` : null,
+                                    dutyType: null
+                                };
+                                if (type === '上班') {
+                                    userUpdate.lastClockInTime = Timestamp?.fromDate ? Timestamp.fromDate(tsDate) : tsDate;
+                                }
+                                await updateDoc(doc(db, 'users', userId), userUpdate);
+                            } catch (uerr) {
+                                console.warn('更新使用者狀態失敗（非致命）', uerr);
+                            }
+                            if (typeof updateDashboardStatus === 'function') {
+                                try { updateDashboardStatus(); } catch {}
+                            }
                             showToast('已新增打卡紀錄');
                             backdrop.remove(); modal.remove();
                         } catch (err) {
