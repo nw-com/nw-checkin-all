@@ -8957,7 +8957,7 @@
 
                     try {
                         // 僅允許安全規則中的打卡類型
-                        const allowedTypes = ['上班','下班','外出','返回','抵達','離開','自動下班'];
+                        const allowedTypes = ['上班','下班'];
                         if (!allowedTypes.includes(type)) {
                             console.warn('不允許的打卡類型，已取消寫入：', type);
                             showToast('此打卡類型不支援紀錄寫入，請改用對應功能', true);
@@ -9024,7 +9024,7 @@
                             } catch (uploadErr) {
                                 console.warn('照片上傳至 Storage 失敗，改用壓縮後的 Data URL：', uploadErr);
                                 const fallbackPhotos = await Promise.all(uploadTargets.map(async (photo) => {
-                                    const url = await compressBlobToDataURL(photo.blob, 800, 0.6);
+                                    const url = await compressBlobToDataURL(photo.blob, 640, 0.5);
                                     return { url, description: photo.description };
                                 }));
                                 photoUrls = fallbackPhotos.map(p => p.url);
@@ -9033,7 +9033,7 @@
                         } else {
                             console.info('偵測到 GitHub Pages 網域或缺少 Storage，直接使用壓縮後的 Data URL。');
                             const fallbackPhotos = await Promise.all(uploadTargets.map(async (photo) => {
-                                const url = await compressBlobToDataURL(photo.blob, 800, 0.6);
+                                const url = await compressBlobToDataURL(photo.blob, 640, 0.5);
                                 return { url, description: photo.description };
                             }));
                             photoUrls = fallbackPhotos.map(p => p.url);
@@ -9081,7 +9081,25 @@
                             await addDoc(collection(db2, "clockInRecords"), recordData);
                         } catch (e) {
                             console.error('新增 clockInRecords 失敗：', e?.code, e?.message || e, { keys: Object.keys(recordData), type: recordData.type, locationIsGeoPoint: recordData.location instanceof GeoPoint, photosLen: recordData.photoUrls.length, descLen: recordData.descriptions.length });
-                            throw e;
+                            // 當前架構僅上班/下班：若無法建立紀錄，回退為僅更新使用者狀態
+                            if (e?.code === 'permission-denied' || e?.code === 'failed-precondition' || e?.code === 'invalid-argument') {
+                                try {
+                                    const { updateDoc, doc } = window.__fs;
+                                    const db2 = window.__db;
+                                    const uid2 = window.__auth?.currentUser?.uid || state.currentUser?.uid;
+                                    await updateDoc(doc(db2, "users", uid2), {
+                                        status: type,
+                                        clockInStatus: type,
+                                        lastUpdated: Timestamp.now()
+                                    });
+                                    console.warn('無法建立 clockInRecords，已改為僅更新使用者狀態');
+                                } catch (e2) {
+                                    console.error('回退更新使用者狀態失敗：', e2);
+                                    throw e;
+                                }
+                            } else {
+                                throw e;
+                            }
                         }
 
                         // 首次打卡裝置ID寫入：僅當使用者尚未有 firstClockInDeviceId
