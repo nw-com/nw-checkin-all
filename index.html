@@ -4870,10 +4870,6 @@
                     mainContent.innerHTML = `
                         <div class="h-[50px] flex items-center justify-between border-b border-gray-200 bg-white">
                             <div id="posts-tabs" class="flex items-center gap-2 flex-nowrap overflow-x-auto px-2"></div>
-                            <div class="flex items-center gap-2 pr-2">
-                                <button id="add-post-btn" class="px-3 py-1 rounded border bg-white hover:bg-red-50 text-gray-700">新增哨點</button>
-                                <button id="rename-post-btn" class="px-3 py-1 rounded border bg-white hover:bg-red-50 text-gray-700">重命名</button>
-                            </div>
                         </div>
                         <div class="overflow-y-auto" style="height: calc(100% - 50px);">
                             <div class="p-3">
@@ -4921,49 +4917,81 @@
                 const renderTabs = () => {
                     const tabsEl = document.getElementById('posts-tabs');
                     if (!tabsEl) return;
-                    tabsEl.innerHTML = pageState.posts.map(p=>`
-                        <button class="px-3 py-1 rounded-md text-sm font-medium ${pageState.selectedPostId===p.id? 'bg-red-600 text-white':'bg-white text-gray-700 border'}" data-post="${p.id}">${(p.name||'未命名哨點')}</button>
-                    `).join('');
-                    tabsEl.querySelectorAll('button').forEach(btn=>{
+                    tabsEl.innerHTML = [
+                        ...pageState.posts.map(p=>`
+                            <button class="px-3 py-1 rounded-md text-sm font-medium ${pageState.selectedPostId===p.id? 'bg-red-600 text-white':'bg-white text-gray-700 border'}" data-post="${p.id}" title="${p.name||'未命名哨點'}"><span class="post-name">${p.name||'未命名哨點'}</span></button>
+                        `),
+                        `<button class="px-3 py-1 rounded-md text-sm font-medium bg-white text-gray-700 border" data-action="add" title="新增哨點">＋</button>`
+                    ].join('');
+                    // 切換哨點
+                    tabsEl.querySelectorAll('button[data-post]').forEach(btn=>{
                         btn.addEventListener('click', ()=>{
                             pageState.selectedPostId = btn.getAttribute('data-post');
                             renderTabs();
                             loadMonth().then(()=> renderCalendar());
                         });
+                        // 直覺式重命名（雙擊）
+                        btn.addEventListener('dblclick', ()=>{
+                            const postId = btn.getAttribute('data-post');
+                            startRenameTab(btn, postId);
+                        });
                     });
-                    const addBtn = document.getElementById('add-post-btn');
-                    const renameBtn = document.getElementById('rename-post-btn');
-                    if (addBtn) addBtn.addEventListener('click', async ()=>{
-                        const name = prompt('請輸入哨點名稱');
-                        if (!name) return;
+                    // 使用「＋」子分頁新增哨點
+                    const plusBtn = tabsEl.querySelector('button[data-action="add"]');
+                    if (plusBtn) plusBtn.addEventListener('click', async ()=>{
                         try {
+                            const defaultName = '未命名哨點';
                             const newDoc = await addDoc(collection(db,'communities', communityId, 'posts'), {
                                 communityId,
-                                name: name,
+                                name: defaultName,
                                 createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             });
-                            pageState.posts.push({ id: newDoc.id, communityId, name });
+                            pageState.posts.push({ id: newDoc.id, communityId, name: defaultName });
                             pageState.selectedPostId = newDoc.id;
                             renderTabs();
+                            // 自動進入重命名模式
+                            const newTab = tabsEl.querySelector(`button[data-post="${newDoc.id}"]`);
+                            if (newTab) startRenameTab(newTab, newDoc.id);
                             await loadMonth();
                             renderCalendar();
                         } catch (e) { showToast('新增哨點失敗', true); }
                     });
-                    if (renameBtn) renameBtn.addEventListener('click', async ()=>{
-                        const post = pageState.posts.find(p=>p.id===pageState.selectedPostId);
-                        if (!post) return showToast('未選擇哨點', true);
-                        const name = prompt('請輸入新的哨點名稱', post.name||'');
-                        if (!name) return;
-                        try {
-                            await updateDoc(doc(db,'communities', communityId, 'posts', post.id), {
-                                name,
-                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                            });
-                            post.name = name;
+
+                    function startRenameTab(btn, postId) {
+                        const nameEl = btn.querySelector('.post-name');
+                        const current = nameEl ? nameEl.textContent : '';
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = current;
+                        input.className = 'px-2 py-1 text-sm border rounded';
+                        btn.innerHTML = '';
+                        btn.appendChild(input);
+                        input.focus();
+                        // 防止點擊輸入框觸發切換事件
+                        input.addEventListener('click', (e)=> e.stopPropagation());
+
+                        const commit = async (val) => {
+                            const newName = (val || '').trim();
+                            if (newName && newName !== current) {
+                                try {
+                                    await updateDoc(doc(db,'communities', communityId, 'posts', postId), {
+                                        name: newName,
+                                        updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                    });
+                                    const p = pageState.posts.find(p=>p.id===postId);
+                                    if (p) p.name = newName;
+                                } catch (e) { showToast('重命名失敗', true); }
+                            }
                             renderTabs();
-                        } catch (e) { showToast('重命名失敗', true); }
-                    });
+                        };
+
+                        input.addEventListener('keydown', (e)=>{
+                            if (e.key === 'Enter') commit(input.value);
+                            else if (e.key === 'Escape') renderTabs();
+                        });
+                        input.addEventListener('blur', ()=> commit(input.value));
+                    }
                 };
 
                 const renderMonthHeader = () => {
@@ -5096,13 +5124,7 @@
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
                             <div class="font-semibold">${iso} 的哨點班表</div>
-                            <div class="flex items-center gap-2">
-                                <button id="batch-copy-btn" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">批次複製到多天</button>
-                                <select id="template-select" class="px-2 py-1 border rounded text-sm"></select>
-                                <button id="apply-template-btn" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">套用模板</button>
-                                <button id="save-template-btn" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">儲存為模板</button>
-                                ${abnormal? `<div class="text-red-600 text-sm">異常：${abnormal}</div>`: ''}
-                            </div>
+                            ${abnormal? `<div class="text-red-600 text-sm">異常：${abnormal}</div>`: ''}
                         </div>
                         <div class="flex items-center gap-4 mb-3">
                             <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-scheduled" ${isScheduledDay?'checked':''}/> 排班日</label>
@@ -5136,108 +5158,7 @@
                             </div>
                         </div>`;
 
-                    // 模板與批次複製控件
-                    const templateSelect = document.getElementById('template-select');
-                    const applyTplBtn = document.getElementById('apply-template-btn');
-                    const saveTplBtn = document.getElementById('save-template-btn');
-                    const batchCopyBtn = document.getElementById('batch-copy-btn');
-
-                    const loadTemplates = async () => {
-                        try {
-                            if (!templateSelect) return [];
-                            const qref = collection(db,'communities', communityId, 'posts', pageState.selectedPostId, 'templates');
-                            const snap = await getDocs(qref);
-                            const templates = []; const tMap = {};
-                            snap.forEach(d=>{ const data = d.data(); const t = { id: d.id, ...data }; templates.push(t); tMap[t.id] = t; });
-                            templateSelect.innerHTML = ['<option value="">選擇模板</option>', ...templates.map(t=>`<option value="${t.id}">${t.name||t.id}</option>`)].join('');
-                            pageState.templatesMap = tMap; return templates;
-                        } catch (e) { console.warn('載入模板失敗', e); if (templateSelect) templateSelect.innerHTML = '<option value="">選擇模板</option>'; return []; }
-                    };
-                    await loadTemplates();
-
-                    if (applyTplBtn && templateSelect) applyTplBtn.addEventListener('click', async ()=>{
-                        const tplId = templateSelect.value || '';
-                        if (!tplId) return showToast('請先選擇模板', true);
-                        const tpl = pageState.templatesMap?.[tplId];
-                        if (!tpl) return showToast('模板不存在', true);
-                        try {
-                            const data = {
-                                communityId,
-                                postId: pageState.selectedPostId,
-                                dateIso: iso,
-                                dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
-                                isScheduledDay: true,
-                                overlapAllowed: !!tpl.overlapAllowed,
-                                requireFullDay: !!tpl.requireFullDay,
-                                shifts: Array.isArray(tpl.shifts)? tpl.shifts : [],
-                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                            };
-                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), data, { merge: true });
-                            showToast('已套用模板');
-                            await loadMonth(); renderCalendar(); renderDayPanel();
-                        } catch (e) { showToast('套用模板失敗', true); }
-                    });
-
-                    if (saveTplBtn) saveTplBtn.addEventListener('click', async ()=>{
-                        const name = prompt('請輸入模板名稱');
-                        if (!name) return;
-                        try {
-                            const tpl = {
-                                communityId,
-                                postId: pageState.selectedPostId,
-                                name,
-                                overlapAllowed,
-                                requireFullDay,
-                                shifts,
-                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                            };
-                            await addDoc(collection(db,'communities', communityId, 'posts', pageState.selectedPostId, 'templates'), tpl);
-                            showToast('已儲存模板');
-                            await loadTemplates();
-                        } catch (e) { showToast('儲存模板失敗', true); }
-                    });
-
-                    if (batchCopyBtn) batchCopyBtn.addEventListener('click', async ()=>{
-                        const txt = prompt('輸入目標日期（逗號分隔），或範圍：YYYY-MM-DD..YYYY-MM-DD');
-                        if (!txt) return;
-                        let targets = [];
-                        const segs = txt.split(',').map(s=>s.trim()).filter(Boolean);
-                        for (const s of segs) {
-                            if (s.includes('..')) {
-                                const [a,b] = s.split('..');
-                                const start = new Date(a+'T00:00:00');
-                                const end = new Date(b+'T00:00:00');
-                                if (isNaN(start) || isNaN(end) || start > end) continue;
-                                const cur = new Date(start);
-                                while (cur <= end) { targets.push(fmtYMD(cur)); cur.setDate(cur.getDate()+1); }
-                            } else {
-                                const d = new Date(s+'T00:00:00'); if (!isNaN(d)) targets.push(fmtYMD(d));
-                            }
-                        }
-                        targets = Array.from(new Set(targets)).filter(t=> t!==iso);
-                        if (!targets.length) return showToast('沒有有效日期', true);
-                        try {
-                            const dataBase = {
-                                communityId,
-                                postId: pageState.selectedPostId,
-                                isScheduledDay,
-                                overlapAllowed,
-                                requireFullDay,
-                                shifts,
-                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                            };
-                            await Promise.all(targets.map(tIso => {
-                                const docId = `${communityId}__${pageState.selectedPostId}__${tIso}`;
-                                const payload = { ...dataBase, dateIso: tIso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${tIso}T00:00:00`)) : new Date(`${tIso}T00:00:00`)) };
-                                return setDoc(doc(db,'communities', communityId, 'postSchedules', docId), payload, { merge: true });
-                            }));
-                            showToast(`已複製到 ${targets.length} 天`);
-                            await loadMonth(); renderCalendar(); renderDayPanel();
-                        } catch (e) { showToast('批次複製失敗', true); }
-                    });
+                    // 已移除模板與批次複製功能（按鍵與事件）
 
                     const saveBtn = document.getElementById('save-day-rules');
                     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
