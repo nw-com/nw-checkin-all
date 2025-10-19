@@ -4919,7 +4919,10 @@
                     if (!tabsEl) return;
                     tabsEl.innerHTML = [
                         ...pageState.posts.map(p=>`
-                            <button class="px-3 py-1 rounded-md text-sm font-medium ${pageState.selectedPostId===p.id? 'bg-red-600 text-white':'bg-white text-gray-700 border'}" data-post="${p.id}" title="${p.name||'未命名哨點'}"><span class="post-name">${p.name||'未命名哨點'}</span></button>
+                            <button class="px-3 py-1 rounded-md text-sm font-medium ${pageState.selectedPostId===p.id? 'bg-red-600 text-white':'bg-white text-gray-700 border'}" data-post="${p.id}" title="${p.name||'未命名哨點'}">
+                                <span class="post-name">${p.name||'未命名哨點'}</span>
+                                <span class="ml-2 text-gray-400 hover:text-red-600 delete-post" title="刪除">×</span>
+                            </button>
                         `),
                         `<button class="px-3 py-1 rounded-md text-sm font-medium bg-white text-gray-700 border" data-action="add" title="新增哨點">＋</button>`
                     ].join('');
@@ -4935,7 +4938,37 @@
                             const postId = btn.getAttribute('data-post');
                             startRenameTab(btn, postId);
                         });
+                        // 刪除哨點
+                        const del = btn.querySelector('.delete-post');
+                        if (del) del.addEventListener('click', async (e)=>{
+                            e.stopPropagation();
+                            const postId = btn.getAttribute('data-post');
+                            await handleDeletePost(postId);
+                        });
                     });
+
+                    async function handleDeletePost(postId) {
+                        if (!postId) return;
+                        if (!confirm('確定刪除該哨點及其班表？')) return;
+                        try {
+                            // 刪除哨點模板（若仍存在）
+                            const tplSnap = await getDocs(collection(db,'communities', communityId, 'posts', postId, 'templates'));
+                            await Promise.all(tplSnap.docs.map(d=> deleteDoc(doc(db,'communities', communityId, 'posts', postId, 'templates', d.id))));
+                            // 刪除該哨點所有班表
+                            const schedSnap = await getDocs(query(collection(db,'communities', communityId, 'postSchedules'), where('postId','==', postId)));
+                            await Promise.all(schedSnap.docs.map(d=> deleteDoc(doc(db,'communities', communityId, 'postSchedules', d.id))));
+                            // 刪除哨點文件
+                            await deleteDoc(doc(db,'communities', communityId, 'posts', postId));
+                            // 更新本地狀態
+                            pageState.posts = pageState.posts.filter(p=> p.id !== postId);
+                            if (pageState.selectedPostId === postId) pageState.selectedPostId = pageState.posts[0]?.id || null;
+                            renderTabs();
+                            await loadMonth();
+                            renderCalendar();
+                            renderDayPanel();
+                            showToast('哨點已刪除');
+                        } catch (e) { showToast('刪除哨點失敗', true); }
+                    }
                     // 使用「＋」子分頁新增哨點
                     const plusBtn = tabsEl.querySelector('button[data-action="add"]');
                     if (plusBtn) plusBtn.addEventListener('click', async ()=>{
@@ -5001,8 +5034,9 @@
                     title.textContent = `${d.getFullYear()} 年 ${d.getMonth()+1} 月`;
                     const prev = document.getElementById('prev-month');
                     const next = document.getElementById('next-month');
-                    if (prev) prev.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()-1, 1); loadMonth().then(()=>{ renderMonthHeader(); renderCalendar(); }); });
-                    if (next) next.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()+1, 1); loadMonth().then(()=>{ renderMonthHeader(); renderCalendar(); }); });
+                    // 使用 onclick 取代 addEventListener，避免重複綁定導致月份錯亂
+                    if (prev) prev.onclick = ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()-1, 1); loadMonth().then(()=>{ renderMonthHeader(); renderCalendar(); }); };
+                    if (next) next.onclick = ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()+1, 1); loadMonth().then(()=>{ renderMonthHeader(); renderCalendar(); }); };
                 };
 
                 const loadMonth = async () => {
@@ -5033,10 +5067,12 @@
                             const s2 = await getDocs(q2);
                             s2.forEach(d=> { if (!users.find(u=>u.id===d.id)) users.push({ id: d.id, ...d.data() }); });
                         } catch (_) {}
-                        // 生成 options HTML
-                        users.sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-                        pageState.communityUsers = users;
-                        pageState.userOptionsHTML = users.map(u=>`<option value="${u.id}">${u.name||u.displayName||u.id}</option>`).join('');
+                        // 僅保留指定角色（總幹事、秘書、保全、清潔、機電/電機）
+                        const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電','電機']);
+                        const filtered = users.filter(u=> allowedRoles.has((u.role||'').trim()));
+                        filtered.sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+                        pageState.communityUsers = filtered;
+                        pageState.userOptionsHTML = filtered.map(u=>`<option value="${u.id}">${u.name||u.displayName||u.id}</option>`).join('');
                     } catch (e) { console.warn('載入社區成員失敗', e); pageState.communityUsers = []; pageState.userOptionsHTML = ''; }
                 };
 
@@ -5137,11 +5173,22 @@
                             <div id="shift-list" class="space-y-3">
                                 ${shifts.map((s,idx)=>`
                                     <div class="flex items-start gap-2">
-                                        <div class="text-sm w-28">${s.start || '—'} ~ ${s.end || '—'}</div>
+                                        <div class="text-sm w-48">
+                                            <span data-time-label="${idx}">${s.start || '—'} ~ ${s.end || '—'}</span>
+                                            <div class="mt-1 space-x-1">
+                                                <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-edit="${idx}">編輯</button>
+                                                <span class="inline-flex items-center gap-1 hidden" data-edit-area="${idx}">
+                                                    <input type="time" class="px-1 py-0.5 border rounded text-xs" id="edit-start-${idx}" value="${s.start || ''}">
+                                                    <span>~</span>
+                                                    <input type="time" class="px-1 py-0.5 border rounded text-xs" id="edit-end-${idx}" value="${s.end || ''}">
+                                                    <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-edit-save="${idx}">儲存時間</button>
+                                                </span>
+                                            </div>
+                                        </div>
                                         <div class="flex-1">
                                             <div class="text-xs text-gray-500 mb-1">指定人員</div>
-                                            <select multiple class="px-2 py-1 border rounded text-xs min-w-[220px]" data-assign="${idx}">
-                                                ${pageState.communityUsers.map(u=>`<option value="${u.id}" ${(Array.isArray(s.assignees)&&s.assignees.includes(u.id))?'selected':''}>${u.name||u.displayName||u.id}</option>`).join('')}
+                                            <select class="px-2 py-1 border rounded text-xs min-w-[220px]" data-assign="${idx}">
+                                                ${pageState.communityUsers.map(u=>`<option value="${u.id}" ${(Array.isArray(s.assignees)&&s.assignees[0]===u.id)?'selected':''}>${(u.name||u.displayName||u.id)}｜${u.role||''}</option>`).join('')}
                                             </select>
                                             <button class="ml-2 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-assign-save="${idx}">儲存指派</button>
                                         </div>
@@ -5153,7 +5200,7 @@
                                 <input id="new-start" type="time" class="px-2 py-1 border rounded text-sm" />
                                 <span>~</span>
                                 <input id="new-end" type="time" class="px-2 py-1 border rounded text-sm" />
-                                <select id="new-assignees" multiple class="px-2 py-1 border rounded text-sm min-w-[220px]">${userOptions}</select>
+                                <select id="new-assignees" class="px-2 py-1 border rounded text-sm min-w-[220px]">${userOptions}</select>
                                 <button id="add-shift" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">新增班表</button>
                             </div>
                         </div>`;
@@ -5201,8 +5248,8 @@
                         btn.addEventListener('click', async ()=>{
                             const idx = parseInt(btn.getAttribute('data-assign-save'),10);
                             const sel = panel.querySelector(`[data-assign="${idx}"]`);
-                            const assVals = Array.from(sel?.selectedOptions||[]).map(o=>o.value);
-                            const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, assignees: assVals } : sh);
+                            const assVal = sel?.value || '';
+                            const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, assignees: assVal ? [assVal] : [] } : sh);
                             try {
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                                 showToast('已更新指派');
@@ -5213,14 +5260,44 @@
                         });
                     });
 
+                    // 編輯既有班表時間
+                    panel.querySelectorAll('[data-edit]').forEach(btn=>{
+                        btn.addEventListener('click', ()=>{
+                            const idx = parseInt(btn.getAttribute('data-edit'),10);
+                            const area = panel.querySelector(`[data-edit-area="${idx}"]`);
+                            if (area) {
+                                area.classList.toggle('hidden');
+                                const input = area.querySelector(`#edit-start-${idx}`);
+                                input && input.focus();
+                            }
+                        });
+                    });
+                    panel.querySelectorAll('[data-edit-save]').forEach(btn=>{
+                        btn.addEventListener('click', async ()=>{
+                            const idx = parseInt(btn.getAttribute('data-edit-save'),10);
+                            const s = document.getElementById(`edit-start-${idx}`)?.value || '';
+                            const e = document.getElementById(`edit-end-${idx}`)?.value || '';
+                            if (!s || !e) return showToast('請輸入完整時間', true);
+                            if (parseHM(e) <= parseHM(s)) return showToast('結束時間需晚於開始時間', true);
+                            const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, start: s, end: e } : sh);
+                            try {
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                showToast('已更新班表時間');
+                                await loadMonth();
+                                renderCalendar();
+                                renderDayPanel();
+                            } catch (e) { showToast('更新失敗', true); }
+                        });
+                    });
+
                     const addBtn = document.getElementById('add-shift');
                     if (addBtn) addBtn.addEventListener('click', async ()=>{
                         const s = document.getElementById('new-start')?.value || '';
                         const e = document.getElementById('new-end')?.value || '';
                         if (!s || !e) return showToast('請輸入完整時間', true);
                         if (parseHM(e) <= parseHM(s)) return showToast('結束時間需晚於開始時間', true);
-                        const assVals = Array.from(document.getElementById('new-assignees')?.selectedOptions||[]).map(o=>o.value);
-                        const newShifts = [...shifts, { start: s, end: e, assignees: assVals }];
+                        const assVal = document.getElementById('new-assignees')?.value || '';
+                        const newShifts = [...shifts, { start: s, end: e, assignees: assVal ? [assVal] : [] }];
                         try {
                             await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                             showToast('已新增班表');
