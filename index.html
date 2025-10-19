@@ -6108,29 +6108,44 @@
                 });
             }
             
-            function renderSettingsAccounts(container) {
+            async function renderSettingsAccounts(container) {
+                const isHRPage = state.currentPage === 'hr';
+                const isGlobalSettings = state.currentPage === 'settings' || state.currentPage === 'navigation';
+                const rolesHR = ['總幹事','秘書','保全','清潔','機電'];
+                const rolesGlobal = ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'];
+                const roleOpts = (isHRPage ? rolesHR : rolesGlobal)
+                    .map(r => `<option value="${r}">${roleLabel(r)}</option>`)
+                    .join('');
+                const communityFilterHtml = isGlobalSettings ? `
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">社區</label>
+                                    <select id="filter-community" class="w-full px-3 py-2 border rounded-md">
+                                        <option value="">全部社區</option>
+                                    </select>
+                                </div>` : '';
+                const tipHtml = isHRPage
+                    ? '<div class="text-sm text-gray-500">此列表僅顯示目前社區之人員；不提供新增功能。</div>'
+                    : '<div class="text-sm text-gray-500">顯示全部社區之人員；可依角色與社區過濾。</div>';
+
                 container.innerHTML = `
                     <div class="p-4 space-y-4">
                         <div class="bg-white p-3 rounded-md shadow-sm border space-y-2">
                             <div class="flex items-center justify-between">
                                 <h3 class="font-bold text-lg">帳號列表</h3>
                             </div>
-                            <div class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
                                     <label class="block text-sm text-gray-600 mb-1">角色</label>
                                     <select id="filter-role" class="w-full px-3 py-2 border rounded-md">
                                         <option value="">全部角色</option>
-                                        <option value="總幹事">${roleLabel('總幹事')}</option>
-                                        <option value="秘書">${roleLabel('秘書')}</option>
-                                        <option value="保全">${roleLabel('保全')}</option>
-                                        <option value="清潔">${roleLabel('清潔')}</option>
-                                        <option value="機電">${roleLabel('機電')}</option>
+                                        ${roleOpts}
                                     </select>
                                 </div>
+                                ${communityFilterHtml}
                             </div>
                         </div>
 
-                        <div class="text-sm text-gray-500">此列表僅顯示目前社區之人員；不提供新增功能。</div>
+                        ${tipHtml}
                         <div id="user-list" class="space-y-2"></div>
                     </div>`;
                 lucide.createIcons();
@@ -6143,8 +6158,19 @@
                 let allUsers = [];
                 let lastRendered = [];
                 const roleSelect = document.getElementById('filter-role');
+                const communitySelect = document.getElementById('filter-community');
+                let communitiesCache = [];
 
                 roleSelect.addEventListener('change', renderUserList);
+                if (isGlobalSettings && communitySelect) {
+                    try { await ensureCommunitiesCache(); } catch (_) {}
+                    try { computeAvailableCommunities(); } catch (_) {}
+                    const byId = state.communitiesById || {};
+                    const list = Object.values(byId).slice().sort(compareCommunitiesByCode);
+                    communitiesCache = list;
+                    communitySelect.innerHTML = `<option value="">全部社區</option>` + list.map(c => `<option value="${c.id}" data-code="${c.code || ''}">${c.code ? '['+c.code+'] ' : ''}${c.name || '(未命名社區)'}</option>`).join('');
+                    communitySelect.addEventListener('change', renderUserList);
+                }
 
                 const unsubscribe = onSnapshot(q, (querySnapshot) => {
                     allUsers = [];
@@ -6160,23 +6186,39 @@
                         return;
                     }
                     const selectedRole = roleSelect.value || '';
-                    const allowedRoles = ['總幹事','秘書','保全','清潔','機電'];
+                    const allowedRoles = isHRPage ? rolesHR : rolesGlobal;
                     let filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : allowedRoles.includes(u.role));
 
-                    // 依目前社區過濾服務成員（僅顯示服務該社區的人員）
-                    const currentCommId = state.currentCommunity?.id || null;
-                    const currentCommCode = state.currentCommunity?.code || null;
-                    if (currentCommId || currentCommCode) {
-                        filtered = filtered.filter(u => {
-                            const byId = currentCommId ? (Array.isArray(u.serviceCommunities) && u.serviceCommunities.includes(currentCommId)) : false;
-                            const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
-                            const byCode = currentCommCode ? (codesArr.includes(currentCommCode) || (u.serviceCommunityCode === currentCommCode)) : false;
-                            return byId || byCode;
-                        });
-                    } else {
-                        // 無指定社區，提示選擇社區並顯示空列表
-                        filtered = [];
-                        userList.innerHTML = `<p class="text-center text-gray-500 p-4">請先選擇社區</p>`;
+                    if (isHRPage) {
+                        // 依目前社區過濾服務成員（僅顯示服務該社區的人員）
+                        const currentCommId = state.currentCommunity?.id || null;
+                        const currentCommCode = state.currentCommunity?.code || null;
+                        if (currentCommId || currentCommCode) {
+                            filtered = filtered.filter(u => {
+                                const byId = currentCommId ? (Array.isArray(u.serviceCommunities) && u.serviceCommunities.includes(currentCommId)) : false;
+                                const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                                const byCode = currentCommCode ? (codesArr.includes(currentCommCode) || (u.serviceCommunityCode === currentCommCode)) : false;
+                                return byId || byCode;
+                            });
+                        } else {
+                            // 無指定社區，提示選擇社區並顯示空列表
+                            filtered = [];
+                            userList.innerHTML = `<p class="text-center text-gray-500 p-4">請先選擇社區</p>`;
+                            return;
+                        }
+                    } else if (isGlobalSettings && communitySelect) {
+                        // 設定/導覽設定頁：可選社區過濾；預設顯示全部社區
+                        const selectedCommId = communitySelect.value || '';
+                        if (selectedCommId) {
+                            const selectedComm = communitiesCache.find(c => c.id === selectedCommId);
+                            const selectedCode = selectedComm?.code || '';
+                            filtered = filtered.filter(u => {
+                                const byId = Array.isArray(u.serviceCommunities) && u.serviceCommunities.includes(selectedCommId);
+                                const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                                const byCode = selectedCode ? (codesArr.includes(selectedCode) || (u.serviceCommunityCode === selectedCode)) : false;
+                                return byId || byCode;
+                            });
+                        }
                     }
 
                     // 人員依姓氏筆畫少→多
