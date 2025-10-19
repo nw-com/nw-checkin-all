@@ -240,7 +240,7 @@ service cloud.firestore {
     // 哨點（排班頁的子分頁）：可自定義名稱，允許重名
     match /posts/{postId} {
       allow read: if request.auth != null;
-      allow create, update, delete: if isCommunityEditor() &&
+      allow create, update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'communityId','name','createdAt','updatedAt'
         ]) &&
@@ -248,12 +248,14 @@ service cloud.firestore {
         request.resource.data.name is string &&
         request.resource.data.createdAt is timestamp &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除操作不應檢查 request.resource.data（delete 時為 null）
+      allow delete: if isCommunityEditor();
     }
 
     // 哨點每日班表與規則
     match /postSchedules/{docId} {
       allow read: if request.auth != null;
-      allow create, update, delete: if isCommunityEditor() &&
+      allow create, update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'communityId','postId','dateIso','dateTS','isScheduledDay','overlapAllowed','requireFullDay','shifts','createdAt','updatedAt'
         ]) &&
@@ -267,12 +269,14 @@ service cloud.firestore {
         (request.resource.data.shifts == null || request.resource.data.shifts is list) &&
         (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除時 request.resource 為 null，因此僅需角色檢查
+      allow delete: if isCommunityEditor();
     }
 
     // 社區巢狀子集合：哨點
     match /communities/{communityId}/posts/{postId} {
       allow read: if request.auth != null;
-      allow create, update, delete: if isCommunityEditor() &&
+      allow create, update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'communityId','name','createdAt','updatedAt'
         ]) &&
@@ -281,12 +285,14 @@ service cloud.firestore {
         request.resource.data.name is string &&
         request.resource.data.createdAt is timestamp &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除時 request.resource 為 null，因此僅需角色檢查
+      allow delete: if isCommunityEditor();
     }
 
     // 社區巢狀子集合：每日班表與規則
     match /communities/{communityId}/postSchedules/{docId} {
       allow read: if request.auth != null;
-      allow create, update, delete: if isCommunityEditor() &&
+      allow create, update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'communityId','postId','dateIso','dateTS','isScheduledDay','overlapAllowed','requireFullDay','shifts','createdAt','updatedAt'
         ]) &&
@@ -301,6 +307,8 @@ service cloud.firestore {
         (request.resource.data.shifts == null || request.resource.data.shifts is list) &&
         (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除時 request.resource 為 null，因此僅需角色檢查
+      allow delete: if isCommunityEditor();
     }
 
     // 帳號申請：任何人可提交（未登入也可），僅管理端可讀取與審核

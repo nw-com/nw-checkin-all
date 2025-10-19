@@ -5235,7 +5235,14 @@
                             const idx = parseInt(btn.getAttribute('data-del'),10);
                             const newShifts = shifts.filter((_,i)=>i!==idx);
                             try {
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                const base = (!docData || !docData.communityId || !docData.postId || !docData.dateIso || !docData.dateTS) ? {
+                                    communityId,
+                                    postId: pageState.selectedPostId,
+                                    dateIso: iso,
+                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                } : {};
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                                 showToast('已刪除班表');
                                 await loadMonth();
                                 renderCalendar();
@@ -5251,7 +5258,14 @@
                             const assVal = sel?.value || '';
                             const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, assignees: assVal ? [assVal] : [] } : sh);
                             try {
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                const base = (!docData || !docData.communityId || !docData.postId || !docData.dateIso || !docData.dateTS) ? {
+                                    communityId,
+                                    postId: pageState.selectedPostId,
+                                    dateIso: iso,
+                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                } : {};
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                                 showToast('已更新指派');
                                 await loadMonth();
                                 renderCalendar();
@@ -5281,7 +5295,14 @@
                             if (parseHM(e) <= parseHM(s)) return showToast('結束時間需晚於開始時間', true);
                             const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, start: s, end: e } : sh);
                             try {
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                const base = (!docData || !docData.communityId || !docData.postId || !docData.dateIso || !docData.dateTS) ? {
+                                    communityId,
+                                    postId: pageState.selectedPostId,
+                                    dateIso: iso,
+                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                } : {};
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                                 showToast('已更新班表時間');
                                 await loadMonth();
                                 renderCalendar();
@@ -5299,7 +5320,14 @@
                         const assVal = document.getElementById('new-assignees')?.value || '';
                         const newShifts = [...shifts, { start: s, end: e, assignees: assVal ? [assVal] : [] }];
                         try {
-                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                            const base = (!docData || !docData.communityId || !docData.postId || !docData.dateIso || !docData.dateTS) ? {
+                                communityId,
+                                postId: pageState.selectedPostId,
+                                dateIso: iso,
+                                dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            } : {};
+                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                             showToast('已新增班表');
                             await loadMonth();
                             renderCalendar();
