@@ -8025,12 +8025,18 @@
                                     <label for="user-phone" class="block text-sm font-medium text-gray-700">手機號碼</label>
                                     <input type="tel" id="user-phone" value="${isEditing ? user.phone || '' : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
-                                ${isEditing ? `
                                 <div>
-                                    <label for="user-lineid" class="block text-sm font-medium text-gray-700">Line ID</label>
-                                    <input type="text" id="user-lineid" value="${user.lineId || ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                    <label for="user-title" class="block text-sm font-medium text-gray-700">職稱</label>
+                                    <input type="text" id="user-title" value="${isEditing ? (user.jobTitle || '') : ''}" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
-                                ` : ''}
+                                <div>
+                                    <label for="user-employment-status" class="block text-sm font-medium text-gray-700">狀態</label>
+                                    <select id="user-employment-status" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="在職" ${isEditing ? (user.employmentStatus === '在職' ? 'selected' : '') : 'selected'}>在職</option>
+                                        <option value="離職" ${isEditing && user.employmentStatus === '離職' ? 'selected' : ''}>離職</option>
+                                        <option value="現金班" ${isEditing && user.employmentStatus === '現金班' ? 'selected' : ''}>現金班</option>
+                                    </select>
+                                </div>
                                 <div>
                                     <label for="user-email" class="block text-sm font-medium text-gray-700">電子郵件 / 帳號 (必填)</label>
                                     <input type="email" id="user-email" value="${isEditing ? user.email : ''}" ${isEditing ? 'disabled' : ''} class="w-full mt-1 px-3 py-2 border rounded-md ${isEditing ? 'bg-gray-100' : ''}" required>
@@ -8277,7 +8283,8 @@
                     // --- Form Data Collection ---
                     const name = document.getElementById('user-name').value;
                     const phone = document.getElementById('user-phone').value;
-                    const lineId = document.getElementById('user-lineid')?.value || '';
+                    const jobTitle = document.getElementById('user-title')?.value || '';
+                    const employmentStatus = document.getElementById('user-employment-status')?.value || '';
                     const email = document.getElementById('user-email').value;
                     const role = document.getElementById('user-role').value;
                     const homeAddress = document.getElementById('user-address')?.value || '';
@@ -8294,7 +8301,7 @@
                     // 收集服務社區
                     const scChecks = modal.querySelectorAll('input[name="service-community"]');
                     const serviceCommunities = Array.from(scChecks).filter(c => c.checked).map(c => c.value);
-                    const updateData = { name, phone, lineId, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode, bloodType, emergencyName, emergencyRelation, emergencyPhone };
+                    const updateData = { name, phone, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode, bloodType, emergencyName, emergencyRelation, emergencyPhone, jobTitle, employmentStatus };
 
                     try {
                         let targetUserId = isEditing ? user.id : null;
