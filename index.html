@@ -1468,7 +1468,7 @@
                     'tracking': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderTracking(subPage || 'map', params) : renderAccessDenied(),
                     'features': () => renderFeatures(subPage || 'news'),
                     'calendar': () => renderCalendar(subPage || 'overview'),
-                    'schedule': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderCalendar('schedule') : renderAccessDenied(),
+                    'schedule': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderShifts(subPage || null) : renderAccessDenied(),
                     'settings': () => role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
                     'hr': () => (['admin','hr','manager','junior_manager'].includes(role)) ? renderHR(subPage || 'applications') : renderAccessDenied(),
                     'navigation': () => isNavigationAllowed(state.currentUserData) ? renderNavigation(subPage || 'community') : renderAccessDenied(),
@@ -4787,6 +4787,367 @@
                     renderGroupMap(subPageContent);
                 }
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('group', btn.dataset.subtab)));
+            }
+
+            function renderShifts(subPage) {
+                const comm = state.currentCommunity;
+                if (!comm || !comm.id) {
+                    mainContent.innerHTML = `
+                        <div class="p-8 flex items-center justify-center h-full">
+                            <div class="text-center text-gray-500">
+                                <i data-lucide="home" class="w-8 h-8 mx-auto mb-3"></i>
+                                <div>請先選擇社區後再進入排班頁</div>
+                            </div>
+                        </div>`;
+                    try { lucide.createIcons(); } catch (_) {}
+                    return;
+                }
+                const communityId = comm.id;
+
+                const pageState = {
+                    posts: [],
+                    selectedPostId: null,
+                    monthDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+                    monthDocsMap: {},
+                    selectedDayIso: null
+                };
+
+                const fmtYMD = (d) => {
+                    const y = d.getFullYear();
+                    const m = (d.getMonth()+1).toString().padStart(2,'0');
+                    const day = d.getDate().toString().padStart(2,'0');
+                    return `${y}-${m}-${day}`;
+                };
+                const parseHM = (s) => {
+                    const [h,m] = (s||'00:00').split(':').map(x=>parseInt(x,10)||0);
+                    return h*60+m;
+                };
+                const mergeIntervalsMinutes = (list) => {
+                    if (!Array.isArray(list) || !list.length) return [];
+                    const intervals = list.map(it => ({start: parseHM(it.start||'00:00'), end: parseHM(it.end||'00:00')}))
+                        .filter(it => it.end>it.start)
+                        .sort((a,b)=>a.start-b.start);
+                    const merged = [];
+                    for (const iv of intervals) {
+                        if (!merged.length || iv.start > merged[merged.length-1].end) {
+                            merged.push({start: iv.start, end: iv.end});
+                        } else {
+                            merged[merged.length-1].end = Math.max(merged[merged.length-1].end, iv.end);
+                        }
+                    }
+                    return merged;
+                };
+                const hasOverlap = (list) => {
+                    const intervals = list.map(it => ({start: parseHM(it.start||'00:00'), end: parseHM(it.end||'00:00')}))
+                        .filter(it => it.end>it.start)
+                        .sort((a,b)=>a.start-b.start);
+                    for (let i=1;i<intervals.length;i++) {
+                        if (intervals[i].start < intervals[i-1].end) return true;
+                    }
+                    return false;
+                };
+                const coverageMinutes = (list) => {
+                    const merged = mergeIntervalsMinutes(list);
+                    return merged.reduce((acc,iv)=>acc+(iv.end-iv.start),0);
+                };
+
+                const computeAbnormal = (docData) => {
+                    if (!docData) return null;
+                    const shifts = Array.isArray(docData.shifts) ? docData.shifts : [];
+                    const isScheduledDay = !!docData.isScheduledDay;
+                    const overlapAllowed = !!docData.overlapAllowed;
+                    const requireFullDay = !!docData.requireFullDay;
+                    // 異常規則
+                    if (isScheduledDay && shifts.length === 0) return '排班日未排班';
+                    if (!isScheduledDay && shifts.length > 0) return '非排班日卻有班表';
+                    if (!overlapAllowed && hasOverlap(shifts)) return '班表時間重疊';
+                    if (requireFullDay && coverageMinutes(shifts) < 24*60) return '未滿24小時';
+                    return null;
+                };
+
+                const renderShell = () => {
+                    mainContent.innerHTML = `
+                        <div class="h-[50px] flex items-center justify-between border-b border-gray-200 bg-white">
+                            <div id="posts-tabs" class="flex items-center gap-2 flex-nowrap overflow-x-auto px-2"></div>
+                            <div class="flex items-center gap-2 pr-2">
+                                <button id="add-post-btn" class="px-3 py-1 rounded border bg-white hover:bg-red-50 text-gray-700">新增哨點</button>
+                                <button id="rename-post-btn" class="px-3 py-1 rounded border bg-white hover:bg-red-50 text-gray-700">重命名</button>
+                            </div>
+                        </div>
+                        <div class="overflow-y-auto" style="height: calc(100% - 50px);">
+                            <div class="p-3">
+                                <div class="flex items-center justify-between mb-2">
+                                    <button id="prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
+                                    <div id="shift-current-month-year" class="text-lg font-semibold"></div>
+                                    <button id="next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
+                                </div>
+                                <div class="grid grid-cols-7 text-center text-xs text-gray-500 mb-1">
+                                    <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                                </div>
+                                <div id="shift-calendar-grid" class="grid grid-cols-7 gap-1"></div>
+                                <hr class="border-t border-gray-200 my-3" />
+                                <div id="shift-day-panel" class="mt-2"></div>
+                            </div>
+                        </div>`;
+                    try { lucide.createIcons(); } catch (_) {}
+                };
+
+                const loadPosts = async () => {
+                    try {
+                        const q = query(collection(db, 'posts'), where('communityId','==', communityId));
+                        const snap = await getDocs(q);
+                        pageState.posts = [];
+                        snap.forEach(d=> pageState.posts.push({ id: d.id, ...d.data() }));
+                        if (!pageState.posts.length) {
+                            // 初次無哨點：建立一個預設哨點
+                            const defaultName = '哨點 A';
+                            const newDoc = await addDoc(collection(db,'posts'), {
+                                communityId,
+                                name: defaultName,
+                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            });
+                            pageState.posts.push({ id: newDoc.id, communityId, name: defaultName });
+                        }
+                        pageState.posts.sort((a,b)=> (a.createdAt?.toMillis?.()||0) - (b.createdAt?.toMillis?.()||0));
+                        pageState.selectedPostId = pageState.selectedPostId || pageState.posts[0]?.id || null;
+                    } catch (e) {
+                        console.warn('載入哨點失敗', e);
+                        pageState.posts = [];
+                    }
+                };
+
+                const renderTabs = () => {
+                    const tabsEl = document.getElementById('posts-tabs');
+                    if (!tabsEl) return;
+                    tabsEl.innerHTML = pageState.posts.map(p=>`
+                        <button class="px-3 py-1 rounded-md text-sm font-medium ${pageState.selectedPostId===p.id? 'bg-red-600 text-white':'bg-white text-gray-700 border'}" data-post="${p.id}">${(p.name||'未命名哨點')}</button>
+                    `).join('');
+                    tabsEl.querySelectorAll('button').forEach(btn=>{
+                        btn.addEventListener('click', ()=>{
+                            pageState.selectedPostId = btn.getAttribute('data-post');
+                            renderTabs();
+                            loadMonth().then(()=> renderCalendar());
+                        });
+                    });
+                    const addBtn = document.getElementById('add-post-btn');
+                    const renameBtn = document.getElementById('rename-post-btn');
+                    if (addBtn) addBtn.addEventListener('click', async ()=>{
+                        const name = prompt('請輸入哨點名稱');
+                        if (!name) return;
+                        try {
+                            const newDoc = await addDoc(collection(db,'posts'), {
+                                communityId,
+                                name: name,
+                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            });
+                            pageState.posts.push({ id: newDoc.id, communityId, name });
+                            pageState.selectedPostId = newDoc.id;
+                            renderTabs();
+                            await loadMonth();
+                            renderCalendar();
+                        } catch (e) { showToast('新增哨點失敗', true); }
+                    });
+                    if (renameBtn) renameBtn.addEventListener('click', async ()=>{
+                        const post = pageState.posts.find(p=>p.id===pageState.selectedPostId);
+                        if (!post) return showToast('未選擇哨點', true);
+                        const name = prompt('請輸入新的哨點名稱', post.name||'');
+                        if (!name) return;
+                        try {
+                            await updateDoc(doc(db,'posts', post.id), {
+                                name,
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            });
+                            post.name = name;
+                            renderTabs();
+                        } catch (e) { showToast('重命名失敗', true); }
+                    });
+                };
+
+                const renderMonthHeader = () => {
+                    const title = document.getElementById('shift-current-month-year');
+                    if (!title) return;
+                    const d = pageState.monthDate;
+                    title.textContent = `${d.getFullYear()} 年 ${d.getMonth()+1} 月`;
+                    const prev = document.getElementById('prev-month');
+                    const next = document.getElementById('next-month');
+                    if (prev) prev.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()-1, 1); loadMonth().then(()=>renderCalendar()); });
+                    if (next) next.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()+1, 1); loadMonth().then(()=>renderCalendar()); });
+                };
+
+                const loadMonth = async () => {
+                    pageState.monthDocsMap = {};
+                    if (!pageState.selectedPostId) return;
+                    try {
+                        const q = query(collection(db,'postSchedules'), where('postId','==', pageState.selectedPostId));
+                        const snap = await getDocs(q);
+                        const y = pageState.monthDate.getFullYear();
+                        const m = pageState.monthDate.getMonth()+1; const ymStr = `${y}-${m.toString().padStart(2,'0')}-`;
+                        snap.forEach(d=>{
+                            const data = d.data();
+                            if (data.communityId !== communityId) return;
+                            const iso = (data.dateIso || '').toString();
+                            if (iso.startsWith(ymStr)) pageState.monthDocsMap[iso] = { id: d.id, ...data };
+                        });
+                    } catch (e) { console.warn('載入班表失敗', e); }
+                };
+
+                const renderCalendar = () => {
+                    const grid = document.getElementById('shift-calendar-grid');
+                    if (!grid) return;
+                    const year = pageState.monthDate.getFullYear();
+                    const month = pageState.monthDate.getMonth();
+                    const firstDay = new Date(year, month, 1);
+                    const startWeekday = firstDay.getDay();
+                    const daysInMonth = new Date(year, month+1, 0).getDate();
+                    const prevMonthDays = new Date(year, month, 0).getDate();
+                    const cells = [];
+                    // Previous month fillers
+                    for (let i=startWeekday-1; i>=0; i--) {
+                        const date = new Date(year, month-1, prevMonthDays - i);
+                        cells.push({ date, inMonth:false });
+                    }
+                    // Current month
+                    for (let d=1; d<=daysInMonth; d++) {
+                        const date = new Date(year, month, d);
+                        cells.push({ date, inMonth:true });
+                    }
+                    // Fill to 6 weeks
+                    const totalCells = Math.ceil(cells.length/7)*7;
+                    const nextFill = totalCells - cells.length;
+                    for (let i=1; i<=nextFill; i++) {
+                        const date = new Date(year, month+1, i);
+                        cells.push({ date, inMonth:false });
+                    }
+                    grid.innerHTML = cells.map(cell => {
+                        const iso = fmtYMD(cell.date);
+                        const docData = pageState.monthDocsMap[iso];
+                        const abnormal = computeAbnormal(docData);
+                        const badge = abnormal ? `<span class="text-[10px] text-red-600">異常</span>` : '';
+                        const cls = `${cell.inMonth? 'bg-white':'bg-gray-50 text-gray-400'} ${abnormal? 'border border-red-300':''} hover:bg-red-50 rounded p-2 text-xs h-[60px] flex flex-col`;
+                        return `<div class="${cls}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
+                    }).join('');
+                    grid.querySelectorAll('[data-iso]').forEach(el=>{
+                        el.addEventListener('click', ()=>{
+                            const iso = el.getAttribute('data-iso');
+                            pageState.selectedDayIso = iso;
+                            renderDayPanel();
+                        });
+                    });
+                };
+
+                const renderDayPanel = async () => {
+                    const panel = document.getElementById('shift-day-panel');
+                    if (!panel) return;
+                    const iso = pageState.selectedDayIso || fmtYMD(new Date());
+                    pageState.selectedDayIso = iso;
+                    const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
+                    let docData = null;
+                    try {
+                        const dref = doc(db,'postSchedules', id);
+                        const dsnap = await getDoc(dref);
+                        if (dsnap.exists()) docData = dsnap.data();
+                    } catch (e) { console.warn('讀取當日班表失敗', e); }
+                    const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                    const isScheduledDay = !!docData?.isScheduledDay;
+                    const overlapAllowed = !!docData?.overlapAllowed;
+                    const requireFullDay = !!docData?.requireFullDay;
+                    const abnormal = computeAbnormal(docData);
+
+                    panel.innerHTML = `
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="font-semibold">${iso} 的哨點班表</div>
+                            ${abnormal? `<div class="text-red-600 text-sm">異常：${abnormal}</div>`: ''}
+                        </div>
+                        <div class="flex items-center gap-4 mb-3">
+                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-scheduled" ${isScheduledDay?'checked':''}/> 排班日</label>
+                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-overlap" ${overlapAllowed?'checked':''}/> 可重疊排班時間</label>
+                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-full" ${requireFullDay?'checked':''}/> 滿班</label>
+                            <button id="save-day-rules" class="ml-auto px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">儲存設定</button>
+                        </div>
+                        <div>
+                            ${(shifts.length===0) ? `<div class="text-gray-500 text-sm">尚未排班</div>` : ''}
+                            <div id="shift-list" class="space-y-2">
+                                ${shifts.map((s,idx)=>`
+                                    <div class="flex items-center gap-2">
+                                        <div class="text-sm">${s.start || '—'} ~ ${s.end || '—'}</div>
+                                        <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-del="${idx}">刪除</button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="mt-3 flex items-center gap-2">
+                                <input id="new-start" type="time" class="px-2 py-1 border rounded text-sm" />
+                                <span>~</span>
+                                <input id="new-end" type="time" class="px-2 py-1 border rounded text-sm" />
+                                <button id="add-shift" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">新增班表</button>
+                            </div>
+                        </div>`;
+
+                    const saveBtn = document.getElementById('save-day-rules');
+                    if (saveBtn) saveBtn.addEventListener('click', async ()=>{
+                        try {
+                            const data = {
+                                communityId,
+                                postId: pageState.selectedPostId,
+                                dateIso: iso,
+                                dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                isScheduledDay: !!document.getElementById('chk-scheduled')?.checked,
+                                overlapAllowed: !!document.getElementById('chk-overlap')?.checked,
+                                requireFullDay: !!document.getElementById('chk-full')?.checked,
+                                shifts: shifts,
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            };
+                            await setDoc(doc(db,'postSchedules', id), data, { merge: true });
+                            showToast('已儲存設定');
+                            await loadMonth();
+                            renderCalendar();
+                            renderDayPanel();
+                        } catch (e) { showToast('儲存失敗', true); }
+                    });
+
+                    panel.querySelectorAll('[data-del]').forEach(btn=>{
+                        btn.addEventListener('click', async ()=>{
+                            const idx = parseInt(btn.getAttribute('data-del'),10);
+                            const newShifts = shifts.filter((_,i)=>i!==idx);
+                            try {
+                                await setDoc(doc(db,'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                showToast('已刪除班表');
+                                await loadMonth();
+                                renderCalendar();
+                                renderDayPanel();
+                            } catch (e) { showToast('刪除失敗', true); }
+                        });
+                    });
+
+                    const addBtn = document.getElementById('add-shift');
+                    if (addBtn) addBtn.addEventListener('click', async ()=>{
+                        const s = document.getElementById('new-start')?.value || '';
+                        const e = document.getElementById('new-end')?.value || '';
+                        if (!s || !e) return showToast('請輸入完整時間', true);
+                        if (parseHM(e) <= parseHM(s)) return showToast('結束時間需晚於開始時間', true);
+                        const newShifts = [...shifts, { start: s, end: e }];
+                        try {
+                            await setDoc(doc(db,'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                            showToast('已新增班表');
+                            await loadMonth();
+                            renderCalendar();
+                            renderDayPanel();
+                        } catch (err) { showToast('新增失敗', true); }
+                    });
+                };
+
+                const init = async () => {
+                    renderShell();
+                    await loadPosts();
+                    renderTabs();
+                    renderMonthHeader();
+                    await loadMonth();
+                    renderCalendar();
+                    await renderDayPanel();
+                };
+                init();
             }
 
             function renderGroupMap(container) {
