@@ -240,13 +240,19 @@ service cloud.firestore {
     // 哨點（排班頁的子分頁）：可自定義名稱，允許重名
     match /posts/{postId} {
       allow read: if request.auth != null;
-      allow create, update: if isCommunityEditor() &&
+      // 建立時需要完整欄位
+      allow create: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'communityId','name','createdAt','updatedAt'
         ]) &&
         request.resource.data.communityId is string &&
         request.resource.data.name is string &&
         request.resource.data.createdAt is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 更新時允許只改名稱與更新時間
+      allow update: if isCommunityEditor() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['name','updatedAt']) &&
+        request.resource.data.name is string &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
       // 刪除操作不應檢查 request.resource.data（delete 時為 null）
       allow delete: if isCommunityEditor();
@@ -276,7 +282,8 @@ service cloud.firestore {
     // 社區巢狀子集合：哨點
     match /communities/{communityId}/posts/{postId} {
       allow read: if request.auth != null;
-      allow create, update: if isCommunityEditor() &&
+      // 建立時需要完整欄位，且 communityId 必須匹配路徑
+      allow create: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'communityId','name','createdAt','updatedAt'
         ]) &&
@@ -284,6 +291,11 @@ service cloud.firestore {
         request.resource.data.communityId == communityId &&
         request.resource.data.name is string &&
         request.resource.data.createdAt is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 更新時允許只改名稱與更新時間
+      allow update: if isCommunityEditor() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['name','updatedAt']) &&
+        request.resource.data.name is string &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
       // 刪除時 request.resource 為 null，因此僅需角色檢查
       allow delete: if isCommunityEditor();
