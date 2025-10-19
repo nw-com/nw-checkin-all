@@ -6125,10 +6125,6 @@
                                         <option value="保全">${roleLabel('保全')}</option>
                                         <option value="清潔">${roleLabel('清潔')}</option>
                                         <option value="機電">${roleLabel('機電')}</option>
-                                        <option value="junior_manager">${roleLabel('junior_manager')}</option>
-                                        <option value="manager">${roleLabel('manager')}</option>
-                                        <option value="hr">${roleLabel('hr')}</option>
-                                        <option value="admin">${roleLabel('admin')}</option>
                                     </select>
                                 </div>
                             </div>
@@ -6164,7 +6160,8 @@
                         return;
                     }
                     const selectedRole = roleSelect.value || '';
-                    let filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : true);
+                    const allowedRoles = ['總幹事','秘書','保全','清潔','機電'];
+                    let filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : allowedRoles.includes(u.role));
 
                     // 依目前社區過濾服務成員（僅顯示服務該社區的人員）
                     const currentCommId = state.currentCommunity?.id || null;
