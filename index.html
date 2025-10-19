@@ -655,6 +655,7 @@
                         };
                         reader.readAsDataURL(file);
                     });
+
                 };
 
                 document.getElementById('apply-upload-avatar-btn').addEventListener('click', () => avatarUploadInput.click());
@@ -4894,14 +4895,14 @@
 
                 const loadPosts = async () => {
                     try {
-                        const q = query(collection(db, 'posts'), where('communityId','==', communityId));
-                        const snap = await getDocs(q);
+                        const qref = collection(db, 'communities', communityId, 'posts');
+                        const snap = await getDocs(qref);
                         pageState.posts = [];
                         snap.forEach(d=> pageState.posts.push({ id: d.id, ...d.data() }));
                         if (!pageState.posts.length) {
                             // 初次無哨點：建立一個預設哨點
                             const defaultName = '哨點 A';
-                            const newDoc = await addDoc(collection(db,'posts'), {
+                            const newDoc = await addDoc(collection(db,'communities', communityId, 'posts'), {
                                 communityId,
                                 name: defaultName,
                                 createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
@@ -4936,7 +4937,7 @@
                         const name = prompt('請輸入哨點名稱');
                         if (!name) return;
                         try {
-                            const newDoc = await addDoc(collection(db,'posts'), {
+                            const newDoc = await addDoc(collection(db,'communities', communityId, 'posts'), {
                                 communityId,
                                 name: name,
                                 createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
@@ -4955,7 +4956,7 @@
                         const name = prompt('請輸入新的哨點名稱', post.name||'');
                         if (!name) return;
                         try {
-                            await updateDoc(doc(db,'posts', post.id), {
+                            await updateDoc(doc(db,'communities', communityId, 'posts', post.id), {
                                 name,
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             });
@@ -4972,25 +4973,43 @@
                     title.textContent = `${d.getFullYear()} 年 ${d.getMonth()+1} 月`;
                     const prev = document.getElementById('prev-month');
                     const next = document.getElementById('next-month');
-                    if (prev) prev.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()-1, 1); loadMonth().then(()=>renderCalendar()); });
-                    if (next) next.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()+1, 1); loadMonth().then(()=>renderCalendar()); });
+                    if (prev) prev.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()-1, 1); loadMonth().then(()=>{ renderMonthHeader(); renderCalendar(); }); });
+                    if (next) next.addEventListener('click', ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()+1, 1); loadMonth().then(()=>{ renderMonthHeader(); renderCalendar(); }); });
                 };
 
                 const loadMonth = async () => {
                     pageState.monthDocsMap = {};
                     if (!pageState.selectedPostId) return;
                     try {
-                        const q = query(collection(db,'postSchedules'), where('postId','==', pageState.selectedPostId));
+                        const q = query(collection(db,'communities', communityId, 'postSchedules'), where('postId','==', pageState.selectedPostId));
                         const snap = await getDocs(q);
                         const y = pageState.monthDate.getFullYear();
                         const m = pageState.monthDate.getMonth()+1; const ymStr = `${y}-${m.toString().padStart(2,'0')}-`;
                         snap.forEach(d=>{
                             const data = d.data();
-                            if (data.communityId !== communityId) return;
                             const iso = (data.dateIso || '').toString();
                             if (iso.startsWith(ymStr)) pageState.monthDocsMap[iso] = { id: d.id, ...data };
                         });
                     } catch (e) { console.warn('載入班表失敗', e); }
+                };
+
+                const loadCommunityUsers = async () => {
+                    try {
+                        if (Array.isArray(pageState.communityUsers) && pageState.communityUsers.length) return;
+                        const users = [];
+                        const q1 = query(collection(db,'users'), where('serviceCommunityCode','==', communityId));
+                        const s1 = await getDocs(q1);
+                        s1.forEach(d=> users.push({ id: d.id, ...d.data() }));
+                        try {
+                            const q2 = query(collection(db,'users'), where('serviceCommunityCodes','array-contains', communityId));
+                            const s2 = await getDocs(q2);
+                            s2.forEach(d=> { if (!users.find(u=>u.id===d.id)) users.push({ id: d.id, ...d.data() }); });
+                        } catch (_) {}
+                        // 生成 options HTML
+                        users.sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+                        pageState.communityUsers = users;
+                        pageState.userOptionsHTML = users.map(u=>`<option value="${u.id}">${u.name||u.displayName||u.id}</option>`).join('');
+                    } catch (e) { console.warn('載入社區成員失敗', e); pageState.communityUsers = []; pageState.userOptionsHTML = ''; }
                 };
 
                 const renderCalendar = () => {
@@ -5024,9 +5043,26 @@
                         const iso = fmtYMD(cell.date);
                         const docData = pageState.monthDocsMap[iso];
                         const abnormal = computeAbnormal(docData);
-                        const badge = abnormal ? `<span class="text-[10px] text-red-600">異常</span>` : '';
-                        const cls = `${cell.inMonth? 'bg-white':'bg-gray-50 text-gray-400'} ${abnormal? 'border border-red-300':''} hover:bg-red-50 rounded p-2 text-xs h-[60px] flex flex-col`;
-                        return `<div class="${cls}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
+                        const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                        const cov = coverageMinutes(shifts);
+                        let segCount = 0;
+                        try {
+                            const mins = shifts.map(s=>({ start: parseHM(s.start), end: parseHM(s.end) }));
+                            segCount = mergeIntervalsMinutes(mins).length;
+                        } catch (_) { segCount = (shifts.length>0?1:0); }
+                        const discontinuity = segCount > 1;
+                        const badgeText = abnormal ? '異常' : (discontinuity ? '斷續' : '');
+                        const badge = badgeText ? `<span class="text-[10px] ${abnormal?'text-red-600':'text-blue-600'}">${badgeText}</span>` : '';
+                        const bgStyle = (()=>{
+                            if (!cell.inMonth) return '';
+                            if (!cov) return '';
+                            if (cov >= 18*60) return 'background-color:#A7F3D0;';
+                            if (cov >= 12*60) return 'background-color:#D1FAE5;';
+                            if (cov >= 6*60) return 'background-color:#FEF3C7;';
+                            return 'background-color:#FFF7ED;';
+                        })();
+                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${abnormal? 'border border-red-300':''} hover:bg-red-50 rounded p-2 text-xs h-[60px] flex flex-col ${cell.inMonth?'bg-white':''}`;
+                        return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
                     }).join('');
                     grid.querySelectorAll('[data-iso]').forEach(el=>{
                         el.addEventListener('click', ()=>{
@@ -5045,7 +5081,7 @@
                     const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
                     let docData = null;
                     try {
-                        const dref = doc(db,'postSchedules', id);
+                        const dref = doc(db,'communities', communityId, 'postSchedules', id);
                         const dsnap = await getDoc(dref);
                         if (dsnap.exists()) docData = dsnap.data();
                     } catch (e) { console.warn('讀取當日班表失敗', e); }
@@ -5055,10 +5091,18 @@
                     const requireFullDay = !!docData?.requireFullDay;
                     const abnormal = computeAbnormal(docData);
 
+                    await loadCommunityUsers();
+                    const userOptions = pageState.userOptionsHTML || '';
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
                             <div class="font-semibold">${iso} 的哨點班表</div>
-                            ${abnormal? `<div class="text-red-600 text-sm">異常：${abnormal}</div>`: ''}
+                            <div class="flex items-center gap-2">
+                                <button id="batch-copy-btn" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">批次複製到多天</button>
+                                <select id="template-select" class="px-2 py-1 border rounded text-sm"></select>
+                                <button id="apply-template-btn" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">套用模板</button>
+                                <button id="save-template-btn" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">儲存為模板</button>
+                                ${abnormal? `<div class="text-red-600 text-sm">異常：${abnormal}</div>`: ''}
+                            </div>
                         </div>
                         <div class="flex items-center gap-4 mb-3">
                             <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-scheduled" ${isScheduledDay?'checked':''}/> 排班日</label>
@@ -5068,10 +5112,17 @@
                         </div>
                         <div>
                             ${(shifts.length===0) ? `<div class="text-gray-500 text-sm">尚未排班</div>` : ''}
-                            <div id="shift-list" class="space-y-2">
+                            <div id="shift-list" class="space-y-3">
                                 ${shifts.map((s,idx)=>`
-                                    <div class="flex items-center gap-2">
-                                        <div class="text-sm">${s.start || '—'} ~ ${s.end || '—'}</div>
+                                    <div class="flex items-start gap-2">
+                                        <div class="text-sm w-28">${s.start || '—'} ~ ${s.end || '—'}</div>
+                                        <div class="flex-1">
+                                            <div class="text-xs text-gray-500 mb-1">指定人員</div>
+                                            <select multiple class="px-2 py-1 border rounded text-xs min-w-[220px]" data-assign="${idx}">
+                                                ${pageState.communityUsers.map(u=>`<option value="${u.id}" ${(Array.isArray(s.assignees)&&s.assignees.includes(u.id))?'selected':''}>${u.name||u.displayName||u.id}</option>`).join('')}
+                                            </select>
+                                            <button class="ml-2 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-assign-save="${idx}">儲存指派</button>
+                                        </div>
                                         <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-del="${idx}">刪除</button>
                                     </div>
                                 `).join('')}
@@ -5080,9 +5131,113 @@
                                 <input id="new-start" type="time" class="px-2 py-1 border rounded text-sm" />
                                 <span>~</span>
                                 <input id="new-end" type="time" class="px-2 py-1 border rounded text-sm" />
+                                <select id="new-assignees" multiple class="px-2 py-1 border rounded text-sm min-w-[220px]">${userOptions}</select>
                                 <button id="add-shift" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">新增班表</button>
                             </div>
                         </div>`;
+
+                    // 模板與批次複製控件
+                    const templateSelect = document.getElementById('template-select');
+                    const applyTplBtn = document.getElementById('apply-template-btn');
+                    const saveTplBtn = document.getElementById('save-template-btn');
+                    const batchCopyBtn = document.getElementById('batch-copy-btn');
+
+                    const loadTemplates = async () => {
+                        try {
+                            if (!templateSelect) return [];
+                            const qref = collection(db,'communities', communityId, 'posts', pageState.selectedPostId, 'templates');
+                            const snap = await getDocs(qref);
+                            const templates = []; const tMap = {};
+                            snap.forEach(d=>{ const data = d.data(); const t = { id: d.id, ...data }; templates.push(t); tMap[t.id] = t; });
+                            templateSelect.innerHTML = ['<option value="">選擇模板</option>', ...templates.map(t=>`<option value="${t.id}">${t.name||t.id}</option>`)].join('');
+                            pageState.templatesMap = tMap; return templates;
+                        } catch (e) { console.warn('載入模板失敗', e); if (templateSelect) templateSelect.innerHTML = '<option value="">選擇模板</option>'; return []; }
+                    };
+                    await loadTemplates();
+
+                    if (applyTplBtn && templateSelect) applyTplBtn.addEventListener('click', async ()=>{
+                        const tplId = templateSelect.value || '';
+                        if (!tplId) return showToast('請先選擇模板', true);
+                        const tpl = pageState.templatesMap?.[tplId];
+                        if (!tpl) return showToast('模板不存在', true);
+                        try {
+                            const data = {
+                                communityId,
+                                postId: pageState.selectedPostId,
+                                dateIso: iso,
+                                dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                isScheduledDay: true,
+                                overlapAllowed: !!tpl.overlapAllowed,
+                                requireFullDay: !!tpl.requireFullDay,
+                                shifts: Array.isArray(tpl.shifts)? tpl.shifts : [],
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            };
+                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), data, { merge: true });
+                            showToast('已套用模板');
+                            await loadMonth(); renderCalendar(); renderDayPanel();
+                        } catch (e) { showToast('套用模板失敗', true); }
+                    });
+
+                    if (saveTplBtn) saveTplBtn.addEventListener('click', async ()=>{
+                        const name = prompt('請輸入模板名稱');
+                        if (!name) return;
+                        try {
+                            const tpl = {
+                                communityId,
+                                postId: pageState.selectedPostId,
+                                name,
+                                overlapAllowed,
+                                requireFullDay,
+                                shifts,
+                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            };
+                            await addDoc(collection(db,'communities', communityId, 'posts', pageState.selectedPostId, 'templates'), tpl);
+                            showToast('已儲存模板');
+                            await loadTemplates();
+                        } catch (e) { showToast('儲存模板失敗', true); }
+                    });
+
+                    if (batchCopyBtn) batchCopyBtn.addEventListener('click', async ()=>{
+                        const txt = prompt('輸入目標日期（逗號分隔），或範圍：YYYY-MM-DD..YYYY-MM-DD');
+                        if (!txt) return;
+                        let targets = [];
+                        const segs = txt.split(',').map(s=>s.trim()).filter(Boolean);
+                        for (const s of segs) {
+                            if (s.includes('..')) {
+                                const [a,b] = s.split('..');
+                                const start = new Date(a+'T00:00:00');
+                                const end = new Date(b+'T00:00:00');
+                                if (isNaN(start) || isNaN(end) || start > end) continue;
+                                const cur = new Date(start);
+                                while (cur <= end) { targets.push(fmtYMD(cur)); cur.setDate(cur.getDate()+1); }
+                            } else {
+                                const d = new Date(s+'T00:00:00'); if (!isNaN(d)) targets.push(fmtYMD(d));
+                            }
+                        }
+                        targets = Array.from(new Set(targets)).filter(t=> t!==iso);
+                        if (!targets.length) return showToast('沒有有效日期', true);
+                        try {
+                            const dataBase = {
+                                communityId,
+                                postId: pageState.selectedPostId,
+                                isScheduledDay,
+                                overlapAllowed,
+                                requireFullDay,
+                                shifts,
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            };
+                            await Promise.all(targets.map(tIso => {
+                                const docId = `${communityId}__${pageState.selectedPostId}__${tIso}`;
+                                const payload = { ...dataBase, dateIso: tIso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${tIso}T00:00:00`)) : new Date(`${tIso}T00:00:00`)) };
+                                return setDoc(doc(db,'communities', communityId, 'postSchedules', docId), payload, { merge: true });
+                            }));
+                            showToast(`已複製到 ${targets.length} 天`);
+                            await loadMonth(); renderCalendar(); renderDayPanel();
+                        } catch (e) { showToast('批次複製失敗', true); }
+                    });
 
                     const saveBtn = document.getElementById('save-day-rules');
                     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
@@ -5099,7 +5254,7 @@
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                 createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             };
-                            await setDoc(doc(db,'postSchedules', id), data, { merge: true });
+                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), data, { merge: true });
                             showToast('已儲存設定');
                             await loadMonth();
                             renderCalendar();
@@ -5112,12 +5267,28 @@
                             const idx = parseInt(btn.getAttribute('data-del'),10);
                             const newShifts = shifts.filter((_,i)=>i!==idx);
                             try {
-                                await setDoc(doc(db,'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                                 showToast('已刪除班表');
                                 await loadMonth();
                                 renderCalendar();
                                 renderDayPanel();
                             } catch (e) { showToast('刪除失敗', true); }
+                        });
+                    });
+
+                    panel.querySelectorAll('[data-assign-save]').forEach(btn=>{
+                        btn.addEventListener('click', async ()=>{
+                            const idx = parseInt(btn.getAttribute('data-assign-save'),10);
+                            const sel = panel.querySelector(`[data-assign="${idx}"]`);
+                            const assVals = Array.from(sel?.selectedOptions||[]).map(o=>o.value);
+                            const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, assignees: assVals } : sh);
+                            try {
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                showToast('已更新指派');
+                                await loadMonth();
+                                renderCalendar();
+                                renderDayPanel();
+                            } catch (e) { showToast('更新指派失敗', true); }
                         });
                     });
 
@@ -5127,9 +5298,10 @@
                         const e = document.getElementById('new-end')?.value || '';
                         if (!s || !e) return showToast('請輸入完整時間', true);
                         if (parseHM(e) <= parseHM(s)) return showToast('結束時間需晚於開始時間', true);
-                        const newShifts = [...shifts, { start: s, end: e }];
+                        const assVals = Array.from(document.getElementById('new-assignees')?.selectedOptions||[]).map(o=>o.value);
+                        const newShifts = [...shifts, { start: s, end: e, assignees: assVals }];
                         try {
-                            await setDoc(doc(db,'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
                             showToast('已新增班表');
                             await loadMonth();
                             renderCalendar();
