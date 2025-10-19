@@ -6132,6 +6132,7 @@
                         <div class="bg-white p-3 rounded-md shadow-sm border space-y-2">
                             <div class="flex items-center justify-between">
                                 <h3 class="font-bold text-lg">帳號列表</h3>
+                                ${ (state.currentPage === 'navigation' && (state.currentUserData?.role === 'admin')) ? `<button id="add-user-btn" class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700">新增帳號</button>` : '' }
                             </div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
@@ -6170,6 +6171,11 @@
                     communitiesCache = list;
                     communitySelect.innerHTML = `<option value="">全部社區</option>` + list.map(c => `<option value="${c.id}" data-code="${c.code || ''}">${c.code ? '['+c.code+'] ' : ''}${c.name || '(未命名社區)'}</option>`).join('');
                     communitySelect.addEventListener('change', renderUserList);
+                }
+
+                const addBtn = document.getElementById('add-user-btn');
+                if (addBtn) {
+                    addBtn.addEventListener('click', () => openUserModal());
                 }
 
                 const unsubscribe = onSnapshot(q, (querySnapshot) => {
