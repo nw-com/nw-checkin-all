@@ -6134,13 +6134,10 @@
                             </div>
                         </div>
 
-                        <button id="add-user-btn" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 flex items-center justify-center">
-                            <i data-lucide="plus-circle" class="w-4 h-4 mr-2"></i>新增帳號
-                        </button>
+                        <div class="text-sm text-gray-500">此列表僅顯示目前社區之人員；不提供新增功能。</div>
                         <div id="user-list" class="space-y-2"></div>
                     </div>`;
                 lucide.createIcons();
-                document.getElementById('add-user-btn').addEventListener('click', () => openUserModal());
 
                 const userList = document.getElementById('user-list');
                 const usersRef = collection(db, "users");
@@ -6168,6 +6165,23 @@
                     }
                     const selectedRole = roleSelect.value || '';
                     let filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : true);
+
+                    // 依目前社區過濾服務成員（僅顯示服務該社區的人員）
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || null;
+                    if (currentCommId || currentCommCode) {
+                        filtered = filtered.filter(u => {
+                            const byId = currentCommId ? (Array.isArray(u.serviceCommunities) && u.serviceCommunities.includes(currentCommId)) : false;
+                            const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                            const byCode = currentCommCode ? (codesArr.includes(currentCommCode) || (u.serviceCommunityCode === currentCommCode)) : false;
+                            return byId || byCode;
+                        });
+                    } else {
+                        // 無指定社區，提示選擇社區並顯示空列表
+                        filtered = [];
+                        userList.innerHTML = `<p class="text-center text-gray-500 p-4">請先選擇社區</p>`;
+                    }
+
                     // 人員依姓氏筆畫少→多
                     filtered = filtered.slice().sort(compareUsersBySurnameStroke);
 
@@ -6268,9 +6282,19 @@
 
                 function renderList() {
                     listEl.innerHTML = '';
-                    const filtered = currentStatus ? allApps.filter(a => (a.status || 'pending') === currentStatus) : allApps;
+                    let filtered = currentStatus ? allApps.filter(a => (a.status || 'pending') === currentStatus) : allApps;
+
+                    // 依目前社區代號過濾申請
+                    const currentCommCode = state.currentCommunity?.code || null;
+                    if (currentCommCode) {
+                        filtered = filtered.filter(a => (a.serviceCommunityCode || '') === currentCommCode);
+                    } else {
+                        listEl.innerHTML = `<p class="text-center text-gray-500 p-4">請先選擇社區</p>`;
+                        return;
+                    }
+
                     if (filtered.length === 0) {
-                        listEl.innerHTML = `<p class="text-center text-gray-500 p-4">目前沒有申請</p>`;
+                        listEl.innerHTML = `<p class="text-center text-gray-500 p-4">目前該社區沒有申請</p>`;
                         return;
                     }
                     filtered.forEach(app => {
