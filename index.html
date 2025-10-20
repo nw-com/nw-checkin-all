@@ -9556,29 +9556,39 @@
                     if (!file) return;
                     showLoading(true);
                     try {
-                        const maxBytes = 900 * 1024; // 約 900KB 上限
-                        // 壓縮為 Blob，避免 Base64 造成行動端記憶體壓力
-                        let blob = await compressToBlob(file, 300, 'image/jpeg', 0.85);
-                        if (!blob) throw new Error('圖片壓縮失敗');
-                        // 若仍過大，嘗試再降低品質一次
-                        if (blob.size > maxBytes) {
-                            blob = await compressToBlob(file, 300, 'image/jpeg', 0.7);
+                        // 壓縮為 Base64，控制尺寸以符合 Firestore 文件大小限制（1MB）
+                        let dataUrl = await compressToBase64(file, 300); // 最長邊 300px，JPEG 0.7
+                        const base64 = dataUrl.split(',')[1] || '';
+                        // 若仍過大，嘗試再降低品質與尺寸
+                        const approxBytes = Math.ceil(base64.length * 0.75); // Base64 估算
+                        if (approxBytes > 900 * 1024) {
+                            dataUrl = await compressToBase64(file, 240); // 再縮小
                         }
-                        if (blob.size > maxBytes) {
+                        const base64After = dataUrl.split(',')[1] || '';
+                        const bytesAfter = Math.ceil(base64After.length * 0.75);
+                        if (bytesAfter > 900 * 1024) {
                             throw new Error('選擇的圖片過大（需小於約 900KB），請換較小的圖片');
                         }
 
-                        const storage = getStorage();
-                        const avatarRef = ref(storage, `userAvatars/${state.currentUser.uid}.jpg`);
-                        await uploadBytes(avatarRef, blob, { contentType: 'image/jpeg' });
-                        const url = await getDownloadURL(avatarRef);
+                        // 寫入 Firestore 的 userAvatars/{uid}
+                        const avatarDocRef = doc(db, 'userAvatars', state.currentUser.uid);
+                        await setDoc(avatarDocRef, {
+                            data: dataUrl,
+                            mimeType: 'image/jpeg',
+                            updatedAt: serverTimestamp(),
+                        }, { merge: true });
 
-                        await updateDoc(doc(db, 'users', state.currentUser.uid), { avatarUrl: url });
-                        state.currentUserData.avatarUrl = url;
-                        document.getElementById('modal-avatar').src = url;
+                        // 兼容既有 UI：將 users.avatarUrl 更新為 Data URL
+                        const userDocRef = doc(db, 'users', state.currentUser.uid);
+                        await updateDoc(userDocRef, { avatarUrl: dataUrl });
+
+                        // 更新本地 UI
+                        state.currentUserData.avatarUrl = dataUrl;
+                        document.getElementById('modal-avatar').src = dataUrl;
                         const header = document.getElementById('header-avatar');
-                        if (header) header.src = url;
-                        showToast('頭像更新成功');
+                        if (header) header.src = dataUrl;
+
+                        showToast('頭像更新成功（已存入 Firestore）');
                     } catch (error) {
                         console.error('Avatar upload error:', error);
                         showToast('頭像上傳失敗: ' + (error.message || error), true);
