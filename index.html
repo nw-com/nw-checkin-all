@@ -3895,7 +3895,7 @@
                             btn.addEventListener('click', (e) => {
                                 const lat = parseFloat(e.currentTarget.dataset.lat);
                                 const lng = parseFloat(e.currentTarget.dataset.lng);
-                                if(lat && lng) openMapModal(lat, lng);
+                                if (Number.isFinite(lat) && Number.isFinite(lng)) openMapModal(lat, lng);
                                 else showToast("無位置資訊可顯示", true);
                             });
                         });
@@ -5808,7 +5808,7 @@
                     btn.addEventListener('click', (e) => {
                         const lat = parseFloat(e.currentTarget.dataset.lat);
                         const lng = parseFloat(e.currentTarget.dataset.lng);
-                        if(lat && lng) openMapModal(lat, lng);
+                        if (Number.isFinite(lat) && Number.isFinite(lng)) openMapModal(lat, lng);
                         else showToast('無位置資訊可顯示', true);
                     });
                 });
@@ -5816,7 +5816,7 @@
                     btn.addEventListener('click', (e) => {
                         const photos = JSON.parse(decodeURIComponent(e.currentTarget.dataset.photos || '%5B%5D'));
                         const descriptions = JSON.parse(decodeURIComponent(e.currentTarget.dataset.descriptions || '%5B%5D'));
-                        openPhotoGalleryModal(photos, descriptions);
+                        openPhotoModal(photos, descriptions);
                     });
                 });
 
@@ -6121,7 +6121,7 @@
                                 btn.addEventListener('click', (e) => {
                                     const lat = parseFloat(e.currentTarget.dataset.lat);
                                     const lng = parseFloat(e.currentTarget.dataset.lng);
-                                    if(lat && lng) openMapModal(lat, lng);
+                                    if (Number.isFinite(lat) && Number.isFinite(lng)) openMapModal(lat, lng);
                                     else showToast("無位置資訊可顯示", true);
                                 });
                             });
