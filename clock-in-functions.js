@@ -27,6 +27,34 @@ const showToast = (typeof window.showToast === 'function')
 // 確保全域亦可使用
 window.showToast = showToast;
 
+// 建立 showLoading 本地別名並全域掛載（避免模組作用域下未解析）
+const showLoading = (typeof window.showLoading === 'function')
+    ? window.showLoading
+    : function(show) {
+        try {
+            const el = document.getElementById('loading-screen');
+            if (el) {
+                el.classList.toggle('hide', !show);
+            } else {
+                let overlay = document.getElementById('global-loading-overlay');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = 'global-loading-overlay';
+                    overlay.className = 'fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center';
+                    const box = document.createElement('div');
+                    box.className = 'bg-white rounded-md shadow p-4 text-gray-700';
+                    box.textContent = '處理中...';
+                    overlay.appendChild(box);
+                    overlay.style.display = 'none';
+                    document.body.appendChild(overlay);
+                }
+                overlay.style.display = show ? 'flex' : 'none';
+            }
+        } catch (_) {}
+    };
+// 確保全域亦可使用
+window.showLoading = showLoading;
+
 // 設置打卡狀態屬性
 if (typeof state.clockInStatus === 'undefined') {
     state.clockInStatus = 'none';
