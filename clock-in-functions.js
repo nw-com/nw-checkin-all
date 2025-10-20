@@ -194,7 +194,7 @@ function updateDashboardStatus() {
                         <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
                     </div>
                     <div class="text-sm text-gray-500 mt-1">
-                        ${ts ? '打卡 ' + ts.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'}) : ''}
+                        ${ts ? '打卡 ' + ts.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) : ''}
                     </div>`;
                 return;
             }
@@ -224,7 +224,7 @@ function updateDashboardStatus() {
                         <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
                     </div>
                     <div class="text-sm text-gray-500 mt-1">
-                        ${ts ? '打卡 ' + ts.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'}) : ''}
+                        ${ts ? '打卡 ' + ts.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) : ''}
                     </div>`;
                 return;
             }
@@ -248,7 +248,7 @@ function updateDashboardStatus() {
                         <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
                     </div>
                     <div class="text-sm text-gray-500 mt-1">
-                        ${ts ? '狀態更新 ' + ts.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'}) : ''}
+                        ${ts ? '狀態更新 ' + ts.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false}) : ''}
                     </div>`;
             } else {
                 const statusText = '尚未打卡';

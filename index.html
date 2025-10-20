@@ -1239,7 +1239,7 @@
                                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusColorClass}">${statusText}</span>
                                             ${hasAnomalies ? '<div class="text-xs text-red-600 mt-1">異常</div>' : ''}
                                         </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${ts.toLocaleString('zh-TW')}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${ts.toLocaleString('zh-TW', { hour12: false })}</td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${r.deviceId || '未知'}</td>
                                     </tr>
                                 `;
@@ -1809,7 +1809,7 @@
                 } catch (e) { console.warn('updateDashboardStatus 初始執行失敗', e); }
                 const timeEl = document.getElementById('current-time');
                 const timerInterval = setInterval(() => {
-                    if(timeEl){ timeEl.textContent = new Date().toLocaleString('zh-TW', { dateStyle: 'long', timeStyle: 'medium' }); }
+                    if(timeEl){ timeEl.textContent = new Date().toLocaleString('zh-TW', { dateStyle: 'long', timeStyle: 'medium', hour12: false }); }
                 }, 1000);
                 state.activeListeners.push(() => clearInterval(timerInterval));
                 
@@ -2051,7 +2051,7 @@
                                 const [eh, em] = expEnd.split(':').map(x=>parseInt(x,10));
                                 const endDt = new Date(start.getFullYear(), start.getMonth(), start.getDate(), eh||17, em||30, 0, 0);
                                 if (ts < endDt) {
-                                    anomalies.push({ type: '提早下班打卡', user: u, detail: `下班時間 ${ts.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}，早於預期 ${expEnd}` });
+                                    anomalies.push({ type: '提早下班打卡', user: u, detail: `下班時間 ${ts.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})}，早於預期 ${expEnd}` });
                                 }
                             }
                         }
@@ -2198,6 +2198,103 @@
                         }
                     }
 
+                    async function renderWorkdayClockCard() {
+                        try {
+                            const fs = window.__fs || {};
+                            const db = window.__db;
+                            const user = window.__auth?.currentUser;
+                            const listEl = document.getElementById('dashboard-duty-list');
+                            if (!db || !user || !listEl) return;
+
+                            const { doc, getDoc, collection, query, where, orderBy, getDocs, Timestamp } = fs;
+                            
+                            const formatYMD = (date) => {
+                                const y = date.getFullYear();
+                                const m = String(date.getMonth() + 1).padStart(2, '0');
+                                const d = String(date.getDate()).padStart(2, '0');
+                                return `${y}-${m}-${d}`;
+                            };
+
+                            const holidays = window.__holidaySettingsCache || { weekendIsHoliday: false, holidays: [] };
+                            const holidaysSet = new Set(holidays.holidays || []);
+                            const isHoliday = (date) => {
+                                const ymd = formatYMD(date);
+                                const weekend = date.getDay() === 0 || date.getDay() === 6;
+                                return holidaysSet.has(ymd) || (holidays.weekendIsHoliday && weekend);
+                            };
+
+                            const getDaysMap = async (year, monthIdx) => {
+                                const ymKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
+                                let daysMap = {};
+                                try {
+                                    const sSnap = await getDoc(doc(db, 'settings', `workdays_${ymKey}`));
+                                    if (sSnap.exists()) { const sd = sSnap.data(); daysMap = sd?.days || {}; }
+                                } catch (_) {}
+                                try {
+                                    const uSnap = await getDoc(doc(db, 'users', user.uid, 'workdays', ymKey));
+                                    if (uSnap.exists()) { const ud = uSnap.data(); daysMap = { ...daysMap, ...(ud?.days || {}) }; }
+                                } catch (_) {}
+                                return daysMap;
+                            };
+
+                            const now = new Date();
+                            const daysMapNow = await getDaysMap(now.getFullYear(), now.getMonth());
+                            const ymdToday = formatYMD(now);
+                            const todayCfg = daysMapNow[ymdToday] || {};
+                            const todayStartExp = todayCfg.start || (!isHoliday(now) && (now.getDay()>=1 && now.getDay()<=5) ? '09:00' : '');
+                            
+                            let actualStart = null;
+                            if (todayStartExp) {
+                                const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+                                const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                                const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
+                                const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
+                                let q;
+                                try {
+                                    q = query(collection(db, 'clockInRecords'), where('userId', '==', user.uid), where('timestamp', '>=', tsStart), where('timestamp', '<=', tsEnd), orderBy('timestamp', 'asc'));
+                                } catch (_) {
+                                    q = query(collection(db, 'clockInRecords'), where('userId', '==', user.uid), where('timestamp', '>=', tsStart), where('timestamp', '<=', tsEnd));
+                                }
+                                const snap = await getDocs(q);
+                                const recs = [];
+                                snap.forEach(d => recs.push(d.data()));
+                                const startRec = recs.find(r => r.type === '上班') || recs.find(r => r.type === '外出');
+                                if (startRec && startRec.timestamp) {
+                                    actualStart = startRec.timestamp?.toDate?.() ? startRec.timestamp.toDate() : new Date(startRec.timestamp);
+                                }
+                            }
+
+                            let nextDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+                            let nextStartExp = '';
+                            for (let i = 0; i < 30; i++) {
+                                const map = await getDaysMap(nextDate.getFullYear(), nextDate.getMonth());
+                                const cfg = map[formatYMD(nextDate)] || {};
+                                const wk = nextDate.getDay();
+                                const defaultStart = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? '09:00' : '';
+                                const st = cfg.start || defaultStart;
+                                if (st) { nextStartExp = st; break; }
+                                nextDate.setDate(nextDate.getDate() + 1);
+                            }
+
+                            const line1 = todayStartExp ? `今天：${actualStart ? actualStart.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})}（已打卡）` : `今天：${todayStartExp}（預期）` : '今天：非工作日';
+                            const line2 = nextStartExp ? `下一工作日（${String(nextDate.getMonth()+1).padStart(2,'0')}/${String(nextDate.getDate()).padStart(2,'0')}）：${nextStartExp}` : '下一工作日：未設定';
+
+                            const html = `
+                                <div id="workday-clock-card" class="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                                  <div class="flex items-center"><i data-lucide="clock" class="w-4 h-4 mr-2 text-blue-600"></i><span class="font-medium text-blue-800">上班打卡時刻</span></div>
+                                  <div class="mt-1 text-sm text-gray-700">${line1}</div>
+                                  <div class="mt-1 text-sm text-gray-700">${line2}</div>
+                                </div>`;
+                            const existing = document.getElementById('workday-clock-card');
+                            if (existing) existing.outerHTML = html;
+                            else listEl.insertAdjacentHTML('afterbegin', html);
+                            try { lucide.createIcons(); } catch (_) {}
+                        } catch (e) {
+                            console.warn('渲染打卡時刻通知失敗', e);
+                        }
+                    }
+
+                    renderWorkdayClockCard();
                     renderDutyReminder();
                 } catch (e) {
                     console.warn('初始化儀錶板通知失敗', e);
@@ -2308,7 +2405,7 @@
                                             <span class="font-semibold text-lg ${statusColorLast}">${statusTextLast}</span>
                                           </div>
                                           <div class="text-sm text-gray-500 mt-1">
-                                            ${ts ? '打卡 ' + ts.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'}) : ''}
+                                            ${ts ? '打卡 ' + ts.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) : ''}
                                           </div>`;
                                     } else {
                                         const statusTextLast = '尚未打卡';
@@ -2566,7 +2663,7 @@
                                                       : getStatusDisplayText(user.clockInStatus || '未打卡', locText, user.dutyType);
                             const statusColor = getStatusColor(statusText);
                             const clockInTime = latest?.timestamp?.toDate?.() ? latest.timestamp.toDate() : (latest?.timestamp ? new Date(latest.timestamp) : null);
-                            const timeFormatted = clockInTime ? clockInTime.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}) : 'N/A';
+                            const timeFormatted = clockInTime ? clockInTime.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}) : 'N/A';
                             listEl.innerHTML += `
                                 <div class=\"flex items-center justify-between bg-white p-3 rounded-md shadow-sm border\">
                                     <div class=\"flex items-center\">
@@ -2599,7 +2696,7 @@
                                     }
                                     const el = document.querySelector(`#clock-time-${u.id}`);
                                     if (el) {
-                                        el.textContent = dt ? dt.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}) : 'N/A';
+                                        el.textContent = dt ? dt.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}) : 'N/A';
                                     }
                                 } catch (e) {
                                     console.warn('載入使用者最新打卡失敗:', e);
@@ -3208,8 +3305,8 @@
 
                         filtered.forEach(leave => {
                             hasRecords = true;
-                            const startTimeText = leave.startTime.toDate().toLocaleString('zh-TW');
-                            const endTimeText = leave.endTime.toDate().toLocaleString('zh-TW');
+                            const startTimeText = leave.startTime.toDate().toLocaleString('zh-TW', { hour12: false });
+                            const endTimeText = leave.endTime.toDate().toLocaleString('zh-TW', { hour12: false });
 
                             const row = document.createElement('tr');
                             row.className = 'hover:bg-gray-50';
@@ -4457,7 +4554,7 @@
                             item.innerHTML = `
                                 <div>
                                     <p class=\"font-medium text-gray-800\">${r.type}</p>
-                                    <p class=\"text-sm text-gray-600\">${when ? when.toLocaleString('zh-TW') : ''}</p>
+                                    <p class=\"text-sm text-gray-600\">${when ? when.toLocaleString('zh-TW', { hour12: false }) : ''}</p>
                                     ${r.locationName ? `<p class=\"text-xs text-gray-500\">地點：${r.locationName}</p>` : ''}
                                     ${r.reason ? `<p class=\"text-xs text-gray-500\">事由：${r.reason}</p>` : ''}
                                 </div>
@@ -4536,7 +4633,7 @@
                             item.innerHTML = `
                                 <div>
                                     <p class=\"font-medium text-gray-800\">${userName}</p>
-                                    <p class=\"text-sm text-gray-600\">${req.type} · ${req.when ? req.when.toLocaleString('zh-TW') : ''}</p>
+                                    <p class=\"text-sm text-gray-600\">${req.type} · ${req.when ? req.when.toLocaleString('zh-TW', { hour12: false }) : ''}</p>
                                     ${req.locationName ? `<p class=\"text-xs text-gray-500\">地點：${req.locationName}</p>` : ''}
                                     ${req.reason ? `<p class=\"text-xs text-gray-500\">事由：${req.reason}</p>` : ''}
                                 </div>
@@ -5660,7 +5757,7 @@
                             <div class="flex justify-between items-start">
                                 <div>
                                     <div class="font-semibold">${userName}</div>
-                                    <div class="text-sm text-gray-500">${time.toLocaleString('zh-TW')}</div>
+                                    <div class="text-sm text-gray-500">${time.toLocaleString('zh-TW', { hour12: false })}</div>
                                     <div class="mt-1 flex items-center">
 <span class="px-2 py-0.5 rounded text-sm ${getStatusBgColor(getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null))}">${getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null)}</span>
                         ${record.location && typeof record.location.latitude === 'number' && typeof record.location.longitude === 'number' ? `<span class="ml-2 text-sm text-gray-500">${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}</span>` : ''}
@@ -5970,7 +6067,7 @@
                                     <div class="flex justify-between items-start">
                                         <div>
                                             <div class="font-semibold">${userName}</div>
-                                            <div class="text-sm text-gray-500">${time.toLocaleString('zh-TW')}</div>
+                                            <div class="text-sm text-gray-500">${time.toLocaleString('zh-TW', { hour12: false })}</div>
                                             <div class="mt-1 flex items-center">
                                                 <span class="px-2 py-0.5 rounded text-sm ${getStatusBgColor(getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null))}">${getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null)}</span>
                         ${record.location && typeof record.location.latitude === 'number' && typeof record.location.longitude === 'number' ? `<span class="ml-2 text-sm text-gray-500">${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}</span>` : ''}
@@ -6270,8 +6367,8 @@
                             
                             hasRecords = true;
                             
-                            const startTime = leave.startTime.toDate().toLocaleString('zh-TW');
-                            const endTime = leave.endTime.toDate().toLocaleString('zh-TW');
+                            const startTime = leave.startTime.toDate().toLocaleString('zh-TW', { hour12: false });
+                            const endTime = leave.endTime.toDate().toLocaleString('zh-TW', { hour12: false });
                             
                             let statusBadge = '';
                             switch (leave.status) {
@@ -9705,7 +9802,7 @@
                     context.font = '16px Arial';
                     context.fillStyle = 'rgba(255, 255, 255, 0.7)';
                     const now = new Date();
-                    const dateTimeText = `${now.toLocaleDateString('zh-TW')} ${now.toLocaleTimeString('zh-TW')}`;
+                    const dateTimeText = `${now.toLocaleDateString('zh-TW')} ${now.toLocaleTimeString('zh-TW',{ hour12: false })}`;
                 const locationText = (state.currentLocation && typeof state.currentLocation.lat === 'number' && typeof state.currentLocation.lng === 'number') ? `位置: ${state.currentLocation.lat.toFixed(6)}, ${state.currentLocation.lng.toFixed(6)}` : '無位置資訊';
                     const userText = `${state.currentUserData.name} - ${type}打卡`;
                     
@@ -9782,7 +9879,7 @@
                         if (restrictedTypes.includes(type) && (dutyStart || dutyEnd)) {
                             const now = new Date();
                             if (dutyStart && now < dutyStart) {
-                                showToast(`勤務尚未開始（${dutyStart.toLocaleString('zh-TW')}），不可打卡`, true);
+                                showToast(`勤務尚未開始（${dutyStart.toLocaleString('zh-TW', { hour12: false })}），不可打卡`, true);
                                 return;
                             }
                             if (dutyEnd && now > dutyEnd) {
@@ -10056,14 +10153,14 @@
                             const startTime = userData.dutyStartTime.toDate ? 
                                 userData.dutyStartTime.toDate() : 
                                 new Date(userData.dutyStartTime);
-                            startTimeStr = startTime.toLocaleString('zh-TW');
+                            startTimeStr = startTime.toLocaleString('zh-TW', { hour12: false });
                         }
                         
                         if (userData.dutyEndTime) {
                             const endTime = userData.dutyEndTime.toDate ? 
                                 userData.dutyEndTime.toDate() : 
                                 new Date(userData.dutyEndTime);
-                            endTimeStr = endTime.toLocaleString('zh-TW');
+                            endTimeStr = endTime.toLocaleString('zh-TW', { hour12: false });
                         }
                         
                         return `
@@ -10084,8 +10181,8 @@
                 const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
                 const startTime = toDate(userData.leaveStartTime);
                 const endTime = toDate(userData.leaveEndTime);
-                const startTimeStr = startTime ? startTime.toLocaleString('zh-TW') : '未指定時間';
-                const endTimeStr = endTime ? endTime.toLocaleString('zh-TW') : '未指定時間';
+                const startTimeStr = startTime ? startTime.toLocaleString('zh-TW', { hour12: false }) : '未指定時間';
+                const endTimeStr = endTime ? endTime.toLocaleString('zh-TW', { hour12: false }) : '未指定時間';
                 
                 return `
                     <div class="font-semibold text-lg">${leaveStatus}</div>
@@ -10239,7 +10336,7 @@
                     d = new Date(timestamp);
                 }
                 if (!d || isNaN(d.getTime())) return '';
-                return d.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                return d.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
             }
 
             // 通用日期時間格式化：支援 Firestore Timestamp、Date、字串與數字
@@ -10255,7 +10352,7 @@
                         d = new Date(value);
                     }
                     if (isNaN(d.getTime())) return '';
-                    return d.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    return d.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
                 } catch (e) {
                     console.error('formatDateTime error:', e);
                     return '';
