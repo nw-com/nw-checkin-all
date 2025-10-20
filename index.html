@@ -1467,7 +1467,7 @@
                     'dashboard': renderDashboard,
                     'clock-in': () => renderClockIn(subPage || 'location'),
                     'tracking': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderTracking(subPage || 'map', params) : renderAccessDenied(),
-                    'features': () => renderFeatures(subPage || 'news'),
+                    'features': () => renderFeatures(subPage || 'training'),
                     'calendar': () => renderCalendar(subPage || 'overview'),
                     'schedule': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderShifts(subPage || null) : renderAccessDenied(),
                     'settings': () => role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
@@ -3190,7 +3190,7 @@
                 const renderDayPanel = () => {
                     const panel = document.getElementById('myshift-day-panel');
                     if (!panel) return;
-                    const iso = pageState.selectedDayIso || fmtYMD(new Date()); const { Timestamp } = window.__fs || {}; const { Timestamp } = window.__fs || {}; const { Timestamp } = window.__fs || {};
+                    const iso = pageState.selectedDayIso || fmtYMD(new Date()); const { Timestamp } = window.__fs || {};
                     const list = pageState.daysMap[iso] || [];
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
