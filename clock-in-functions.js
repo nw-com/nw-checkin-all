@@ -697,7 +697,7 @@ function openTempLeaveModal() {
     // 創建彈窗
     const modal = document.createElement('div');
     modal.id = 'temp-leave-modal';
-    modal.className = 'bg-white rounded-lg p-6 w-[90%] max-w-md';
+    modal.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-6 w-[90%] max-w-md z-50';
     
     // 彈窗標題
     const title = document.createElement('h3');
@@ -986,6 +986,9 @@ function openTempLeaveModal() {
     // 添加到頁面
     document.body.appendChild(backdrop);
     document.body.appendChild(modal);
+
+    // 讓使用者能立即輸入
+    reasonSelect.focus();
 }
 
 // 特殊勤務彈窗
@@ -998,7 +1001,7 @@ function openSpecialDutyModal() {
     // 創建彈窗
     const modal = document.createElement('div');
     modal.id = 'special-duty-modal';
-    modal.className = 'bg-white rounded-lg p-6 w-[90%] max-w-md';
+    modal.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-6 w-[90%] max-w-md z-50';
     
     // 彈窗標題
     const title = document.createElement('h3');
@@ -1012,6 +1015,7 @@ function openSpecialDutyModal() {
     
     const dutySelect = document.createElement('select');
     dutySelect.id = 'duty-type-select';
+    dutySelect.autofocus = true;
     dutySelect.className = 'w-full border border-gray-300 rounded-md p-2 mb-4';
     
     // 添加選項
@@ -1206,6 +1210,9 @@ function openSpecialDutyModal() {
     // 添加到頁面
     document.body.appendChild(backdrop);
     document.body.appendChild(modal);
+
+    // 讓使用者能立即輸入
+    dutySelect.focus();
 }
 
 // 關閉所有彈窗
