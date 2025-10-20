@@ -6155,6 +6155,15 @@
                         }
                     }
                 } catch (e) { console.warn("載入公司位置失敗，使用預設中心點", e); }
+                // 社區模式：若目前社區有座標，優先以社區中心為地圖中心
+                if (state.appMode === 'community') {
+                    const c = state.currentCommunity || {};
+                    const cLat = typeof c.lat === 'number' ? c.lat : null;
+                    const cLng = typeof c.lng === 'number' ? c.lng : null;
+                    if (cLat != null && cLng != null) {
+                        mapCenter = { lat: cLat, lng: cLng };
+                    }
+                }
                 
                 state.trackingMap = new google.maps.Map(mapDiv, {
                     center: mapCenter,
@@ -6819,8 +6828,24 @@
                     }
                     const filteredUsers = users.filter(u => visibilityMap[u.id] !== false);
 
-                    if (filteredUsers.length === 0) {
-                        userListEl.innerHTML = `<p class="text-center text-gray-500 p-2">沒有使用者可追蹤</p>`;
+                    // 社區模式：僅顯示該社區的外勤相關角色（總幹事、秘書、保全、清潔、機電）
+                    let baseList = filteredUsers;
+                    if (state.appMode === 'community') {
+                        const currentCommId = state.currentCommunity?.id || null;
+                        const currentCommCode = state.currentCommunity?.code || null;
+                        baseList = filteredUsers.filter(u => {
+                            if (!isFieldLikeRole(u.role)) return false;
+                            const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                            const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                            const codeSingle = u.serviceCommunityCode || null;
+                            const matchById = currentCommId ? ids.includes(currentCommId) : false;
+                            const matchByCode = currentCommCode ? (codesArr.includes(currentCommCode) || codeSingle === currentCommCode) : false;
+                            return matchById || matchByCode;
+                        });
+                    }
+
+                    if (baseList.length === 0) {
+                        userListEl.innerHTML = `<p class="text-center text-gray-500 p-2">該社區目前沒有可追蹤的人員</p>`;
                         return;
                     }
 
@@ -6828,7 +6853,7 @@
                     const { collection: fsCollection, query: fsQuery, where, orderBy: fsOrderBy, limit, getDocs } = window.__fs || {};
                     const dbRef = window.__db || null;
 
-                    const augmentedPromises = filteredUsers.map(async (user) => {
+                    const augmentedPromises = baseList.map(async (user) => {
                         let latestRecord = null;
                         try {
                             if (fsCollection && fsQuery && where && fsOrderBy && limit && getDocs && dbRef) {
