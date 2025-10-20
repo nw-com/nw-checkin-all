@@ -6118,7 +6118,7 @@
                         <div id="tracking-map" class="h-full w-full"></div>
                         <div id="tracking-map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
 <button id="tracking-map-center-btn" class="absolute top-3 right-3 z-10 bg-white text-gray-700 border border-gray-300 rounded-full shadow px-3 py-2 flex items-center hover:bg-gray-50">
-                            <i data-lucide="focus" class="w-4 h-4 mr-2"></i>回到公司
+                            <i data-lucide="focus" class="w-4 h-4 mr-2"></i>${state.appMode === 'community' ? '回到社區' : '回到公司'}
                         </button>
                         <div class="absolute bottom-0 left-0 right-0 p-2">
                             <div id="user-tracking-list" class="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg max-h-[150px] overflow-y-auto p-2 space-y-2">
@@ -6180,7 +6180,7 @@
                             state.trackingMap.panTo(state.companyCenter);
                             state.trackingMap.setZoom(14);
                         } else {
-                            showToast('尚未設定公司座標', true);
+                            showToast(state.appMode === 'community' ? '尚未設定社區座標' : '尚未設定公司座標', true);
                         }
                     });
                 }
