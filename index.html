@@ -4020,35 +4020,210 @@
                         if (recordsListEl) {
                             (async () => {
                                 try {
-                                    const { doc, getDoc } = window.__fs; const db2 = window.__db;
+                                    const { doc, getDoc, collection, query, where, getDocs } = window.__fs; const db2 = window.__db;
                                     const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
                                     if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`; return; }
-                                    const userRef = doc(db2, 'users', uid);
-                                    const userSnap = await getDoc(userRef);
-                                    if (userSnap.exists() && userSnap.data().clockInStatus) {
-                                        const u = userSnap.data();
-                                        const ts = u.lastUpdated?.toDate?.() || (u.lastUpdated ? new Date(u.lastUpdated) : null);
-                                        if (ts && ts >= startOfMonth && ts <= endOfMonth) {
-                                            const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
+
+                                    // Fallback：僅以 userId 讀取紀錄，再在前端依月份過濾
+                                    const q2 = query(collection(db2, 'clockInRecords'), where('userId', '==', uid));
+                                    const snap2 = await getDocs(q2);
+                                    const records = [];
+                                    snap2.forEach(d => { records.push({ id: d.id, ...d.data() }); });
+                                    const filtered = records.filter(r => {
+                                        const ts = r.timestamp?.toDate?.() || (r.timestamp ? new Date(r.timestamp) : null);
+                                        return ts && ts >= startOfMonth && ts <= endOfMonth;
+                                    }).sort((a, b) => {
+                                        const timeA = a.timestamp?.toDate?.() || (a.timestamp ? new Date(a.timestamp) : new Date(0));
+                                        const timeB = b.timestamp?.toDate?.() || (b.timestamp ? new Date(b.timestamp) : new Date(0));
+                                        return timeB - timeA;
+                                    });
+
+                                    if (filtered.length > 0) {
+                                        recordsListEl.innerHTML = '';
+                                        filtered.forEach(record => {
+                                            const card = document.createElement('div');
+                                            card.className = 'bg-white p-3 rounded-lg shadow-sm border mb-3';
+                                            const statusText = getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null);
                                             const statusColor = getStatusColor(statusText);
-                                            recordsListEl.innerHTML = `
-                                                <div class="bg-white p-3 rounded-lg shadow-sm border mb-3">
-                                                    <div class="flex justify-between items-start">
+                                            const abnormalInfo = computeRecordAbnormal(record, state.currentUserData?.serviceCommunities || []);
+                                            const abnormalHtml = (abnormalInfo && abnormalInfo.isAbnormal)
+                                                ? `<div class="mt-1 flex items-center"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class="ml-2 text-xs text-gray-500">${abnormalInfo.detail}</span>` : ''}</div>`
+                                                : '';
+                                            card.innerHTML = `
+                                                <div class="flex justify-between items-start">
+                                                    <div>
+                                                        <p class="font-bold text-lg ${statusColor}">${statusText}</p>
+                                                        <p class="text-sm text-gray-600">${formatDate(record.timestamp)}</p>
+                                                        ${abnormalHtml}
+                                                    </div>
+                                                </div>
+                                                <div class="mt-2 flex space-x-2 overflow-x-auto">
+                                                    <button class="photo-btn bg-green-500 text-white px-2 py-1 rounded text-sm" 
+                                                        data-photos='${encodeURIComponent(JSON.stringify(record.photoUrls || []))}' 
+                                                        data-descriptions='${encodeURIComponent(JSON.stringify(record.descriptions || []))}'>
+                                                        <i data-lucide="image"></i> 照片 (${(record.photoUrls?.length || 0)})
+                                                    </button>
+                                                    <button class="map-btn bg-blue-500 text-white px-2 py-1 rounded text-sm" data-lat="${record.location?.latitude || 0}" data-lng="${record.location?.longitude || 0}">
+                                                        <i data-lucide="map-pin"></i> 地圖
+                                                    </button>
+                                                    <button class="apply-mod-btn bg-orange-500 text-white px-2 py-1 rounded text-sm"
+                                                        data-id="${record.id}"
+                                                        data-type="${record.type || ''}"
+                                                        data-ts="${(record.timestamp?.toMillis ? record.timestamp.toMillis() : (record.timestamp?.seconds ? record.timestamp.seconds * 1000 : (record.timestamp ? (new Date(record.timestamp)).getTime() : Date.now())))}"
+                                                        data-locationname="${record.locationName || ''}">
+                                                        <i data-lucide="edit"></i> 申請修改
+                                                    </button>
+                                                </div>
+                                            `;
+                                            recordsListEl.appendChild(card);
+                                        });
+                                         
+                                        try { lucide.createIcons(); } catch(e) {}
+                                        document.querySelectorAll('.map-btn').forEach(btn => {
+                                            btn.addEventListener('click', (e) => {
+                                                const lat = parseFloat(e.currentTarget.dataset.lat);
+                                                const lng = parseFloat(e.currentTarget.dataset.lng);
+                                                if (Number.isFinite(lat) && Number.isFinite(lng)) openMapModal(lat, lng);
+                                                else showToast("無位置資訊可顯示", true);
+                                            });
+                                        });
+                                        
+                                        document.querySelectorAll('.apply-mod-btn').forEach(btn => {
+                                            btn.addEventListener('click', async (e) => {
+                                                const d = e.currentTarget.dataset;
+                                                const tsMillis = parseInt(d.ts || '0', 10);
+                                                const ts = Number.isFinite(tsMillis) && tsMillis > 0 ? new Date(tsMillis) : new Date();
+                                                const recTypeRaw = d.type || '';
+                                                const recLocationName = d.locationname || '';
+                                                const typeMap = { clock_in: '上班', clock_out: '下班', out: '外出', arrive: '抵達', leave: '離開', return: '返回' };
+                                                const recType = typeMap[recTypeRaw] || recTypeRaw;
+                                                const backdrop = document.createElement('div');
+                                                backdrop.className = 'fixed inset-0 bg-black bg-opacity-40 z-40';
+                                                const modal = document.createElement('div');
+                                                modal.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-4 z-50 w-[92%] max-w-[560px]';
+                                                modal.innerHTML = `
+                                                    <h3 class="text-lg font-bold mb-3">申請修改打卡資料</h3>
+                                                    <div class="space-y-3">
+                                                        <div class="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label class="text-sm font-medium">日期</label>
+                                                                <input type="date" id="mod-date" class="w-full border border-gray-300 rounded-md p-2" value="${ts.toISOString().split('T')[0]}" />
+                                                            </div>
+                                                            <div>
+                                                                <label class="text-sm font-medium">時間</label>
+                                                                <input type="time" id="mod-time" class="w-full border border-gray-300 rounded-md p-2" value="${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}" />
+                                                            </div>
+                                                        </div>
                                                         <div>
-                                                            <p class="font-bold text-lg ${statusColor}">${statusText}</p>
-                                                            <p class="text-sm text-gray-600">${ts ? formatDate(ts) : ''}</p>
+                                                            <label class="text-sm font-medium">項目</label>
+                                                            <select id="mod-type" class="w-full border border-gray-300 rounded-md p-2">
+                                                                <option value="上班" ${recType==='上班' ? 'selected' : ''}>上班</option>
+                                                                <option value="下班" ${recType==='下班' ? 'selected' : ''}>下班</option>
+                                                                <option value="外出" ${recType==='外出' ? 'selected' : ''}>外出</option>
+                                                                <option value="抵達" ${recType==='抵達' ? 'selected' : ''}>抵達</option>
+                                                                <option value="離開" ${recType==='離開' ? 'selected' : ''}>離開</option>
+                                                                <option value="返回" ${recType==='返回' ? 'selected' : ''}>返回</option>
+                                                            </select>
+                                                        </div>
+                                                        <div id="mod-extra" class="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label class="text-sm font-medium">事由</label>
+                                                                <input type="text" id="mod-reason" class="w-full border border-gray-300 rounded-md p-2" placeholder="請輸入事由" />
+                                                            </div>
+                                                            <div>
+                                                                <label class="text-sm font-medium">地點</label>
+                                                                <input type="text" id="mod-location" class="w-full border border-gray-300 rounded-md p-2" placeholder="請輸入地點" value="${recLocationName}" />
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <label class="text-sm font-medium">備註</label>
+                                                            <input type="text" id="mod-note" class="w-full border border-gray-300 rounded-md p-2" placeholder="請填寫申請原因/說明" />
                                                         </div>
                                                     </div>
-                                                    <div class="mt-2 text-xs text-gray-400">來源：使用者狀態快照</div>
-                                                </div>`;
-                                            try { lucide.createIcons(); } catch(e){}
+                                                    <div class="flex justify-end gap-2 mt-4">
+                                                        <button id="mod-cancel" class="px-3 py-2 border rounded-md">取消</button>
+                                                        <button id="mod-submit" class="px-3 py-2 bg-orange-600 text-white rounded-md">送出審核</button>
+                                                    </div>
+                                                `;
+                                                document.body.appendChild(backdrop);
+                                                document.body.appendChild(modal);
+                                                const typeSelect = modal.querySelector('#mod-type');
+                                                const reasonInput = modal.querySelector('#mod-reason');
+                                                const locInput = modal.querySelector('#mod-location');
+                                                const toggle = () => {
+                                                    const need = ['外出','抵達','離開'].includes(typeSelect.value);
+                                                    modal.querySelector('#mod-extra').style.display = need ? 'grid' : 'none';
+                                                };
+                                                typeSelect.addEventListener('change', toggle); toggle();
+                                                modal.querySelector('#mod-cancel').addEventListener('click', () => { backdrop.remove(); modal.remove(); });
+                                                backdrop.addEventListener('click', () => { backdrop.remove(); modal.remove(); });
+                                                modal.querySelector('#mod-submit').addEventListener('click', async () => {
+                                                    try {
+                                                        const { addDoc, collection, Timestamp } = window.__fs; const db = window.__db; const user = window.__auth?.currentUser;
+                                                        if (!user) { showToast('尚未登入', true); return; }
+                                                        const dateStr = modal.querySelector('#mod-date').value;
+                                                        const timeStr = modal.querySelector('#mod-time').value;
+                                                        const type = typeSelect.value;
+                                                        const reason = (reasonInput.value || '').trim();
+                                                        const locationName = (locInput.value || '').trim();
+                                                        if (!dateStr || !timeStr) { showToast('請填寫日期與時間', true); return; }
+                                                        if (['外出','抵達','離開'].includes(type) && (!reason || !locationName)) { showToast('外出/抵達/離開需填寫事由與地點', true); return; }
+                                                        const dt = new Date(`${dateStr}T${timeStr}:00`);
+                                                        const payload = {
+                                                            userId: user.uid,
+                                                            type,
+                                                            reason: reason || '',
+                                                            locationName: locationName || '',
+                                                            requestedAt: Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date(),
+                                                            targetTime: Timestamp?.fromDate ? Timestamp.fromDate(dt) : dt,
+                                                            status: 'pending'
+                                                        };
+                                                        await addDoc(collection(db, 'retroClockRequests'), payload);
+                                                        showToast('已送出修改申請');
+                                                        backdrop.remove(); modal.remove();
+                                                    } catch (err) {
+                                                        console.error('送出申請失敗', err);
+                                                        showToast('送出申請失敗，請稍後再試', true);
+                                                    }
+                                                });
+                                            });
+                                        });
+                                        
+                                        document.querySelectorAll('.photo-btn').forEach(btn => {
+                                            btn.addEventListener('click', (e) => {
+                                                const photos = JSON.parse(decodeURIComponent(e.currentTarget.dataset.photos || '%5B%5D'));
+                                                const descriptions = JSON.parse(decodeURIComponent(e.currentTarget.dataset.descriptions || '%5B%5D'));
+                                                openPhotoModal(photos, descriptions);
+                                            });
+                                        });
+                                    } else {
+                                        const userRef = doc(db2, 'users', uid);
+                                        const userSnap = await getDoc(userRef);
+                                        if (userSnap.exists() && userSnap.data().clockInStatus) {
+                                            const u = userSnap.data();
+                                            const ts = u.lastUpdated?.toDate?.() || (u.lastUpdated ? new Date(u.lastUpdated) : null);
+                                            if (ts && ts >= startOfMonth && ts <= endOfMonth) {
+                                                const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
+                                                const statusColor = getStatusColor(statusText);
+                                                recordsListEl.innerHTML = `
+                                                    <div class="bg-white p-3 rounded-lg shadow-sm border mb-3">
+                                                        <div class="flex justify-between items-start">
+                                                            <div>
+                                                                <p class="font-bold text-lg ${statusColor}">${statusText}</p>
+                                                                <p class="text-sm text-gray-600">${ts ? formatDate(ts) : ''}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div class="mt-2 text-xs text-gray-400">來源：使用者狀態快照（clockInRecords 建立失敗）</div>
+                                                    </div>`;
+                                                try { lucide.createIcons(); } catch(e){}
+                                            } else {
+                                                const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
+                                                recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄 ${hint}</p>`;
+                                            }
                                         } else {
                                             const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
                                             recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄 ${hint}</p>`;
                                         }
-                                    } else {
-                                        const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
-                                        recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄 ${hint}</p>`;
                                     }
                                 } catch (e2) {
                                     const hint = (error?.code === 'failed-precondition') ? '可能需要建立複合索引（userId + timestamp）。' : '請確認 Firestore 規則與網路狀況。';
