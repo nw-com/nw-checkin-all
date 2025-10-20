@@ -10135,11 +10135,12 @@
                         const recordData = {
                             userId: uid,
                             type: type,
-                            timestamp: serverTimestamp(),
+                            timestamp: Timestamp.now(),
                             location: new GeoPoint(safeLat, safeLng),
                             photoUrls,
                             descriptions,
-                            deviceId: state.deviceId || 'unknown-device'
+                            deviceId: state.deviceId || 'unknown-device',
+                            isAutomatic: false
                         };
                         // 勤務項目與超時巡邏標記：避免 undefined 寫入
                         if (isOvertime) {
