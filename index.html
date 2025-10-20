@@ -461,6 +461,8 @@
         function showLoading(show) {
             if(loadingScreen) loadingScreen.classList.toggle('hide', !show);
         }
+        // 掛到全域讓外部腳本可使用
+        window.showLoading = showLoading;
 
         function initializeAppLogic() {
             const app = initializeApp(firebaseConfig);
@@ -2735,9 +2737,9 @@
                 const isStaff = new Set(['總幹事','秘書','保全','清潔','機電']).has(role);
                 const tabs = isStaff
                     ? [
+                        { key: 'workdays', label: '我的班表' },
                         { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
-                        { key: 'workdays', label: '我的班表' },
                         { key: 'leaves', label: '請假申請' }
                       ]
                     : [
