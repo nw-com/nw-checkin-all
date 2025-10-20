@@ -2276,7 +2276,7 @@
                                 nextDate.setDate(nextDate.getDate() + 1);
                             }
 
-                            const line1 = todayStartExp ? `今天：${actualStart ? actualStart.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})}（已打卡）` : `今天：${todayStartExp}（預期）` : '今天：非工作日';
+                            const line1 = todayStartExp ? (actualStart ? `今天：${actualStart.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})}（已打卡）` : `今天：${todayStartExp}（預期）`) : '今天：非工作日';
                             const line2 = nextStartExp ? `下一工作日（${String(nextDate.getMonth()+1).padStart(2,'0')}/${String(nextDate.getDate()).padStart(2,'0')}）：${nextStartExp}` : '下一工作日：未設定';
 
                             const html = `
