@@ -2738,13 +2738,13 @@
                         { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
                         { key: 'workdays', label: '我的班表' },
-                        { key: 'leaves', label: '請假紀錄' }
+                        { key: 'leaves', label: '請假申請' }
                       ]
                     : [
                         { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
                         { key: 'retro', label: '補打卡' },
-                        { key: 'leaves', label: '請假紀錄' }
+                        { key: 'leaves', label: '請假申請' }
                       ];
 
                 const tabsHtml = tabs.map(t => `
@@ -2791,10 +2791,9 @@
                             <span id="status-text">尚未打卡</span>
                         </div>
                         <div id="clock-in-buttons" class="grid grid-cols-2 gap-2 pt-4">
-                            <!-- 僅保留三個按鈕：上班、下班、請假申請 -->
+                            <!-- 僅保留兩個按鈕：上班、下班；請假申請已移至子分頁 -->
                             <button id="work-start-btn" data-type="上班" class="clock-in-btn bg-green-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-green-600">上班打卡</button>
                             <button id="work-end-btn" data-type="下班" class="clock-in-btn bg-red-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-red-600">下班打卡</button>
-                            <button data-type="臨時請假" id="temp-leave-btn" class="clock-in-btn w-full bg-orange-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-orange-600">請假申請</button>
                         </div>
                     </div>`;
                 lucide.createIcons();
@@ -3017,10 +3016,13 @@
                     });
                 });
                 
-                // 臨時請假按鈕
-                document.getElementById('temp-leave-btn').addEventListener('click', () => {
-                    openTempLeaveModal();
-                });
+                // 臨時請假按鈕移至「請假申請」子分頁；保留安全檢查避免元素不存在報錯
+                const tempLeaveBtnEl = document.getElementById('temp-leave-btn');
+                if (tempLeaveBtnEl) {
+                    tempLeaveBtnEl.addEventListener('click', () => {
+                        openTempLeaveModal();
+                    });
+                }
                 
                 // 已移除特殊勤務按鈕
             }
@@ -3188,7 +3190,7 @@
                 const renderDayPanel = () => {
                     const panel = document.getElementById('myshift-day-panel');
                     if (!panel) return;
-                    const iso = pageState.selectedDayIso || fmtYMD(new Date());
+                    const iso = pageState.selectedDayIso || fmtYMD(new Date()); const { Timestamp } = window.__fs || {}; const { Timestamp } = window.__fs || {}; const { Timestamp } = window.__fs || {};
                     const list = pageState.daysMap[iso] || [];
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
@@ -3222,6 +3224,11 @@
             function renderMyLeaveRecords(container) {
                 container.innerHTML = `
                     <div class="p-4 space-y-4">
+                        <div class="flex justify-end mb-2">
+                            <button id="leave-apply-btn" onclick="openTempLeaveModal()" class="bg-orange-500 text-white px-3 py-2 rounded-md hover:bg-orange-600 flex items-center">
+                                <i data-lucide="file-plus" class="w-4 h-4 mr-1"></i>請假申請
+                            </button>
+                        </div>
                         <div class="flex flex-wrap items-center gap-4 mb-4">
                             <div class="flex items-center space-x-2">
                                 <label for="my-leave-status-filter" class="text-sm font-medium">審核狀態:</label>
@@ -5534,6 +5541,7 @@
                     const panel = document.getElementById('shift-day-panel');
                     if (!panel) return;
                     const iso = pageState.selectedDayIso || fmtYMD(new Date());
+                    const { Timestamp } = window.__fs || {};
                     pageState.selectedDayIso = iso;
                     const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
                     let docData = null;
@@ -5615,7 +5623,7 @@
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                 createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             };
-                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), data, { merge: true });
+                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), data);
                             showToast('已儲存設定');
                             await loadMonth();
                             renderCalendar();
@@ -5635,7 +5643,8 @@
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                const payloadDel = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadDel);
                                 showToast('已刪除班表');
                                 await loadMonth();
                                 renderCalendar();
@@ -5658,7 +5667,8 @@
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                const payloadAssign = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAssign);
                                 showToast('已更新指派');
                                 await loadMonth();
                                 renderCalendar();
@@ -5695,7 +5705,8 @@
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                                const payloadEdit = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadEdit);
                                 showToast('已更新班表時間');
                                 await loadMonth();
                                 renderCalendar();
@@ -5720,12 +5731,17 @@
                                 dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                 createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             } : {};
-                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), { ...base, shifts: newShifts, updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }, { merge: true });
+                            const payloadAdd = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAdd);
                             showToast('已新增班表');
                             await loadMonth();
                             renderCalendar();
                             renderDayPanel();
-                        } catch (err) { showToast('新增失敗', true); }
+                        } catch (err) {
+                            console.error('新增班表失敗', err);
+                            const msg = (err && err.code === 'permission-denied') ? '沒有社區寫入權限，請使用管理端或社區管理員身分' : '新增失敗';
+                            showToast(msg, true);
+                        }
                     });
                 };
 
