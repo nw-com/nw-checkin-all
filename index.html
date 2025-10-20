@@ -3025,7 +3025,7 @@
                 // 已移除特殊勤務按鈕
             }
 
-            // 我的班表子分頁：僅顯示「當前社區」中屬於自己的排班（只讀）
+            // 我的班表子分頁：僅顯示「當前社區」中屬於自己的排班（只讀），上方月曆、預設當日、下方顯示時間與哨點
             function renderWorkDatesMonthView(container) {
                 const comm = state.currentCommunity;
                 if (!comm || !comm.id) {
@@ -3040,91 +3040,98 @@
                     return;
                 }
                 const communityId = comm.id;
-                const communityName = comm.name || comm.displayName || communityId;
 
-                let year, month; // 0-based month
-                const trgY = localStorage.getItem('__workdays_target_year');
-                const trgM = localStorage.getItem('__workdays_target_month');
-                if (trgY && trgM) {
-                    year = parseInt(trgY, 10);
-                    month = parseInt(trgM, 10);
-                    localStorage.removeItem('__workdays_target_year');
-                    localStorage.removeItem('__workdays_target_month');
-                } else {
-                    const now = new Date();
-                    year = now.getFullYear();
-                    month = now.getMonth();
-                }
-                const ymStr = `${year}-${String(month + 1).padStart(2, '0')}-`;
+                const db = window.__db; const { collection, getDocs } = window.__fs || {};
+                const userId = window.__auth?.currentUser?.uid || '';
 
-                // 讀取假日設定以決定預設是否為工作日（用於背景樣式）
-                const holidaySettings = window.__holidaySettingsCache || { weekendIsHoliday: false, holidays: [] };
-                const holidaysSet = new Set(holidaySettings.holidays || []);
-                const isHoliday = (date) => {
-                    const ymd = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-                    const weekend = date.getDay() === 0 || date.getDay() === 6;
-                    return holidaysSet.has(ymd) || (holidaySettings.weekendIsHoliday && weekend);
+                const pageState = {
+                    monthDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+                    selectedDayIso: null,
+                    daysMap: {}, // { iso: [{ start, end, postName }] }
+                    postNameMap: {}
                 };
 
-                container.innerHTML = `
-                    <div class="p-4 space-y-4 h-full">
-                        <div class="bg-white rounded-lg shadow-sm border p-4">
-                            <div class="flex items-center justify-between mb-4">
-                                <h2 class="text-xl font-bold text-gray-800">我的班表（${year}年${month+1}月｜${communityName}）</h2>
-                                <div class="space-x-2">
-                                    <button id="prev-workdays-month" class="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200">上個月</button>
-                                    <button id="next-workdays-month" class="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200">下個月</button>
-                                </div>
-                            </div>
-                            <div id="workdays-list" class="space-y-2 overflow-y-auto" style="max-height: calc(100vh - 220px);"></div>
-                        </div>
-                    </div>`;
-
-                const listEl = document.getElementById('workdays-list');
-                listEl.innerHTML = `<div class="p-4 text-center text-gray-500"><div class="flex items-center justify-center"><i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i>載入個人排班...</div></div>`;
-                try { lucide.createIcons(); } catch (_) {}
-
-                const lastDay = new Date(year, month + 1, 0);
-
-                const renderRows = (daysMap) => {
-                    listEl.innerHTML = '';
-                    const weekdayNames = ['日','一','二','三','四','五','六'];
-                    for (let d = 1; d <= lastDay.getDate(); d++) {
-                        const date = new Date(year, month, d);
-                        const weekday = weekdayNames[date.getDay()];
-                        const ymd = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                        const isGray = holidaysSet.has(ymd) || (holidaySettings.weekendIsHoliday && (date.getDay()===0 || date.getDay()===6));
-                        const items = Array.isArray(daysMap[ymd]) ? daysMap[ymd] : [];
-                        const schedulesHTML = items.length
-                            ? items.map(it => `
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm font-medium">${it.start || '—'} ~ ${it.end || '—'}</span>
-                                    <span class="text-xs text-gray-500">${it.postName || '未命名哨點'}</span>
-                                </div>`).join('')
-                            : `<div class="text-xs text-gray-400">無個人排班</div>`;
-                        const row = document.createElement('div');
-                        row.className = `flex items-start justify-between p-2 rounded border ${isGray ? 'bg-gray-100' : 'bg-white'}`;
-                        row.innerHTML = `
-                            <div class="w-40">
-                                <div class="font-medium">${ymd}</div>
-                                <div class="text-xs text-gray-500">星期${weekday}</div>
-                            </div>
-                            <div class="flex flex-col items-start gap-1 flex-1">${schedulesHTML}</div>
-                        `;
-                        listEl.appendChild(row);
+                const fmtYMD = (d) => {
+                    const y = d.getFullYear();
+                    const m = (d.getMonth()+1).toString().padStart(2,'0');
+                    const day = d.getDate().toString().padStart(2,'0');
+                    return `${y}-${m}-${day}`;
+                };
+                const parseHM = (s) => {
+                    const [h,m] = (s||'00:00').split(':').map(x=>parseInt(x,10)||0);
+                    return h*60+m;
+                };
+                const mergeIntervalsMinutes = (list) => {
+                    if (!Array.isArray(list) || !list.length) return [];
+                    const intervals = list.map(it => ({start: parseHM(it.start||'00:00'), end: parseHM(it.end||'00:00')}))
+                        .filter(it => it.end>it.start)
+                        .sort((a,b)=>a.start-b.start);
+                    const merged = [];
+                    for (const iv of intervals) {
+                        if (!merged.length || iv.start > merged[merged.length-1].end) {
+                            merged.push({start: iv.start, end: iv.end});
+                        } else {
+                            merged[merged.length-1].end = Math.max(merged[merged.length-1].end, iv.end);
+                        }
                     }
+                    return merged;
+                };
+                const coverageMinutes = (list) => mergeIntervalsMinutes(list).reduce((acc,iv)=>acc+(iv.end-iv.start),0);
+
+                const renderShell = () => {
+                    container.innerHTML = `
+                        <div class="p-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <button id="my-prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
+                                <div id="my-current-month-year" class="text-lg font-semibold"></div>
+                                <button id="my-next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
+                            </div>
+                            <div class="grid grid-cols-7 text-center text-xs text-gray-500 mb-1">
+                                <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                            </div>
+                            <div id="myshift-calendar-grid" class="grid grid-cols-7 gap-1"></div>
+                            <hr class="border-t border-gray-200 my-3" />
+                            <div id="myshift-day-panel" class="mt-2"></div>
+                        </div>`;
+                    try { lucide.createIcons(); } catch (_) {}
                 };
 
-                const fetchMyShifts = async () => {
-                    const db = window.__db; const { collection, getDocs } = window.__fs;
-                    const userId = window.__auth?.currentUser?.uid || '';
-                    const daysMap = {};
+                const renderMonthHeader = () => {
+                    const title = document.getElementById('my-current-month-year');
+                    if (!title) return;
+                    const d = pageState.monthDate;
+                    title.textContent = `${d.getFullYear()} 年 ${d.getMonth()+1} 月`;
+                    const prev = document.getElementById('my-prev-month');
+                    const next = document.getElementById('my-next-month');
+                    if (prev) prev.onclick = async ()=>{
+                        pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()-1, 1);
+                        await loadMonth();
+                        renderMonthHeader();
+                        renderCalendar();
+                        renderDayPanel();
+                    };
+                    if (next) next.onclick = async ()=>{
+                        pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()+1, 1);
+                        await loadMonth();
+                        renderMonthHeader();
+                        renderCalendar();
+                        renderDayPanel();
+                    };
+                };
+
+                const loadPosts = async () => {
+                    pageState.postNameMap = {};
                     try {
-                        // 先載入哨點名稱映射
-                        const postNameMap = {};
                         const postsSnap = await getDocs(collection(db, 'communities', communityId, 'posts'));
-                        postsSnap.forEach(d => { const data = d.data() || {}; postNameMap[d.id] = data.name || '未命名哨點'; });
-                        // 讀取本社區所有當月班表，僅保留屬於自己的班次
+                        postsSnap.forEach(d => { const data = d.data() || {}; pageState.postNameMap[d.id] = data.name || '未命名哨點'; });
+                    } catch (e) { console.warn('載入哨點名稱失敗', e); }
+                };
+
+                const loadMonth = async () => {
+                    pageState.daysMap = {};
+                    try {
+                        const y = pageState.monthDate.getFullYear();
+                        const m = pageState.monthDate.getMonth()+1; const ymStr = `${y}-${m.toString().padStart(2,'0')}-`;
                         const schedSnap = await getDocs(collection(db, 'communities', communityId, 'postSchedules'));
                         schedSnap.forEach(d => {
                             const data = d.data() || {};
@@ -3133,33 +3140,82 @@
                             const shifts = Array.isArray(data.shifts) ? data.shifts : [];
                             const my = shifts.filter(s => Array.isArray(s.assignees) && s.assignees.includes(userId));
                             if (my.length) {
-                                daysMap[iso] = my.map(s => ({
-                                    start: s.start || '',
-                                    end: s.end || '',
-                                    postName: postNameMap[data.postId] || '未命名哨點'
-                                }));
+                                pageState.daysMap[iso] = my.map(s => ({ start: s.start || '', end: s.end || '', postName: pageState.postNameMap[data.postId] || '未命名哨點' }));
                             }
                         });
-                    } catch (e) {
-                        console.warn('讀取個人排班失敗', e);
-                    }
-                    return daysMap;
+                    } catch (e) { console.warn('讀取個人排班失敗', e); }
+                    const todayIso = fmtYMD(new Date());
+                    const dToday = new Date(todayIso);
+                    const sameMonth = dToday.getMonth() === pageState.monthDate.getMonth() && dToday.getFullYear() === pageState.monthDate.getFullYear();
+                    pageState.selectedDayIso = sameMonth ? todayIso : fmtYMD(new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth(), 1));
                 };
 
-                fetchMyShifts()
-                    .then((daysMap) => { renderRows(daysMap); try { lucide.createIcons(); } catch (_) {} })
-                    .catch(() => { renderRows({}); try { lucide.createIcons(); } catch (_) {} });
-
-                // 月份切換：重導至 clock-in/workdays 導覽，帶目標月份
-                const navigateWorkdays = (offset) => {
-                    const base = new Date(year, month, 1);
-                    base.setMonth(base.getMonth() + offset);
-                    localStorage.setItem('__workdays_target_year', String(base.getFullYear()));
-                    localStorage.setItem('__workdays_target_month', String(base.getMonth()));
-                    showPage('clock-in', 'workdays');
+                const renderCalendar = () => {
+                    const grid = document.getElementById('myshift-calendar-grid');
+                    if (!grid) return;
+                    const year = pageState.monthDate.getFullYear();
+                    const month = pageState.monthDate.getMonth();
+                    const firstDay = new Date(year, month, 1);
+                    const startWeekday = firstDay.getDay();
+                    const daysInMonth = new Date(year, month+1, 0).getDate();
+                    const prevMonthDays = new Date(year, month, 0).getDate();
+                    const cells = [];
+                    const selectedIso = pageState.selectedDayIso || fmtYMD(new Date());
+                    for (let i=startWeekday-1; i>=0; i--) { const date = new Date(year, month-1, prevMonthDays - i); cells.push({ date, inMonth:false }); }
+                    for (let d=1; d<=daysInMonth; d++) { cells.push({ date: new Date(year, month, d), inMonth:true }); }
+                    const totalCells = Math.ceil(cells.length/7)*7;
+                    const nextFill = totalCells - cells.length;
+                    for (let i=1; i<=nextFill; i++) { cells.push({ date: new Date(year, month+1, i), inMonth:false }); }
+                    grid.innerHTML = cells.map(cell => {
+                        const iso = fmtYMD(cell.date);
+                        const myList = pageState.daysMap[iso] || [];
+                        const cov = coverageMinutes(myList);
+                        const bgStyle = (()=>{
+                            if (!cell.inMonth) return '';
+                            if (!cov) return '';
+                            if (cov >= 18*60) return 'background-color:#A7F3D0;';
+                            if (cov >= 12*60) return 'background-color:#D1FAE5;';
+                            if (cov >= 6*60) return 'background-color:#FEF3C7;';
+                            return 'background-color:#FFF7ED;';
+                        })();
+                        const isSelected = iso === selectedIso;
+                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[60px] flex flex-col ${cell.inMonth?'bg-white':''}`;
+                        return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto text-[10px] text-gray-500">${myList.length? '個人班次 '+myList.length:'無'}</div></div>`;
+                    }).join('');
+                    grid.querySelectorAll('[data-iso]').forEach(el=>{ el.addEventListener('click', ()=>{ pageState.selectedDayIso = el.getAttribute('data-iso'); renderDayPanel(); }); });
                 };
-                document.getElementById('prev-workdays-month').addEventListener('click', () => navigateWorkdays(-1));
-                document.getElementById('next-workdays-month').addEventListener('click', () => navigateWorkdays(1));
+
+                const renderDayPanel = () => {
+                    const panel = document.getElementById('myshift-day-panel');
+                    if (!panel) return;
+                    const iso = pageState.selectedDayIso || fmtYMD(new Date());
+                    const list = pageState.daysMap[iso] || [];
+                    panel.innerHTML = `
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="font-semibold">${iso} 的個人班表</div>
+                        </div>
+                        <div>
+                            ${list.length===0 ? `<div class="text-gray-500 text-sm">本日無個人排班</div>` : ''}
+                            <div class="space-y-2">
+                                ${list.map(it=>`
+                                    <div class="flex items-center gap-2 p-2 rounded border bg-white">
+                                        <span class="text-sm font-medium">${it.start || '—'} ~ ${it.end || '—'}</span>
+                                        <span class="text-xs text-gray-500">${it.postName || '未命名哨點'}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>`;
+                };
+
+                const init = async () => {
+                    renderShell();
+                    await loadPosts();
+                    renderMonthHeader();
+                    await loadMonth();
+                    renderCalendar();
+                    renderDayPanel();
+                };
+                init();
             }
 
             // 個人請假紀錄子頁籤
