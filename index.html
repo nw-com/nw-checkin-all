@@ -5212,12 +5212,14 @@
 
                 const renderShell = () => {
                     mainContent.innerHTML = `
-                        <div class="h-[50px] flex items-center justify-between border-b border-gray-200 bg-white">
-                            <div id="posts-tabs" class="flex items-center gap-2 flex-nowrap overflow-x-auto px-2"></div>
+                        <div class="h-[50px] flex items-center justify-between border-b border-gray-200 bg-white px-3">
+                            <div id="shift-summary" class="flex items-center gap-4">
+                                <span id="post-count" class="text-sm text-gray-700">哨點：0</span>
+                                <span id="user-count" class="text-sm text-gray-700">人員：0</span>
+                            </div>
                         </div>
                         <div class="overflow-y-auto" style="height: calc(100% - 50px);">
                             <div class="p-3">
-                                <div id="post-title" class="text-base font-medium mb-2"></div>
                                 <div class="flex items-center justify-between mb-2">
                                     <button id="prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
                                     <div id="shift-current-month-year" class="text-lg font-semibold"></div>
@@ -5228,7 +5230,7 @@
                                 </div>
                                 <div id="shift-calendar-grid" class="grid grid-cols-7 gap-1"></div>
                                 <div class="flex items-center justify-between mt-3">
-                                    <div class="text-base font-medium">每月班表列表</div>
+                                    <div id="shift-list-title" class="text-base font-medium">每月班表列表</div>
                                     <button id="open-add-schedule" class="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
                                 </div>
                                 <div id="shift-monthly-list" class="mt-2"></div>
@@ -5433,6 +5435,13 @@
                     if (next) next.onclick = ()=>{ pageState.monthDate = new Date(pageState.monthDate.getFullYear(), pageState.monthDate.getMonth()+1, 1); loadMonth().then(()=>{ renderMonthHeader(); renderCalendar(); renderMonthlyList(); }); };
                 };
 
+                const updateCounts = () => {
+                    const postCountEl = document.getElementById('post-count');
+                    const userCountEl = document.getElementById('user-count');
+                    if (postCountEl) postCountEl.textContent = `哨點：${pageState.posts.length}`;
+                    if (userCountEl) userCountEl.textContent = `人員：${(pageState.communityUsers || []).length}`;
+                };
+
                 const loadMonth = async () => {
                     pageState.monthDocsMap = {};
                     if (!pageState.selectedPostId) return;
@@ -5536,7 +5545,7 @@
                     grid.querySelectorAll('[data-iso]').forEach(el=>{
                         el.addEventListener('click', ()=>{
                             const iso = el.getAttribute('data-iso');
-                            pageState.selectedDayIso = iso;
+                            pageState.selectedDayIso = (pageState.selectedDayIso === iso) ? null : iso;
                             renderDayPanel();
                             renderMonthlyList();
                         });
@@ -5785,6 +5794,8 @@
                     if (!el) return;
                     await loadCommunityUsers();
                     const filterIso = pageState.selectedDayIso || null;
+                    const titleEl = document.getElementById('shift-list-title');
+                    if (titleEl) titleEl.textContent = filterIso ? '當日班表列表' : '每月班表列表';
                     const entries = Object.entries(pageState.monthDocsMap).sort(([a],[b]) => a.localeCompare(b));
                     const rows = [];
                     const currentPost = pageState.posts.find(p=>p.id===pageState.selectedPostId);
@@ -6006,13 +6017,13 @@
                 const init = async () => {
                     renderShell();
                     await loadPosts();
-                    renderTabs();
-                    renderPostTitle();
+                    await loadCommunityUsers();
                     renderMonthHeader();
                     await loadMonth();
                     renderCalendar();
                     await renderMonthlyList();
                     await renderDayPanel();
+                    updateCounts();
                 };
                 init();
             }
@@ -6046,14 +6057,20 @@
                 if (!mapDiv || !mapLoader) return;
                 let mapCenter = { lat: 25.0330, lng: 121.5654 };
                 try {
-                    const docSnap = await getDoc(doc(db, "settings", "location"));
-                    if (docSnap.exists()) {
-                        const s = docSnap.data();
-                        if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') {
-                            mapCenter = { lat: s.companyLat, lng: s.companyLng };
+                    // 優先使用目前社區的 GPS 座標
+                    const comm = state.currentCommunity;
+                    if (comm && typeof comm.lat === 'number' && typeof comm.lng === 'number') {
+                        mapCenter = { lat: comm.lat, lng: comm.lng };
+                    } else {
+                        const docSnap = await getDoc(doc(db, "settings", "location"));
+                        if (docSnap.exists()) {
+                            const s = docSnap.data();
+                            if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') {
+                                mapCenter = { lat: s.companyLat, lng: s.companyLng };
+                            }
                         }
                     }
-                } catch (e) { console.warn("載入公司位置失敗，使用預設中心點", e); }
+                } catch (e) { console.warn("載入中心點失敗，使用預設中心點", e); }
                 state.groupMap = new google.maps.Map(mapDiv, { center: mapCenter, zoom: 12, disableDefaultUI: true, zoomControl: true, mapId: 'DEMO_MAP_ID' });
                 state.companyCenter = mapCenter;
                 const centerBtn = document.getElementById('group-map-center-btn');
@@ -6107,7 +6124,10 @@
                             visibleUsers = settings.visibleUsers || {};
                         }
                     } catch (e) {}
-                    const visibleUsersList = usersByCommunity.filter(user => visibleUsers[user.id] !== false);
+                    // 僅顯示社區內指定角色（總幹事、秘書、保全、清潔、機電）
+                    const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電','電機']);
+                    const communityRoleUsers = usersByCommunity.filter(u => allowedRoles.has((u.role || '').trim()));
+                    const visibleUsersList = communityRoleUsers.filter(user => visibleUsers[user.id] !== false);
                     const latestMap = {};
                     try {
                         await Promise.all(visibleUsersList.map(async (u) => {
