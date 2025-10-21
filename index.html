@@ -5819,6 +5819,27 @@
                     const el = document.getElementById('shift-monthly-list');
                     if (!el) return;
                     await loadCommunityUsers();
+                    // 管理員判斷（控制刪除按鈕顯示）
+                    const isAdmin = await (window.checkAdminStatus ? window.checkAdminStatus() : Promise.resolve(false));
+                    // 轉換與格式化最後編輯時間
+                    const toJSDate = (ts) => {
+                        try {
+                            if (!ts) return null;
+                            if (ts.toDate) return ts.toDate();
+                            if (typeof ts.seconds === 'number') return new Date(ts.seconds * 1000);
+                            return new Date(ts);
+                        } catch (_) { return null; }
+                    };
+                    const fmtDateTime = (ts) => {
+                        const d = toJSDate(ts);
+                        if (!d || isNaN(d.getTime())) return '';
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        const hh = String(d.getHours()).padStart(2, '0');
+                        const mm = String(d.getMinutes()).padStart(2, '0');
+                        return `${y}-${m}-${day} ${hh}:${mm}`;
+                    };
                     const filterIso = pageState.selectedDayIso || null;
                     const titleEl = document.getElementById('shift-list-title');
                     if (titleEl) titleEl.textContent = filterIso ? '當日班表列表' : '每月班表列表';
@@ -5856,9 +5877,11 @@
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${status}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">
                                     <button class="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" data-edit-month="${iso}__${idx}">編輯</button>
-                                    <button class="ml-1 px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700" data-copy-month="${iso}__${idx}">複製</button>
-                                    <button class="ml-1 px-2 py-1 text-xs rounded bg-rose-600 text-white hover:bg-rose-700" data-del-month="${iso}__${idx}">刪除</button>
+                                    ${ isAdmin ? `<button class="ml-1 px-2 py-1 text-xs rounded bg-rose-600 text-white hover:bg-rose-700" data-del-month="${iso}__${idx}">刪除</button>` : '' }
                                     <button class="ml-1 px-2 py-1 text-xs rounded bg-amber-500 text-white hover:bg-amber-600" data-share-month="${iso}__${idx}">分享(轉現金班)</button>
+                                  </td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">
+                                    ${ (() => { const editorId = s.lastEditedBy || doc.updatedBy || ''; const editorName = editorId ? getUserNameById(editorId) : '—'; const tm = fmtDateTime(s.lastEditedAt || doc.updatedAt || doc.createdAt); return `帳號：${editorName}<br/>時間：${tm || '—'}`; })() }
                                   </td>
                                 </tr>`);
                         });
@@ -5880,9 +5903,10 @@
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">下班時間</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">狀態</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">操作</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">紀錄</th>
                               </tr>
                             </thead>
-                            <tbody>${rows.join('') || `<tr><td colspan="12" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
+                            <tbody>${rows.join('') || `<tr><td colspan="13" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
                     const addBtn = document.getElementById('open-add-schedule');
@@ -6012,7 +6036,7 @@
                                     const dsnap = await getDoc(dref);
                                     const docData = dsnap.exists() ? dsnap.data() : null;
                                     const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                                    const newShift = { start: startStr, end: endStr, assignees: assId ? [assId] : [], role: roleVal, endDateIso };
+                                    const newShift = { start: startStr, end: endStr, assignees: assId ? [assId] : [], role: roleVal, endDateIso, lastEditedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || ''), lastEditedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) };
                                     const payload = {
                                         communityId, postId: effPostId, dateIso,
                                         // 避免字串解析造成 Invalid time value，改用原生年月日建構
@@ -6025,7 +6049,8 @@
                                         isScheduledDay: !!docData?.isScheduledDay,
                                         shifts: [...shifts, newShift],
                                         createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                        updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                        updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                        updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                                     };
                                     await setDoc(dref, payload);
                                 }
@@ -6058,6 +6083,9 @@
                             const [iso, idxStr] = btn.getAttribute('data-del-month').split('__');
                             const idx = parseInt(idxStr,10);
                             const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
+                            // 僅管理員可刪除
+                            const canDelete = await (window.checkAdminStatus ? window.checkAdminStatus() : Promise.resolve(false));
+                            if (!canDelete) { showToast('只有管理員可刪除', true); return; }
                             try {
                                 const { Timestamp } = window.__fs || {};
                                 const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', id));
@@ -6070,7 +6098,8 @@
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     isScheduledDay, shifts: newShifts,
                                     createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                    updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                                 };
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload);
                                 showToast('已刪除班表');
@@ -6111,41 +6140,20 @@
                                 const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', id));
                                 const docData = dsnap.exists() ? dsnap.data() : null;
                                 const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                                const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, cashShift: true } : sh);
+                                const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, cashShift: true, lastEditedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || ''), lastEditedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) } : sh);
                                 const payload = {
                                     communityId, postId: pageState.selectedPostId, dateIso: iso,
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     isScheduledDay: !!docData?.isScheduledDay, shifts: newShifts,
                                     createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                    updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                                 };
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload);
                             } catch(_) {}
                         });
                     });
-                    el.querySelectorAll('[data-copy-month]').forEach(btn=>{
-                        btn.addEventListener('click', async ()=>{
-                            const [iso, idxStr] = btn.getAttribute('data-copy-month').split('__');
-                            const idx = parseInt(idxStr,10);
-                            const d = pageState.monthDocsMap[iso];
-                            const s = Array.isArray(d?.shifts) ? d.shifts[idx] : null;
-                            if (!s) return;
-                            const start = s.start || '07:00';
-                            const end = s.end || '19:00';
-                            const assId = Array.isArray(s.assignees) ? (s.assignees[0] || '') : '';
-                            const assName = assId ? getUserNameById(assId) : '未指派';
-                            const dow = dayOfWeekLabel(iso);
-                            const role = s.role || '保全';
-                            const endIso = s.endDateIso || iso;
-                            const endDow = dayOfWeekLabel(endIso);
-                            const displayPost = role === '保全' ? postName : '無';
-                            const content = `職稱：${role}\n哨點：${displayPost}\n上班日期：${iso} ${dow}\n上班時間：${start}\n下班日期：${endIso} ${endDow}\n下班時間：${end}\n指派人員：${assName}`;
-                            try {
-                                await navigator.clipboard.writeText(content);
-                                showToast('已複製班表資訊');
-                            } catch(_) {}
-                        });
-                    });
+                    /* 已移除複製功能 */
                 };
 
                 const openAddScheduleModal = (edit = null) => {
@@ -6324,9 +6332,9 @@
                             const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
                             let newShifts = [];
                             if (edit && typeof edit.index === 'number') {
-                                newShifts = shifts.map((sh,i)=> i===edit.index ? { ...sh, start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso } : sh);
+                                newShifts = shifts.map((sh,i)=> i===edit.index ? { ...sh, start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso, lastEditedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || ''), lastEditedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) } : sh);
                             } else {
-                                newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso }];
+                                newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso, lastEditedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || ''), lastEditedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) }];
                             }
                             const payload = {
                                 communityId, postId: effPostId, dateIso: iso,
@@ -6334,7 +6342,8 @@
                                 isScheduledDay: !!docData?.isScheduledDay,
                                 shifts: newShifts,
                                 createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                             };
                             await setDoc(dref, payload);
                             showToast(edit ? '已更新排班' : '已新增排班');
