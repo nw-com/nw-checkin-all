@@ -5206,23 +5206,30 @@
                 const renderShell = () => {
                     mainContent.innerHTML = `
                         <div class="h-[50px] flex items-center justify-between border-b border-gray-200 bg-white px-3">
-                            <div id="shift-summary" class="flex items-center gap-4">
-                                <span id="post-count" class="text-sm text-gray-700">哨點：0</span>
-                                <span id="user-count" class="text-sm text-gray-700">人員：0</span>
+                            <div id="shift-summary" class="flex items-center gap-3 flex-wrap">
+                                <span id="count-gm" class="text-sm text-gray-700">總幹事：0</span>
+                                <span id="count-sec" class="text-sm text-gray-700">秘書：0</span>
+                                <span id="count-guard" class="text-sm text-gray-700">保全：0</span>
+                                <span id="count-clean" class="text-sm text-gray-700">清潔：0</span>
+                                <span id="count-mech" class="text-sm text-gray-700">機電：0</span>
                             </div>
                         </div>
                         <div class="overflow-y-auto" style="height: calc(100% - 50px);">
+                            <div id="calendar-sticky" class="sticky top-0 z-10 bg-white">
+                                <div class="p-3">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <button id="prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
+                                        <div id="shift-current-month-year" class="text-lg font-semibold"></div>
+                                        <button id="next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
+                                    </div>
+                                    <div class="grid grid-cols-7 text-center text-xs text-gray-500 mb-1">
+                                        <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                                    </div>
+                                    <div id="shift-calendar-grid" class="grid grid-cols-7 gap-1"></div>
+                                </div>
+                            </div>
                             <div class="p-3">
-                                <div class="flex items-center justify-between mb-2">
-                                    <button id="prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
-                                    <div id="shift-current-month-year" class="text-lg font-semibold"></div>
-                                    <button id="next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
-                                </div>
-                                <div class="grid grid-cols-7 text-center text-xs text-gray-500 mb-1">
-                                    <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
-                                </div>
-                                <div id="shift-calendar-grid" class="grid grid-cols-7 gap-1"></div>
-                                <div class="flex items-center justify-between mt-3">
+                                <div class="flex items-center justify-between mt-1">
                                     <div id="shift-list-title" class="text-base font-medium">每月班表列表</div>
                                     <button id="open-add-schedule" class="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
                                 </div>
@@ -5433,10 +5440,22 @@
                 };
 
                 const updateCounts = () => {
-                    const postCountEl = document.getElementById('post-count');
-                    const userCountEl = document.getElementById('user-count');
-                    if (postCountEl) postCountEl.textContent = `哨點：${pageState.posts.length}`;
-                    if (userCountEl) userCountEl.textContent = `人員：${(pageState.communityUsers || []).length}`;
+                    const list = (pageState.communityUsers || []);
+                    const counts = { '總幹事': 0, '秘書': 0, '保全': 0, '清潔': 0, '機電': 0 };
+                    for (const u of list) {
+                        const r = (u.role || '').trim();
+                        if (counts.hasOwnProperty(r)) counts[r] += 1;
+                    }
+                    const gmEl = document.getElementById('count-gm');
+                    const secEl = document.getElementById('count-sec');
+                    const guardEl = document.getElementById('count-guard');
+                    const cleanEl = document.getElementById('count-clean');
+                    const mechEl = document.getElementById('count-mech');
+                    if (gmEl) gmEl.textContent = `總幹事：${counts['總幹事']}`;
+                    if (secEl) secEl.textContent = `秘書：${counts['秘書']}`;
+                    if (guardEl) guardEl.textContent = `保全：${counts['保全']}`;
+                    if (cleanEl) cleanEl.textContent = `清潔：${counts['清潔']}`;
+                    if (mechEl) mechEl.textContent = `機電：${counts['機電']}`;
                 };
 
                 const loadMonth = async () => {
@@ -5755,6 +5774,15 @@
                     } catch (_) { return '星期'; }
                 };
 
+                // 短版星期（只顯示日、一、二、三、四、五、六）
+                const dayOfWeekShort = (iso) => {
+                    try {
+                        const arr = ['日','一','二','三','四','五','六'];
+                        const dt = new Date(`${iso}T00:00:00`);
+                        return arr[dt.getDay()];
+                    } catch (_) { return ''; }
+                };
+
                 const getUserNameById = (uid) => {
                     const u = (pageState.communityUsers || []).find(x => x.id === uid);
                     return u ? (u.name || u.displayName || u.id) : '未指派';
@@ -5797,51 +5825,51 @@
                             const assId = Array.isArray(s.assignees) ? (s.assignees[0] || '') : '';
                             const assName = assId ? getUserNameById(assId) : '未指派';
                             const status = computeShiftStatus(iso, s);
-                            const dow = dayOfWeekLabel(iso);
+                            const dow = dayOfWeekShort(iso);
                             const role = s.role || '保全';
                             const endIso = s.endDateIso || iso;
-                            const endDow = dayOfWeekLabel(endIso);
+                            const endDow = dayOfWeekShort(endIso);
                             const displayPost = role === '保全' ? postName : '無';
                             rows.push(`
-                                <tr class="border-b">
-                                  <td class="px-2 py-1">${role}</td>
-                                  <td class="px-2 py-1">${displayPost}</td>
-                                  <td class="px-2 py-1">${iso}</td>
-                                  <td class="px-2 py-1">${dow}</td>
-                                  <td class="px-2 py-1">${start}</td>
-                                  <td class="px-2 py-1">${endIso}</td>
-                                  <td class="px-2 py-1">${endDow}</td>
-                                  <td class="px-2 py-1">${end}</td>
-                                  <td class="px-2 py-1">${assName}</td>
-                                  <td class="px-2 py-1">${status}</td>
-                                  <td class="px-2 py-1">
-                                    <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-edit-month="${iso}__${idx}">編輯</button>
-                                    <button class="ml-1 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-copy-month="${iso}__${idx}">複製</button>
-                                    <button class="ml-1 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-del-month="${iso}__${idx}">刪除</button>
-                                    <button class="ml-1 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-share-month="${iso}__${idx}">分享(轉現金班)</button>
+                                <tr>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${role}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${displayPost}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${iso}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${dow}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${start}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${endIso}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${endDow}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${end}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${assName}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${status}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">
+                                    <button class="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" data-edit-month="${iso}__${idx}">編輯</button>
+                                    <button class="ml-1 px-2 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700" data-copy-month="${iso}__${idx}">複製</button>
+                                    <button class="ml-1 px-2 py-1 text-xs rounded bg-rose-600 text-white hover:bg-rose-700" data-del-month="${iso}__${idx}">刪除</button>
+                                    <button class="ml-1 px-2 py-1 text-xs rounded bg-amber-500 text-white hover:bg-amber-600" data-share-month="${iso}__${idx}">分享(轉現金班)</button>
                                   </td>
                                 </tr>`);
                         });
                     }
                     el.innerHTML = `
                         <div class="overflow-x-auto">
-                          <table class="min-w-full text-sm">
+                          <table class="text-sm" style="min-width: max-content; border-collapse: collapse;">
                             <thead>
-                              <tr class="bg-gray-50 border-b text-gray-600">
-                                <th class="px-2 py-1 text-left">職稱</th>
-                                <th class="px-2 py-1 text-left">哨點</th>
-                                <th class="px-2 py-1 text-left">上班日期</th>
-                                <th class="px-2 py-1 text-left">星期</th>
-                                <th class="px-2 py-1 text-left">上班時間</th>
-                                <th class="px-2 py-1 text-left">下班日期</th>
-                                <th class="px-2 py-1 text-left">星期</th>
-                                <th class="px-2 py-1 text-left">下班時間</th>
-                                <th class="px-2 py-1 text-left">指派人員</th>
-                                <th class="px-2 py-1 text-left">狀態</th>
-                                <th class="px-2 py-1 text-left">操作</th>
+                              <tr class="bg-gray-50 text-gray-600">
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">職稱</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">哨點</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班日期</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">星期</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班時間</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">下班日期</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">星期</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">下班時間</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">指派人員</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">狀態</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">操作</th>
                               </tr>
                             </thead>
-                            <tbody>${rows.join('') || `<tr><td colspan="11" class="px-2 py-3 text-center text-gray-500">本月尚無班表</td></tr>`}</tbody>
+                            <tbody>${rows.join('') || `<tr><td colspan="11" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
                     const addBtn = document.getElementById('open-add-schedule');
