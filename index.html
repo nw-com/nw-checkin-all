@@ -2375,7 +2375,7 @@
                         if (display.startsWith('抵達-')) return 4;
                         if (display.startsWith('離開-')) return 5;
                         if (isLeave) return 6;
-                        if (display.includes('已下班')) return 7;
+                        if (display.includes('下班')) return 7;
                         return 8;
                     };
 
@@ -2549,7 +2549,7 @@
                         if (display.startsWith('抵達-')) return 4;
                         if (display.startsWith('離開-')) return 5;
                         if (isLeave) return 6;
-                        if (display.includes('已下班')) return 7;
+                        if (display.includes('下班')) return 7;
                         return 8;
                     };
 
@@ -2597,7 +2597,7 @@
                             }
                         }
                         if (isLeave) return true;
-                        if (display.includes('已下班') || (u.clockInStatus === '下班')) return true;
+                        if (display.includes('下班') || (u.clockInStatus === '下班')) return true;
                         if (display.includes('上班') || (u.clockInStatus === '返回')) return true;
                         return false;
                     });
@@ -2649,7 +2649,7 @@
                                 if (display.startsWith('抵達-')) return 4;
                                 if (display.startsWith('離開-')) return 5;
                                 if (isLeave) return 6;
-                                if (display.includes('已下班')) return 7;
+                                if (display.includes('下班')) return 7;
                                 return 8;
                             };
 
@@ -6760,13 +6760,17 @@
                 const mapLoader = document.getElementById('tracking-map-loader');
                 if (!mapDiv || !mapLoader) return;
 
+                const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+
                 // 以目前選擇的社區 GPS 為中心；若無則退回設定或預設
                 let mapCenter = null;
+                let circleRadius = null;
                 const c = state.currentCommunity || {};
                 const cLat = typeof c.lat === 'number' ? c.lat : null;
                 const cLng = typeof c.lng === 'number' ? c.lng : null;
                 if (cLat != null && cLng != null) {
                     mapCenter = { lat: cLat, lng: cLng };
+                    if (typeof c.radius === 'number' && c.radius > 0) circleRadius = c.radius;
                 } else {
                     try {
                         const docSnap = await getDoc(doc(db, "settings", "location"));
@@ -6778,6 +6782,7 @@
                             } else if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') {
                                 mapCenter = { lat: s.companyLat, lng: s.companyLng };
                             }
+                            if (typeof s.companyRadius === 'number' && s.companyRadius > 0) circleRadius = s.companyRadius;
                         }
                     } catch (e) { console.warn("載入中心點失敗，使用預設中心點", e); }
                 }
@@ -6797,10 +6802,43 @@
                     centerBtn.addEventListener('click', () => {
                         if (state.companyCenter) {
                             state.trackingMap.panTo(state.companyCenter);
-                            state.trackingMap.setZoom(14);
+                            state.trackingMap.setZoom(16);
                         } else {
                             showToast('尚未設定社區座標', true);
                         }
+                    });
+                }
+
+                // 清理舊的中心標記與半徑圈
+                try { if (state.trackingCenterMarker) state.trackingCenterMarker.map = null; } catch (_) {}
+                try { if (state.trackingRadiusCircle) state.trackingRadiusCircle.setMap(null); } catch (_) {}
+
+                // 在社區中心點放置圖示
+                const centerIcon = document.createElement('div');
+                centerIcon.className = 'w-10 h-10 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center';
+                const innerDot = document.createElement('div');
+                innerDot.className = 'w-3 h-3 rounded-full bg-red-600 border-2 border-white';
+                centerIcon.appendChild(innerDot);
+
+                state.trackingCenterMarker = new AdvancedMarkerElement({
+                    position: mapCenter,
+                    map: state.trackingMap,
+                    title: '社區中心',
+                    content: centerIcon,
+                    zIndex: 1000
+                });
+
+                // 標示社區打卡半徑
+                if (typeof circleRadius === 'number' && circleRadius > 0) {
+                    state.trackingRadiusCircle = new google.maps.Circle({
+                        map: state.trackingMap,
+                        center: mapCenter,
+                        radius: circleRadius,
+                        strokeColor: '#FF0000',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 2,
+                        fillColor: '#FF0000',
+                        fillOpacity: 0.1
                     });
                 }
 
@@ -7494,7 +7532,23 @@
                         const recordType = latestRecord?.type || user.clockInStatus || user.status || '未打卡';
                         const recordLocationName = latestRecord?.locationName || user.lastLocation?.address || null;
                         const dutyType = latestRecord?.dutyType || null;
-                        const statusText = getStatusDisplayText(recordType, recordLocationName, dutyType);
+                        let statusText = getStatusDisplayText(recordType, recordLocationName, dutyType);
+
+                        // 核准的請假：顯示「請假」（橘色），僅在當天有效期內；未核准但臨時請假顯示「請假申請」
+                        const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
+                        const now = new Date();
+                        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                        if (user.leaveStatus === 'approved' && user.leaveStartTime && user.leaveEndTime) {
+                            const leaveStart = toDate(user.leaveStartTime);
+                            const leaveEnd = toDate(user.leaveEndTime);
+                            if (leaveStart && leaveEnd && leaveStart <= todayEnd && leaveEnd >= todayStart) {
+                                statusText = '請假';
+                            }
+                        } else if (user.clockInStatus === '臨時請假') {
+                            statusText = '請假申請';
+                        }
+
                         const ts = latestRecord?.timestamp && latestRecord.timestamp.toDate ? latestRecord.timestamp.toDate() : (latestRecord?.timestamp ? new Date(latestRecord.timestamp) : (user.lastClockInTime?.toDate ? user.lastClockInTime.toDate() : null));
 
                         return {
@@ -7529,7 +7583,7 @@
                             if (display.startsWith('抵達-')) return 4;
                             if (display.startsWith('離開-')) return 5;
                             if (isLeave) return 6;
-                            if (display.includes('已下班')) return 7;
+                            if (display.includes('下班')) return 7;
                             return 8;
                         };
 

@@ -39,9 +39,9 @@ function getStatusDisplayText(status, location, dutyType) {
         return location ? `超時巡邏-${location}` : '超時巡邏';
     }
     switch(status) {
-        case '上班': return '上班中-辦公室';
-        case '下班': return '已下班';
-        case '自動下班': return '已下班';
+        case '上班': return '上班';
+        case '下班': return '下班';
+        case '自動下班': return '下班';
         case '已下班-未打卡': return '已下班-未打卡';
         case '外出': {
             if (dutyType && location) return `外出-${dutyType}-${location}`;
@@ -81,7 +81,7 @@ function getStatusColor(status) {
     if (status.includes('上班')) return 'text-green-600';
     if (status.includes('超時巡邏')) return 'text-red-600';
     if (status.includes('已下班-未打卡')) return 'text-yellow-600';
-    if (status.includes('已下班')) return 'text-red-600';
+    if (status.includes('下班')) return 'text-red-600';
     if (status.includes('外出') || status.includes('抵達') || status.includes('離開')) return 'text-blue-600';
     if (status.includes('返回')) return 'text-green-600';
     if (status.includes('請假')) return 'text-orange-600';
