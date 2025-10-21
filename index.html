@@ -5232,8 +5232,6 @@
                                     <button id="open-add-schedule" class="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
                                 </div>
                                 <div id="shift-monthly-list" class="mt-2"></div>
-                                <hr class="border-t border-gray-200 my-3" />
-                                <div id="shift-day-panel" class="mt-2"></div>
                             </div>
                         </div>`;
                     try { lucide.createIcons(); } catch (_) {}
@@ -6092,6 +6090,15 @@
 
                     const users = [];
                     querySnapshot.forEach(doc => { const data = { id: doc.id, ...doc.data() }; if (allowedUserIds.includes(data.id)) users.push(data); });
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                    const usersByCommunity = (currentCommId || currentCommCode) ? users.filter(u => {
+                        const byId = Array.isArray(u.serviceCommunities) && currentCommId ? u.serviceCommunities.includes(currentCommId) : false;
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const byCode = currentCommCode ? (codesArr.includes(currentCommCode) || (u.serviceCommunityCode === currentCommCode)) : false;
+                        const byLegacy = currentCommId ? ((u.serviceCommunityCode === currentCommId) || (codesArr.includes(currentCommId))) : false;
+                        return byId || byCode || byLegacy;
+                    }) : users;
                     let visibleUsers = {};
                     try {
                         const savedSettings = localStorage.getItem('app_general_settings');
@@ -6100,7 +6107,7 @@
                             visibleUsers = settings.visibleUsers || {};
                         }
                     } catch (e) {}
-                    const visibleUsersList = users.filter(user => visibleUsers[user.id] !== false);
+                    const visibleUsersList = usersByCommunity.filter(user => visibleUsers[user.id] !== false);
                     const latestMap = {};
                     try {
                         await Promise.all(visibleUsersList.map(async (u) => {
