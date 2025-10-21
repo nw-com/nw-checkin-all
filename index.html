@@ -6449,25 +6449,28 @@
                 const mapLoader = document.getElementById('tracking-map-loader');
                 if (!mapDiv || !mapLoader) return;
 
-                let mapCenter = { lat: 25.0330, lng: 121.5654 };
-                try {
-                    const docSnap = await getDoc(doc(db, "settings", "location"));
-                    if (docSnap.exists()) {
-                        const s = docSnap.data();
-                        if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') {
-                            mapCenter = { lat: s.companyLat, lng: s.companyLng };
+                // 以目前選擇的社區 GPS 為中心；若無則退回設定或預設
+                let mapCenter = null;
+                const c = state.currentCommunity || {};
+                const cLat = typeof c.lat === 'number' ? c.lat : null;
+                const cLng = typeof c.lng === 'number' ? c.lng : null;
+                if (cLat != null && cLng != null) {
+                    mapCenter = { lat: cLat, lng: cLng };
+                } else {
+                    try {
+                        const docSnap = await getDoc(doc(db, "settings", "location"));
+                        if (docSnap.exists()) {
+                            const s = docSnap.data();
+                            // 優先社區中心，其次舊公司中心
+                            if (typeof s.communityLat === 'number' && typeof s.communityLng === 'number') {
+                                mapCenter = { lat: s.communityLat, lng: s.communityLng };
+                            } else if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') {
+                                mapCenter = { lat: s.companyLat, lng: s.companyLng };
+                            }
                         }
-                    }
-                } catch (e) { console.warn("載入公司位置失敗，使用預設中心點", e); }
-                // 社區模式：若目前社區有座標，優先以社區中心為地圖中心
-                if (state.appMode === 'community') {
-                    const c = state.currentCommunity || {};
-                    const cLat = typeof c.lat === 'number' ? c.lat : null;
-                    const cLng = typeof c.lng === 'number' ? c.lng : null;
-                    if (cLat != null && cLng != null) {
-                        mapCenter = { lat: cLat, lng: cLng };
-                    }
+                    } catch (e) { console.warn("載入中心點失敗，使用預設中心點", e); }
                 }
+                if (!mapCenter) mapCenter = { lat: 25.0330, lng: 121.5654 };
                 
                 state.trackingMap = new google.maps.Map(mapDiv, {
                     center: mapCenter,
@@ -6476,6 +6479,7 @@
                     zoomControl: true,
                     mapId: 'DEMO_MAP_ID' // Required for Advanced Markers
                 });
+                // 將中心點存入狀態，供「回到社區」使用
                 state.companyCenter = mapCenter;
                 const centerBtn = document.getElementById('tracking-map-center-btn');
                 if (centerBtn) {
@@ -7132,11 +7136,11 @@
                     }
                     const filteredUsers = users.filter(u => visibilityMap[u.id] !== false);
 
-                    // 僅顯示指定社區角色（總幹事、秘書、保全、清潔、機電），並在社區模式下限定於當前社區
+                    // 僅顯示指定社區角色（總幹事、秘書、保全、清潔、機電）；若已選擇社區，僅顯示該社區成員
                     let baseList = filteredUsers.filter(u => isFieldLikeRole(u.role));
-                    if (state.appMode === 'community') {
-                        const currentCommId = state.currentCommunity?.id || null;
-                        const currentCommCode = state.currentCommunity?.code || null;
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || null;
+                    if (currentCommId || currentCommCode) {
                         baseList = baseList.filter(u => {
                             const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
                             const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
