@@ -5215,7 +5215,7 @@
                             </div>
                         </div>
                         <div class="overflow-y-auto" style="height: calc(100% - 50px);">
-                            <div id="calendar-sticky" class="sticky top-0 z-10 bg-white" style="height: calc((100vh - 50px) * 0.5);">
+                            <div id="calendar-sticky" class="sticky top-0 z-10 bg-white">
                                 <div class="p-3">
                                     <div class="flex items-center justify-between mb-2">
                                         <button id="prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
@@ -5238,7 +5238,7 @@
                                         <input id="import-csv-input" type="file" accept=".csv,text/csv" class="hidden">
                                     </div>
                                 </div>
-                                <div id="shift-monthly-list" class="mt-2" style="height: calc((100vh - 50px) * 0.5); overflow-y: auto;"></div>
+                                <div id="shift-monthly-list" class="mt-2"></div>
                             </div>
                         </div>`;
                     try { lucide.createIcons(); } catch (_) {}
@@ -5890,7 +5890,7 @@
 
                     const exportBtn = document.getElementById('export-csv');
                     if (exportBtn) exportBtn.onclick = async () => {
-                        const header = ['角色','指派人員','職稱','哨點','上班日期','星期','上班時間','下班日期','星期','下班時間','狀態'];
+                        const header = ['角色','指派人員','哨點','上班日期','上班時間','下班日期','下班時間'];
                         const lines = [header.join(',')];
                         const entries2 = Object.entries(pageState.monthDocsMap).sort(([a],[b]) => a.localeCompare(b));
                         const currentPost2 = pageState.posts.find(p=>p.id===pageState.selectedPostId);
@@ -5910,7 +5910,7 @@
                                 const endIso = s2.endDateIso || iso2;
                                 const endDow = dayOfWeekShort(endIso);
                                 const displayPost = role === '保全' ? postName2 : '無';
-                                const row = [role, assName, assTitle, displayPost, iso2, `星期${dow}`, start, endIso, `星期${endDow}`, end, status].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+                                const row = [role, assName, displayPost, iso2, start, endIso, end].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
                                 lines.push(row);
                             });
                         }
@@ -5946,7 +5946,7 @@
                                     endDate: header.indexOf('下班日期'),
                                     end: header.indexOf('下班時間')
                                 };
-                                const missing = ['role','assignee','date','start','endDate','end'].filter(k=> idxMap[k] === -1);
+                                const missing = ['role','assignee','post','date','start','endDate','end'].filter(k=> idxMap[k] === -1);
                                 if (missing.length) { showToast('CSV 欄位缺少：' + missing.join('、'), true); return; }
                                 const { Timestamp } = window.__fs || {};
                                 for (let i=1; i<lines.length; i++) {
