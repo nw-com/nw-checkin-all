@@ -5764,13 +5764,14 @@
                     try {
                         const startStr = shift?.start || '07:00';
                         const endStr = shift?.end || '19:00';
+                        const endIso = shift?.endDateIso || iso;
                         const start = new Date(`${iso}T${startStr}:00`);
-                        const end = new Date(`${iso}T${endStr}:00`);
+                        const end = new Date(`${endIso}T${endStr}:00`);
                         const now = new Date();
                         const assId = Array.isArray(shift?.assignees) ? shift.assignees[0] : null;
                         const assUser = assId ? (pageState.communityUsers || []).find(u=>u.id===assId) : null;
-                        if (assUser && (assUser.employmentStatus === '現金班')) return '轉現金班';
-                        if (now < start) return '未到上哨時間';
+                        if (shift?.cashShift === true || (assUser && (assUser.employmentStatus === '現金班'))) return '轉現金班';
+                        if (now < start) return '未到上班時間';
                         if (now > end) return '已完成';
                         return '未上哨';
                     } catch(_) { return '未上哨'; }
@@ -5797,19 +5798,27 @@
                             const assName = assId ? getUserNameById(assId) : '未指派';
                             const status = computeShiftStatus(iso, s);
                             const dow = dayOfWeekLabel(iso);
+                            const role = s.role || '保全';
+                            const endIso = s.endDateIso || iso;
+                            const endDow = dayOfWeekLabel(endIso);
+                            const displayPost = role === '保全' ? postName : '無';
                             rows.push(`
                                 <tr class="border-b">
-                                  <td class="px-2 py-1">${postName}</td>
+                                  <td class="px-2 py-1">${role}</td>
+                                  <td class="px-2 py-1">${displayPost}</td>
                                   <td class="px-2 py-1">${iso}</td>
                                   <td class="px-2 py-1">${dow}</td>
                                   <td class="px-2 py-1">${start}</td>
+                                  <td class="px-2 py-1">${endIso}</td>
+                                  <td class="px-2 py-1">${endDow}</td>
                                   <td class="px-2 py-1">${end}</td>
                                   <td class="px-2 py-1">${assName}</td>
                                   <td class="px-2 py-1">${status}</td>
                                   <td class="px-2 py-1">
                                     <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-edit-month="${iso}__${idx}">編輯</button>
+                                    <button class="ml-1 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-copy-month="${iso}__${idx}">複製</button>
                                     <button class="ml-1 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-del-month="${iso}__${idx}">刪除</button>
-                                    <button class="ml-1 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-share-month="${iso}__${idx}">分享</button>
+                                    <button class="ml-1 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-share-month="${iso}__${idx}">分享(轉現金班)</button>
                                   </td>
                                 </tr>`);
                         });
@@ -5819,17 +5828,20 @@
                           <table class="min-w-full text-sm">
                             <thead>
                               <tr class="bg-gray-50 border-b text-gray-600">
+                                <th class="px-2 py-1 text-left">職稱</th>
                                 <th class="px-2 py-1 text-left">哨點</th>
-                                <th class="px-2 py-1 text-left">日期</th>
+                                <th class="px-2 py-1 text-left">上班日期</th>
                                 <th class="px-2 py-1 text-left">星期</th>
-                                <th class="px-2 py-1 text-left">上哨時間</th>
-                                <th class="px-2 py-1 text-left">下哨時間</th>
+                                <th class="px-2 py-1 text-left">上班時間</th>
+                                <th class="px-2 py-1 text-left">下班日期</th>
+                                <th class="px-2 py-1 text-left">星期</th>
+                                <th class="px-2 py-1 text-left">下班時間</th>
                                 <th class="px-2 py-1 text-left">指派人員</th>
                                 <th class="px-2 py-1 text-left">狀態</th>
                                 <th class="px-2 py-1 text-left">操作</th>
                               </tr>
                             </thead>
-                            <tbody>${rows.join('') || `<tr><td colspan="8" class="px-2 py-3 text-center text-gray-500">本月尚無班表</td></tr>`}</tbody>
+                            <tbody>${rows.join('') || `<tr><td colspan="11" class="px-2 py-3 text-center text-gray-500">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
                     const addBtn = document.getElementById('open-add-schedule');
@@ -5884,7 +5896,11 @@
                             const assId = Array.isArray(s.assignees) ? (s.assignees[0] || '') : '';
                             const assName = assId ? getUserNameById(assId) : '未指派';
                             const dow = dayOfWeekLabel(iso);
-                            const content = `哨點：${postName}\n日期：${iso} ${dow}\n時間：${start}~${end}\n指派人員：${assName}`;
+                            const role = s.role || '保全';
+                            const endIso = s.endDateIso || iso;
+                            const endDow = dayOfWeekLabel(endIso);
+                            const displayPost = role === '保全' ? postName : '無';
+                            const content = `職稱：${role}\n哨點：${displayPost}\n上班日期：${iso} ${dow}\n上班時間：${start}\n下班日期：${endIso} ${endDow}\n下班時間：${end}\n指派人員：${assName}`;
                             try {
                                 if (navigator.share) {
                                     await navigator.share({ title: '班表', text: content });
@@ -5892,6 +5908,44 @@
                                     await navigator.clipboard.writeText(content);
                                     showToast('已複製班表資訊');
                                 }
+                                // 分享後標記為現金班
+                                const { Timestamp } = window.__fs || {};
+                                const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
+                                const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', id));
+                                const docData = dsnap.exists() ? dsnap.data() : null;
+                                const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                                const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, cashShift: true } : sh);
+                                const payload = {
+                                    communityId, postId: pageState.selectedPostId, dateIso: iso,
+                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                    isScheduledDay: !!docData?.isScheduledDay, shifts: newShifts,
+                                    createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload);
+                            } catch(_) {}
+                        });
+                    });
+                    el.querySelectorAll('[data-copy-month]').forEach(btn=>{
+                        btn.addEventListener('click', async ()=>{
+                            const [iso, idxStr] = btn.getAttribute('data-copy-month').split('__');
+                            const idx = parseInt(idxStr,10);
+                            const d = pageState.monthDocsMap[iso];
+                            const s = Array.isArray(d?.shifts) ? d.shifts[idx] : null;
+                            if (!s) return;
+                            const start = s.start || '07:00';
+                            const end = s.end || '19:00';
+                            const assId = Array.isArray(s.assignees) ? (s.assignees[0] || '') : '';
+                            const assName = assId ? getUserNameById(assId) : '未指派';
+                            const dow = dayOfWeekLabel(iso);
+                            const role = s.role || '保全';
+                            const endIso = s.endDateIso || iso;
+                            const endDow = dayOfWeekLabel(endIso);
+                            const displayPost = role === '保全' ? postName : '無';
+                            const content = `職稱：${role}\n哨點：${displayPost}\n上班日期：${iso} ${dow}\n上班時間：${start}\n下班日期：${endIso} ${endDow}\n下班時間：${end}\n指派人員：${assName}`;
+                            try {
+                                await navigator.clipboard.writeText(content);
+                                showToast('已複製班表資訊');
                             } catch(_) {}
                         });
                     });
@@ -5901,36 +5955,61 @@
                     const defaultDateIso = pageState.selectedDayIso || fmtYMD(new Date());
                     const defaultStart = edit?.shift?.start || '07:00';
                     const defaultEnd = edit?.shift?.end || '19:00';
+                    const defaultEndDateIso = edit?.shift?.endDateIso || defaultDateIso;
+                    const defaultRole = edit?.shift?.role || '保全';
                     const defaultAss = Array.isArray(edit?.shift?.assignees) ? edit.shift.assignees[0] || '' : '';
                     const currentPostId = pageState.selectedPostId;
-                    const postsOptions = pageState.posts.map(p => `<option value="${p.id}" ${p.id===currentPostId?'selected':''}>${p.name||'未命名哨點'}</option>`).join('');
                     const currentPostName = (pageState.posts.find(p => p.id===currentPostId)?.name) || '';
                     const postsOptionsDatalist = pageState.posts.map(p => `<option value="${p.name||'未命名哨點'}"></option>`).join('');
                     const usersOptions = (pageState.userOptionsHTML && pageState.userOptionsHTML.length) ? pageState.userOptionsHTML : '<option value="" disabled>請先建立或指派人員</option>';
-                    const dow = dayOfWeekLabel(defaultDateIso);
+                    const startDow = dayOfWeekLabel(defaultDateIso);
+                    const endDow = dayOfWeekLabel(defaultEndDateIso);
                     const modal = document.getElementById('modal-container');
                     if (!modal) return;
                     modal.innerHTML = `
                         <div class="modal-backdrop"></div>
-                        <div class="modal-content max-w-[720px]">
+                        <div class="modal-content max-w-[880px]">
                           <div class="text-lg font-semibold mb-3">${edit ? '編輯排班' : '新增排班'}</div>
                           <div class="grid grid-cols-8 gap-2 items-center">
-                            <div class="col-span-2 text-sm text-gray-600">哨點</div>
+                            <div class="col-span-2 text-sm text-gray-600">職稱</div>
                             <div class="col-span-6">
-                              <input id="new-post-input" list="post-name-list" class="px-2 py-1 border rounded w-full" value="${currentPostName}" placeholder="輸入或選擇哨點"/>
-                              <datalist id="post-name-list">${postsOptionsDatalist}</datalist>
+                              <select id="new-role" class="px-2 py-1 border rounded w-full">
+                                ${['總幹事','秘書','保全','清潔','機電'].map(r=>`<option value="${r}" ${r===defaultRole?'selected':''}>${r}</option>`).join('')}
+                              </select>
                             </div>
 
-                            <div class="col-span-2 text-sm text-gray-600">日期</div>
+                            <div id="role-post-row" class="contents">
+                              <div class="col-span-2 text-sm text-gray-600">哨點</div>
+                              <div class="col-span-6">
+                                <input id="new-post-input" list="post-name-list" class="px-2 py-1 border rounded w-full" value="${currentPostName}" placeholder="輸入或選擇哨點"/>
+                                <datalist id="post-name-list">${postsOptionsDatalist}</datalist>
+                              </div>
+                            </div>
+
+                            <div class="col-span-2 text-sm text-gray-600">上班日期</div>
                             <div class="col-span-6"><input type="date" id="new-date" value="${defaultDateIso}" class="px-2 py-1 border rounded w-full"/></div>
 
                             <div class="col-span-2 text-sm text-gray-600">星期</div>
-                            <div class="col-span-6"><input id="new-dow" class="px-2 py-1 border rounded w-full" value="${dow}" readonly/></div>
+                            <div class="col-span-6"><input id="new-dow" class="px-2 py-1 border rounded w-full" value="${startDow}" readonly/></div>
 
-                            <div class="col-span-2 text-sm text-gray-600">上哨時間</div>
+                            <div class="col-span-2 text-sm text-gray-600">上班時間</div>
                             <div class="col-span-6"><input type="time" id="new-start-time" value="${defaultStart}" class="px-2 py-1 border rounded w-full"/></div>
 
-                            <div class="col-span-2 text-sm text-gray-600">下哨時間</div>
+                            <div class="col-span-2 text-sm text-gray-600">加入小時按鈕</div>
+                            <div class="col-span-6">
+                              <div class="flex items-center gap-2">
+                                <button id="btn-add-9h" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">+9</button>
+                                <button id="btn-add-12h" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">+12</button>
+                              </div>
+                            </div>
+
+                            <div class="col-span-2 text-sm text-gray-600">下班日期</div>
+                            <div class="col-span-6"><input type="date" id="new-end-date" value="${defaultEndDateIso}" class="px-2 py-1 border rounded w-full"/></div>
+
+                            <div class="col-span-2 text-sm text-gray-600">星期</div>
+                            <div class="col-span-6"><input id="new-end-dow" class="px-2 py-1 border rounded w-full" value="${endDow}" readonly/></div>
+
+                            <div class="col-span-2 text-sm text-gray-600">下班時間</div>
                             <div class="col-span-6"><input type="time" id="new-end-time" value="${defaultEnd}" class="px-2 py-1 border rounded w-full"/></div>
 
                             <div class="col-span-2 text-sm text-gray-600">指派人員</div>
@@ -5944,55 +6023,114 @@
                     modal.classList.remove('hide');
                     try { lucide.createIcons(); } catch(_) {}
 
+                    const roleSel = document.getElementById('new-role');
+                    const postRow = document.getElementById('role-post-row');
                     const dateInput = document.getElementById('new-date');
                     const dowInput = document.getElementById('new-dow');
+                    const endDateInput = document.getElementById('new-end-date');
+                    const endDowInput = document.getElementById('new-end-dow');
+                    const startTimeInput = document.getElementById('new-start-time');
+                    const endTimeInput = document.getElementById('new-end-time');
+
+                    const togglePostRow = () => {
+                        if (!roleSel || !postRow) return;
+                        if (roleSel.value === '保全') {
+                            postRow.classList.remove('hidden');
+                            postRow.classList.add('contents');
+                        } else {
+                            postRow.classList.add('hidden');
+                            postRow.classList.remove('contents');
+                        }
+                    };
+                    togglePostRow();
+                    if (roleSel) roleSel.addEventListener('change', togglePostRow);
+
                     if (dateInput && dowInput) {
                         dateInput.addEventListener('change', ()=>{
                             const iso = dateInput.value;
                             dowInput.value = dayOfWeekLabel(iso);
                         });
                     }
+                    if (endDateInput && endDowInput) {
+                        endDateInput.addEventListener('change', ()=>{
+                            const iso = endDateInput.value;
+                            endDowInput.value = dayOfWeekLabel(iso);
+                        });
+                    }
+
+                    const addHours = (h) => {
+                        const iso = dateInput?.value || defaultDateIso;
+                        const start = startTimeInput?.value || '07:00';
+                        const addMin = h * 60;
+                        const sm = parseHM(start);
+                        let total = sm + addMin;
+                        let endIsoCalc = iso;
+                        if (total >= 24*60) {
+                            total -= 24*60;
+                            const d0 = new Date(`${iso}T00:00:00`);
+                            d0.setDate(d0.getDate()+1);
+                            endIsoCalc = fmtYMD(d0);
+                        }
+                        const hh = String(Math.floor(total/60)).padStart(2,'0');
+                        const mm = String(total % 60).padStart(2,'0');
+                        if (endTimeInput) endTimeInput.value = `${hh}:${mm}`;
+                        if (endDateInput) endDateInput.value = endIsoCalc;
+                        if (endDowInput) endDowInput.value = dayOfWeekLabel(endIsoCalc);
+                    };
+
+                    const btn9 = document.getElementById('btn-add-9h');
+                    const btn12 = document.getElementById('btn-add-12h');
+                    if (btn9) btn9.addEventListener('click', ()=> addHours(9));
+                    if (btn12) btn12.addEventListener('click', ()=> addHours(12));
+
                     const cancelBtn = document.getElementById('new-schedule-cancel');
                     if (cancelBtn) cancelBtn.addEventListener('click', ()=> { modal.classList.add('hide'); });
 
                     const saveBtn = document.getElementById('new-schedule-save');
                     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
-                        let postId = null;
-                        const nameVal = document.getElementById('new-post-input')?.value.trim() || '';
-                        if (!nameVal) return showToast('請輸入哨點名稱', true);
-                        let existing = pageState.posts.find(p => (p.name || '') === nameVal);
-                        if (existing) {
-                            postId = existing.id;
-                        } else {
-                            const { Timestamp } = window.__fs || {};
-                            const newPostDoc = await addDoc(collection(db,'communities', communityId, 'posts'), {
-                                communityId,
-                                name: nameVal,
-                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                            });
-                            postId = newPostDoc.id;
+                        const roleVal = roleSel?.value || '保全';
+                        let postId = pageState.selectedPostId || null;
+                        let nameVal = '';
+                        if (roleVal === '保全') {
+                            nameVal = document.getElementById('new-post-input')?.value.trim() || '';
+                            if (!nameVal) return showToast('請輸入哨點名稱', true);
+                            const existing = pageState.posts.find(p => (p.name || '') === nameVal);
+                            if (existing) {
+                                postId = existing.id;
+                            } else {
+                                const { Timestamp } = window.__fs || {};
+                                const newPostDoc = await addDoc(collection(db,'communities', communityId, 'posts'), {
+                                    communityId,
+                                    name: nameVal,
+                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                });
+                                postId = newPostDoc.id;
+                            }
                         }
                         const iso = document.getElementById('new-date')?.value || defaultDateIso;
-                        const start = document.getElementById('new-start-time')?.value || '07:00';
-                        const end = document.getElementById('new-end-time')?.value || '19:00';
+                        const endIso = document.getElementById('new-end-date')?.value || defaultEndDateIso;
+                        const start = startTimeInput?.value || '07:00';
+                        const end = endTimeInput?.value || '19:00';
                         const assId = document.getElementById('new-assignee')?.value || '';
-                        if (!postId || !iso || !start || !end) return showToast('請完整填寫排班資訊', true);
-                        if (parseHM(end) <= parseHM(start)) return showToast('結束時間需晚於開始時間', true);
+                        if (!iso || !start || !end) return showToast('請完整填寫排班資訊', true);
+                        if (roleVal === '保全' && !postId) return showToast('請輸入哨點名稱', true);
+                        if (endIso === iso && parseHM(end) <= parseHM(start)) return showToast('結束時間需晚於開始時間', true);
                         try {
                             const { Timestamp } = window.__fs || {};
-                            const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${postId}__${iso}`);
+                            const effPostId = postId || pageState.selectedPostId;
+                            const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${effPostId}__${iso}`);
                             const dsnap = await getDoc(dref);
                             const docData = dsnap.exists() ? dsnap.data() : null;
                             const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
                             let newShifts = [];
                             if (edit && typeof edit.index === 'number') {
-                                newShifts = shifts.map((sh,i)=> i===edit.index ? { ...sh, start, end, assignees: assId ? [assId] : [] } : sh);
+                                newShifts = shifts.map((sh,i)=> i===edit.index ? { ...sh, start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso } : sh);
                             } else {
-                                newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [] }];
+                                newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso }];
                             }
                             const payload = {
-                                communityId, postId, dateIso: iso,
+                                communityId, postId: effPostId, dateIso: iso,
                                 dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                 isScheduledDay: !!docData?.isScheduledDay,
                                 shifts: newShifts,
@@ -6002,7 +6140,7 @@
                             await setDoc(dref, payload);
                             showToast(edit ? '已更新排班' : '已新增排班');
                             modal.classList.add('hide');
-                            pageState.selectedPostId = postId;
+                            pageState.selectedPostId = effPostId;
                             await loadMonth();
                             renderTabs();
                             renderPostTitle();
