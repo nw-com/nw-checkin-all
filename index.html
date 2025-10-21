@@ -75,8 +75,8 @@
         .modal-backdrop {
             position: fixed;
             inset: 0;
-            background-color: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(4px);
+            background-color: rgba(17, 24, 39, 0.45);
+            backdrop-filter: blur(2px);
             z-index: 40;
             display: flex;
             align-items: center;
@@ -94,6 +94,11 @@
             overflow-y: auto; /* 內容可捲動 */
             -webkit-overflow-scrolling: touch; /* iOS 捲動優化 */
             margin-top: 12px; /* 與頂部保持距離，避免被地址列遮住 */
+            background-color: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+            padding: 16px;
         }
         /* iOS/瀏覽器安全區支援 */
         @supports (padding: env(safe-area-inset-top)) {
@@ -5196,19 +5201,7 @@
                     return merged.reduce((acc,iv)=>acc+(iv.end-iv.start),0);
                 };
 
-                const computeAbnormal = (docData) => {
-                    if (!docData) return null;
-                    const shifts = Array.isArray(docData.shifts) ? docData.shifts : [];
-                    const isScheduledDay = !!docData.isScheduledDay;
-                    const overlapAllowed = !!docData.overlapAllowed;
-                    const requireFullDay = !!docData.requireFullDay;
-                    // 異常規則
-                    if (isScheduledDay && shifts.length === 0) return '排班日未排班';
-                    if (!isScheduledDay && shifts.length > 0) return '非排班日卻有班表';
-                    if (!overlapAllowed && hasOverlap(shifts)) return '班表時間重疊';
-                    if (requireFullDay && coverageMinutes(shifts) < 24*60) return '未滿24小時';
-                    return null;
-                };
+                // 排班異常邏輯已移除
 
                 const renderShell = () => {
                     mainContent.innerHTML = `
@@ -5519,7 +5512,6 @@
                     grid.innerHTML = cells.map(cell => {
                         const iso = fmtYMD(cell.date);
                         const docData = pageState.monthDocsMap[iso];
-                        const abnormal = computeAbnormal(docData);
                         const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
                         const cov = coverageMinutes(shifts);
                         let segCount = 0;
@@ -5528,8 +5520,8 @@
                             segCount = mergeIntervalsMinutes(mins).length;
                         } catch (_) { segCount = (shifts.length>0?1:0); }
                         const discontinuity = segCount > 1;
-                        const badgeText = abnormal ? '異常' : (discontinuity ? '斷續' : '');
-                        const badge = badgeText ? `<span class="text-[10px] ${abnormal?'text-red-600':'text-blue-600'}">${badgeText}</span>` : '';
+                        const badgeText = discontinuity ? '斷續' : '';
+                        const badge = badgeText ? `<span class="text-[10px] text-blue-600">${badgeText}</span>` : '';
                         const bgStyle = (()=>{
                             if (!cell.inMonth) return '';
                             if (!cov) return '';
@@ -5539,7 +5531,7 @@
                             return 'background-color:#FFF7ED;';
                         })();
                         const isSelected = iso === selectedIso;
-                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${abnormal? 'border border-red-300':''} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[60px] flex flex-col ${cell.inMonth?'bg-white':''}`;
+                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[60px] flex flex-col ${cell.inMonth?'bg-white':''}`;
                         return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
                     }).join('');
                     grid.querySelectorAll('[data-iso]').forEach(el=>{
@@ -5567,21 +5559,15 @@
                     } catch (e) { console.warn('讀取當日班表失敗', e); }
                     const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
                     const isScheduledDay = !!docData?.isScheduledDay;
-                    const overlapAllowed = !!docData?.overlapAllowed;
-                    const requireFullDay = !!docData?.requireFullDay;
-                    const abnormal = computeAbnormal(docData);
 
                     await loadCommunityUsers();
                     const userOptions = pageState.userOptionsHTML && pageState.userOptionsHTML.length ? pageState.userOptionsHTML : '<option value="" disabled>請先建立或指派人員</option>';
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
                             <div class="font-semibold">${iso} 的哨點班表</div>
-                            ${abnormal? `<div class="text-red-600 text-sm">異常：${abnormal}</div>`: ''}
                         </div>
                         <div class="flex items-center gap-4 mb-3">
                             <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-scheduled" ${isScheduledDay?'checked':''}/> 排班日</label>
-                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-overlap" ${overlapAllowed?'checked':''}/> 可重疊排班時間</label>
-                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-full" ${requireFullDay?'checked':''}/> 滿班</label>
                             <button id="save-day-rules" class="ml-auto px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">儲存設定</button>
                         </div>
                         <div>
@@ -5632,8 +5618,6 @@
                                 dateIso: iso,
                                 dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                 isScheduledDay: !!document.getElementById('chk-scheduled')?.checked,
-                                overlapAllowed: !!document.getElementById('chk-overlap')?.checked,
-                                requireFullDay: !!document.getElementById('chk-full')?.checked,
                                 shifts: shifts,
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                 createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
@@ -5658,7 +5642,7 @@
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
-                                const payloadDel = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                                const payloadDel = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadDel);
                                 showToast('已刪除班表');
                                 await loadMonth();
@@ -5682,7 +5666,7 @@
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
-                                const payloadAssign = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                                const payloadAssign = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAssign);
                                 showToast('已更新指派');
                                 await loadMonth();
@@ -5720,7 +5704,7 @@
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
-                                const payloadEdit = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                                const payloadEdit = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadEdit);
                                 showToast('已更新班表時間');
                                 await loadMonth();
@@ -5746,7 +5730,7 @@
                                 dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                 createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             } : {};
-                            const payloadAdd = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
+                            const payloadAdd = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAdd);
                             showToast('已新增班表');
                             await loadMonth();
@@ -5867,14 +5851,12 @@
                                 const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', id));
                                 const docData = dsnap.exists() ? dsnap.data() : null;
                                 const isScheduledDay = !!docData?.isScheduledDay;
-                                const overlapAllowed = !!docData?.overlapAllowed;
-                                const requireFullDay = !!docData?.requireFullDay;
                                 const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
                                 const newShifts = shifts.filter((_,i)=>i!==idx);
                                 const payload = {
                                     communityId, postId: pageState.selectedPostId, dateIso: iso,
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
-                                    isScheduledDay, overlapAllowed, requireFullDay, shifts: newShifts,
+                                    isScheduledDay, shifts: newShifts,
                                     createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                     updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 };
@@ -5919,6 +5901,8 @@
                     const defaultAss = Array.isArray(edit?.shift?.assignees) ? edit.shift.assignees[0] || '' : '';
                     const currentPostId = pageState.selectedPostId;
                     const postsOptions = pageState.posts.map(p => `<option value="${p.id}" ${p.id===currentPostId?'selected':''}>${p.name||'未命名哨點'}</option>`).join('');
+                    const currentPostName = (pageState.posts.find(p => p.id===currentPostId)?.name) || '';
+                    const postsOptionsDatalist = pageState.posts.map(p => `<option value="${p.name||'未命名哨點'}"></option>`).join('');
                     const usersOptions = (pageState.userOptionsHTML && pageState.userOptionsHTML.length) ? pageState.userOptionsHTML : '<option value="" disabled>請先建立或指派人員</option>';
                     const dow = dayOfWeekLabel(defaultDateIso);
                     const modal = document.getElementById('modal-container');
@@ -5929,7 +5913,10 @@
                           <div class="text-lg font-semibold mb-3">${edit ? '編輯排班' : '新增排班'}</div>
                           <div class="grid grid-cols-8 gap-2 items-center">
                             <div class="col-span-2 text-sm text-gray-600">哨點</div>
-                            <div class="col-span-6"><select id="new-post-select" class="px-2 py-1 border rounded w-full">${postsOptions}</select></div>
+                            <div class="col-span-6">
+                              <input id="new-post-input" list="post-name-list" class="px-2 py-1 border rounded w-full" value="${currentPostName}" placeholder="輸入或選擇哨點"/>
+                              <datalist id="post-name-list">${postsOptionsDatalist}</datalist>
+                            </div>
 
                             <div class="col-span-2 text-sm text-gray-600">日期</div>
                             <div class="col-span-6"><input type="date" id="new-date" value="${defaultDateIso}" class="px-2 py-1 border rounded w-full"/></div>
@@ -5967,7 +5954,22 @@
 
                     const saveBtn = document.getElementById('new-schedule-save');
                     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
-                        const postId = document.getElementById('new-post-select')?.value || currentPostId;
+                        let postId = null;
+                        const nameVal = document.getElementById('new-post-input')?.value.trim() || '';
+                        if (!nameVal) return showToast('請輸入哨點名稱', true);
+                        let existing = pageState.posts.find(p => (p.name || '') === nameVal);
+                        if (existing) {
+                            postId = existing.id;
+                        } else {
+                            const { Timestamp } = window.__fs || {};
+                            const newPostDoc = await addDoc(collection(db,'communities', communityId, 'posts'), {
+                                communityId,
+                                name: nameVal,
+                                createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            });
+                            postId = newPostDoc.id;
+                        }
                         const iso = document.getElementById('new-date')?.value || defaultDateIso;
                         const start = document.getElementById('new-start-time')?.value || '07:00';
                         const end = document.getElementById('new-end-time')?.value || '19:00';
@@ -5990,8 +5992,6 @@
                                 communityId, postId, dateIso: iso,
                                 dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                 isScheduledDay: !!docData?.isScheduledDay,
-                                overlapAllowed: !!docData?.overlapAllowed,
-                                requireFullDay: !!docData?.requireFullDay,
                                 shifts: newShifts,
                                 createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
@@ -6034,7 +6034,7 @@
                         <div id="group-map" class="h-full w-full"></div>
                         <div id="group-map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
 <button id="group-map-center-btn" class="absolute top-3 right-3 z-10 bg-white text-gray-700 border border-gray-300 rounded-full shadow px-3 py-2 flex items-center hover:bg-gray-50">
-                            <i data-lucide="focus" class="w-4 h-4 mr-2"></i>回到公司
+                            <i data-lucide="focus" class="w-4 h-4 mr-2"></i>回到社區
                         </button>
                         <div class="absolute bottom-0 left-0 right-0 p-2">
                             <div id="group-user-list" class="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg max-h-[150px] overflow-y-auto p-2 space-y-2"></div>
@@ -6080,7 +6080,7 @@
                             state.groupMap.panTo(state.companyCenter);
                             state.groupMap.setZoom(14);
                         } else {
-                            showToast('尚未設定公司座標', true);
+                            showToast('尚未設定社區座標', true);
                         }
                     });
                 }
