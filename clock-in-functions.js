@@ -953,7 +953,7 @@ function openTempLeaveModal() {
             const { addDoc, collection, updateDoc, doc, Timestamp, serverTimestamp } = window.__fs;
             const leaveData = {
                 userId: user.uid,
-                userName: state.currentUser.displayName || user.email,
+                userName: (state.currentUserData?.name || user?.displayName || user?.email || ''),
                 reason: reason,
                 startTime: Timestamp.fromDate(startTime),
                 endTime: Timestamp.fromDate(endTime),
@@ -1181,7 +1181,7 @@ function openSpecialDutyModal() {
             const { addDoc, collection, updateDoc, doc, Timestamp, serverTimestamp } = window.__fs;
             const dutyData = {
                 userId: user.uid,
-                userName: state.currentUser.displayName || user.email,
+                userName: (state.currentUserData?.name || user?.displayName || user?.email || ''),
                 dutyType: dutyType,
                 location: location,
                 startTime: Timestamp.fromDate(startTime),
