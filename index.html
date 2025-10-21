@@ -5251,9 +5251,11 @@
                         }
                         pageState.posts.sort((a,b)=> (a.createdAt?.toMillis?.()||0) - (b.createdAt?.toMillis?.()||0));
                         pageState.selectedPostId = pageState.selectedPostId || pageState.posts[0]?.id || null;
+                        updateCounts();
                     } catch (e) {
                         console.warn('載入哨點失敗', e);
                         pageState.posts = [];
+                        updateCounts();
                     }
                 };
 
@@ -5307,6 +5309,7 @@
                             // 更新本地狀態
                             pageState.posts = pageState.posts.filter(p=> p.id !== postId);
                             if (pageState.selectedPostId === postId) pageState.selectedPostId = pageState.posts[0]?.id || null;
+                            updateCounts();
                             renderTabs();
                             await loadMonth();
                             renderCalendar();
@@ -5327,6 +5330,7 @@
                             });
                             pageState.posts.push({ id: newDoc.id, communityId, name: defaultName });
                             pageState.selectedPostId = newDoc.id;
+                            updateCounts();
                             renderTabs();
                             // 自動進入重命名模式
                             const newTab = tabsEl.querySelector(`button[data-post="${newDoc.id}"]`);
@@ -5453,7 +5457,6 @@
 
                 const loadCommunityUsers = async () => {
                     try {
-                        if (Array.isArray(pageState.communityUsers) && pageState.communityUsers.length) return;
                         const users = [];
                         const communityCode = (comm && (comm.code || comm.communityCode)) ? (comm.code || comm.communityCode) : communityId;
                         const queries = [
@@ -5471,14 +5474,14 @@
                                 s.forEach(d=> { if (!users.find(u=>u.id===d.id)) users.push({ id: d.id, ...d.data() }); });
                             } catch (_) {}
                         }
-                        // 角色過濾：優先只顯示外勤與社區人員；若過濾後為空，則顯示全部查詢到的人員
-                        const preferredRoles = new Set(['總幹事','秘書','保全','清潔','機電','電機','社區管理員']);
-                        let filtered = users.filter(u=> preferredRoles.has((u.role||'').trim()));
-                        if (!filtered.length) filtered = users.slice();
-                        filtered.sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+                        // 僅依各社區帳號列表角色計數（總幹事、秘書、保全、清潔、機電）
+                        const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
+                        const filtered = users.filter(u=> allowedRoles.has((u.role||'').trim()))
+                                              .sort((a,b)=> (a.name||'').localeCompare(b.name||''));
                         pageState.communityUsers = filtered;
                         pageState.userOptionsHTML = filtered.map(u=>`<option value="${u.id}">${u.name||u.displayName||u.id}</option>`).join('');
                     } catch (e) { console.warn('載入社區成員失敗', e); pageState.communityUsers = []; pageState.userOptionsHTML = ''; }
+                    updateCounts();
                 };
 
                 const renderCalendar = () => {
