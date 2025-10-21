@@ -966,17 +966,20 @@ function openTempLeaveModal() {
             const leaveRef = await addDoc(collection(window.__db, 'leaves'), leaveData);
             console.log('請假記錄已創建:', leaveRef.id);
             
-            // 更新用戶狀態
+            // 更新用戶狀態（僅寫入 Firestore 規則允許的欄位）
             await updateDoc(doc(window.__db, 'users', user.uid), {
                 clockInStatus: '臨時請假',
+                status: '臨時請假',
                 leaveReason: reason,
-                leaveStartTime: Timestamp.fromDate(startTime),
-                leaveEndTime: Timestamp.fromDate(endTime)
+                leaveStatus: 'pending',
+                lastUpdated: serverTimestamp()
             });
             console.log('用戶狀態已更新為請假申請');
             
             // 更新本地狀態
             state.clockInStatus = '臨時請假';
+            state.leaveReason = reason;
+            state.leaveStatus = 'pending';
             
             // 更新狀態顯示
             updateStatusDisplay();
@@ -1193,18 +1196,18 @@ function openSpecialDutyModal() {
             const dutyRef = await addDoc(collection(window.__db, 'specialDuties'), dutyData);
             console.log('特殊勤務記錄已創建:', dutyRef.id);
             
-            // 更新用戶狀態
+            // 更新用戶狀態（僅寫入 Firestore 規則允許的欄位）
             await updateDoc(doc(window.__db, 'users', user.uid), {
                 clockInStatus: '特殊勤務',
+                status: '特殊勤務',
                 dutyType: dutyType,
-                dutyLocation: location,
-                dutyStartTime: Timestamp.fromDate(startTime),
-                dutyEndTime: Timestamp.fromDate(endTime)
+                lastUpdated: serverTimestamp()
             });
             console.log('用戶狀態已更新為特殊勤務');
             
             // 更新本地狀態
             state.clockInStatus = '特殊勤務';
+            state.dutyType = dutyType;
             
             // 更新狀態顯示
             updateStatusDisplay();
