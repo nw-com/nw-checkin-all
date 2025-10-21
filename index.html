@@ -5558,7 +5558,7 @@
                             return 'background-color:#FFF7ED;';
                         })();
                         const isSelected = iso === selectedIso;
-                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[60px] flex flex-col ${cell.inMonth?'bg-white':''}`;
+                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[30px] flex flex-col ${cell.inMonth?'bg-white':''}`;
                         return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
                     }).join('');
                     grid.querySelectorAll('[data-iso]').forEach(el=>{
