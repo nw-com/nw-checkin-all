@@ -164,7 +164,7 @@
         <div class="text-center mb-8">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
             <h1 class="text-2xl font-bold text-gray-800 mt-4">西北社區打卡系統</h1>
-            <p class="text-gray-500">社區版V1.2.1</p>
+            <p class="text-gray-500">社區版V2.1.1</p>
         </div>
         <form id="login-form">
             <div class="mb-4">
@@ -5229,7 +5229,7 @@
                                 </div>
                             </div>
                             <div class="p-3">
-                                <div class="flex items-center justify-between mt-1 flex-nowrap">
+                                <div class="flex items-center justify-between mt-1 flex-nowrap sticky top-0 z-20 bg-white border-b border-gray-200">
                                     <div id="shift-list-title" class="text-xs font-medium whitespace-nowrap">每月班表列表</div>
                                     <div class="flex items-center gap-1 whitespace-nowrap">
                                         <button id="export-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯出CSV</button>
@@ -5867,7 +5867,7 @@
                         <div class="overflow-x-auto">
                           <table class="text-sm" style="min-width: max-content; border-collapse: collapse;">
                             <thead>
-                              <tr class="bg-gray-50 text-gray-600">
+                              <tr class="bg-gray-50 text-gray-600 sticky z-10" style="top: 40px; background: white;">
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">角色</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">指派人員</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">職稱</th>
