@@ -5958,10 +5958,33 @@
                                     };
                                     const roleVal = get(idxMap.role) || '保全';
                                     const assigneeName = get(idxMap.assignee) || '';
-                                    const dateIso = get(idxMap.date) || '';
+                                    const rawDateIso = get(idxMap.date) || '';
                                     const startStr = get(idxMap.start) || '07:00';
-                                    const endDateIso = get(idxMap.endDate) || dateIso;
+                                    const rawEndDateIso = get(idxMap.endDate) || rawDateIso;
                                     const endStr = get(idxMap.end) || '19:00';
+                                    // 允許多種日期格式，轉為 YYYY-MM-DD；並去除附帶時間
+                                    const toIso = (raw) => {
+                                        const s = String(raw || '').trim();
+                                        if (!s) return '';
+                                        const datePart = s.split(/[T\s]/)[0];
+                                        let m = datePart.match(/^([0-9]{4})[\/\.-]([0-9]{1,2})[\/\.-]([0-9]{1,2})$/);
+                                        if (m) {
+                                            const y = parseInt(m[1],10), mo = parseInt(m[2],10), d = parseInt(m[3],10);
+                                            if (mo>=1 && mo<=12 && d>=1 && d<=31) return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                                        }
+                                        m = datePart.match(/^([0-9]{1,2})[\/\.-]([0-9]{1,2})[\/\.-]([0-9]{4})$/);
+                                        if (m) {
+                                            const mo = parseInt(m[1],10), d = parseInt(m[2],10), y = parseInt(m[3],10);
+                                            if (mo>=1 && mo<=12 && d>=1 && d<=31) return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                                        }
+                                        const dt = new Date(datePart);
+                                        if (!isNaN(dt.getTime())) {
+                                            return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+                                        }
+                                        return '';
+                                    };
+                                    const dateIso = toIso(rawDateIso);
+                                    const endDateIso = toIso(rawEndDateIso) || dateIso;
                                     let postId = pageState.selectedPostId || null;
                                     if (roleVal === '保全' && idxMap.post !== -1) {
                                         const postName = get(idxMap.post) || '';
@@ -5992,7 +6015,13 @@
                                     const newShift = { start: startStr, end: endStr, assignees: assId ? [assId] : [], role: roleVal, endDateIso };
                                     const payload = {
                                         communityId, postId: effPostId, dateIso,
-                                        dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${dateIso}T00:00:00`)) : new Date(`${dateIso}T00:00:00`)),
+                                        // 避免字串解析造成 Invalid time value，改用原生年月日建構
+                                        dateTS: (() => {
+                                            const parts = dateIso.split('-');
+                                            const y = parseInt(parts[0],10), mo = parseInt(parts[1],10), d = parseInt(parts[2],10);
+                                            const jsDate = new Date(y, mo - 1, d, 0, 0, 0, 0);
+                                            return (Timestamp?.fromDate ? Timestamp.fromDate(jsDate) : jsDate);
+                                        })(),
                                         isScheduledDay: !!docData?.isScheduledDay,
                                         shifts: [...shifts, newShift],
                                         createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
