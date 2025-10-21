@@ -5215,7 +5215,7 @@
                             </div>
                         </div>
                         <div class="overflow-y-auto" style="height: calc(100% - 50px);">
-                            <div id="calendar-sticky" class="sticky top-0 z-10 bg-white">
+                            <div id="calendar-sticky" class="sticky top-0 z-10 bg-white" style="height: calc((100vh - 50px) * 0.5);">
                                 <div class="p-3">
                                     <div class="flex items-center justify-between mb-2">
                                         <button id="prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
@@ -5231,7 +5231,12 @@
                             <div class="p-3">
                                 <div class="flex items-center justify-between mt-1">
                                     <div id="shift-list-title" class="text-base font-medium">每月班表列表</div>
-                                    <button id="open-add-schedule" class="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
+                                    <div class="flex items-center gap-2">
+                                        <button id="export-csv" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">匯出CSV</button>
+                                        <button id="import-csv" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">匯入CSV</button>
+                                        <button id="open-add-schedule" class="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
+                                        <input id="import-csv-input" type="file" accept=".csv,text/csv" class="hidden">
+                                    </div>
                                 </div>
                                 <div id="shift-monthly-list" class="mt-2"></div>
                             </div>
@@ -5788,6 +5793,11 @@
                     return u ? (u.name || u.displayName || u.id) : '未指派';
                 };
 
+                const getUserTitleById = (uid) => {
+                    const u = (pageState.communityUsers || []).find(x => x.id === uid);
+                    return u ? (u.jobTitle || '') : '';
+                };
+
                 const computeShiftStatus = (iso, shift) => {
                     try {
                         const startStr = shift?.start || '07:00';
@@ -5824,6 +5834,7 @@
                             const end = s.end || '19:00';
                             const assId = Array.isArray(s.assignees) ? (s.assignees[0] || '') : '';
                             const assName = assId ? getUserNameById(assId) : '未指派';
+                            const assTitle = assId ? getUserTitleById(assId) : '';
                             const status = computeShiftStatus(iso, s);
                             const dow = dayOfWeekShort(iso);
                             const role = s.role || '保全';
@@ -5833,6 +5844,8 @@
                             rows.push(`
                                 <tr>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${role}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${assName}</td>
+                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${assTitle}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${displayPost}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${iso}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${dow}</td>
@@ -5840,7 +5853,6 @@
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${endIso}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${endDow}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${end}</td>
-                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${assName}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${status}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">
                                     <button class="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" data-edit-month="${iso}__${idx}">編輯</button>
@@ -5856,6 +5868,8 @@
                           <table class="text-sm" style="min-width: max-content; border-collapse: collapse;">
                             <thead>
                               <tr class="bg-gray-50 text-gray-600">
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">角色</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">指派人員</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">職稱</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">哨點</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班日期</th>
@@ -5864,16 +5878,141 @@
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">下班日期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">星期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">下班時間</th>
-                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">指派人員</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">狀態</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">操作</th>
                               </tr>
                             </thead>
-                            <tbody>${rows.join('') || `<tr><td colspan="11" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
+                            <tbody>${rows.join('') || `<tr><td colspan="12" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
                     const addBtn = document.getElementById('open-add-schedule');
                     if (addBtn) { addBtn.onclick = () => openAddScheduleModal(); }
+
+                    const exportBtn = document.getElementById('export-csv');
+                    if (exportBtn) exportBtn.onclick = async () => {
+                        const header = ['角色','指派人員','職稱','哨點','上班日期','星期','上班時間','下班日期','星期','下班時間','狀態'];
+                        const lines = [header.join(',')];
+                        const entries2 = Object.entries(pageState.monthDocsMap).sort(([a],[b]) => a.localeCompare(b));
+                        const currentPost2 = pageState.posts.find(p=>p.id===pageState.selectedPostId);
+                        const postName2 = currentPost2?.name || '未命名哨點';
+                        for (const [iso2, doc2] of entries2) {
+                            if (filterIso && iso2 !== filterIso) continue;
+                            const shifts2 = Array.isArray(doc2.shifts) ? doc2.shifts : [];
+                            shifts2.forEach((s2) => {
+                                const start = s2.start || '07:00';
+                                const end = s2.end || '19:00';
+                                const assId = Array.isArray(s2.assignees) ? (s2.assignees[0] || '') : '';
+                                const assName = assId ? getUserNameById(assId) : '未指派';
+                                const assTitle = assId ? getUserTitleById(assId) : '';
+                                const status = computeShiftStatus(iso2, s2);
+                                const dow = dayOfWeekShort(iso2);
+                                const role = s2.role || '保全';
+                                const endIso = s2.endDateIso || iso2;
+                                const endDow = dayOfWeekShort(endIso);
+                                const displayPost = role === '保全' ? postName2 : '無';
+                                const row = [role, assName, assTitle, displayPost, iso2, `星期${dow}`, start, endIso, `星期${endDow}`, end, status].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+                                lines.push(row);
+                            });
+                        }
+                        const csv = lines.join('\r\n');
+                        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                        const d0 = pageState.monthDate || new Date();
+                        const fname = `shifts_${d0.getFullYear()}_${String(d0.getMonth()+1).padStart(2,'0')}.csv`;
+                        const url = URL.createObjectURL(blob);
+                        const a0 = document.createElement('a');
+                        a0.href = url; a0.download = fname; a0.click();
+                        setTimeout(()=> URL.revokeObjectURL(url), 1000);
+                    };
+
+                    const importBtn = document.getElementById('import-csv');
+                    const importInput = document.getElementById('import-csv-input');
+                    if (importBtn && importInput) {
+                        importBtn.onclick = () => importInput.click();
+                        importInput.onchange = async (evt) => {
+                            const file = evt.target.files?.[0];
+                            if (!file) return;
+                            try {
+                                const text = await file.text();
+                                const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+                                if (lines.length <= 1) { showToast('CSV 無資料', true); return; }
+                                const header = lines[0].split(',').map(h=>h.replace(/^\s*\"|\"\s*$/g,''));
+                                const idxMap = {
+                                    role: header.indexOf('角色'),
+                                    assignee: header.indexOf('指派人員'),
+                                    post: header.indexOf('哨點'),
+                                    date: header.indexOf('上班日期'),
+                                    start: header.indexOf('上班時間'),
+                                    endDate: header.indexOf('下班日期'),
+                                    end: header.indexOf('下班時間')
+                                };
+                                const missing = ['role','assignee','date','start','endDate','end'].filter(k=> idxMap[k] === -1);
+                                if (missing.length) { showToast('CSV 欄位缺少：' + missing.join('、'), true); return; }
+                                const { Timestamp } = window.__fs || {};
+                                for (let i=1; i<lines.length; i++) {
+                                    const cols = lines[i].match(/("([^"]|"")*"|[^,]+)/g);
+                                    if (!cols || !cols.length) continue;
+                                    const get = (ix) => {
+                                        const v = cols[ix] || '';
+                                        return v.trim().replace(/^\"|\"$/g,'').replace(/""/g,'"');
+                                    };
+                                    const roleVal = get(idxMap.role) || '保全';
+                                    const assigneeName = get(idxMap.assignee) || '';
+                                    const dateIso = get(idxMap.date) || '';
+                                    const startStr = get(idxMap.start) || '07:00';
+                                    const endDateIso = get(idxMap.endDate) || dateIso;
+                                    const endStr = get(idxMap.end) || '19:00';
+                                    let postId = pageState.selectedPostId || null;
+                                    if (roleVal === '保全' && idxMap.post !== -1) {
+                                        const postName = get(idxMap.post) || '';
+                                        if (postName) {
+                                            const existing = pageState.posts.find(p => (p.name || '') === postName);
+                                            if (existing) {
+                                                postId = existing.id;
+                                            } else {
+                                                const newPostDoc = await addDoc(collection(db,'communities', communityId, 'posts'), {
+                                                    communityId,
+                                                    name: postName,
+                                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                                });
+                                                postId = newPostDoc.id;
+                                                pageState.posts.push({ id: postId, communityId, name: postName });
+                                            }
+                                        }
+                                    }
+                                    const assUser = (pageState.communityUsers || []).find(u => (u.name || u.displayName || '') === assigneeName);
+                                    const assId = assUser ? assUser.id : '';
+                                    if (!dateIso || !startStr || !endStr) continue;
+                                    const effPostId = postId || pageState.selectedPostId;
+                                    const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${effPostId}__${dateIso}`);
+                                    const dsnap = await getDoc(dref);
+                                    const docData = dsnap.exists() ? dsnap.data() : null;
+                                    const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                                    const newShift = { start: startStr, end: endStr, assignees: assId ? [assId] : [], role: roleVal, endDateIso };
+                                    const payload = {
+                                        communityId, postId: effPostId, dateIso,
+                                        dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${dateIso}T00:00:00`)) : new Date(`${dateIso}T00:00:00`)),
+                                        isScheduledDay: !!docData?.isScheduledDay,
+                                        shifts: [...shifts, newShift],
+                                        createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                        updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                    };
+                                    await setDoc(dref, payload);
+                                }
+                                showToast('CSV 匯入完成');
+                                await loadMonth();
+                                renderCalendar();
+                                renderMonthlyList();
+                                renderDayPanel();
+                            } catch (e) {
+                                console.error('CSV 匯入錯誤', e);
+                                showToast('CSV 匯入失敗', true);
+                            } finally {
+                                importInput.value = '';
+                            }
+                        };
+                    }
+
                     el.querySelectorAll('[data-edit-month]').forEach(btn=>{
                         btn.addEventListener('click', async ()=>{
                             const [iso, idxStr] = btn.getAttribute('data-edit-month').split('__');
@@ -5999,12 +6138,15 @@
                         <div class="modal-content max-w-[880px]">
                           <div class="text-lg font-semibold mb-3">${edit ? '編輯排班' : '新增排班'}</div>
                           <div class="grid grid-cols-8 gap-2 items-center">
-                            <div class="col-span-2 text-sm text-gray-600">職稱</div>
+                            <div class="col-span-2 text-sm text-gray-600">角色</div>
                             <div class="col-span-6">
                               <select id="new-role" class="px-2 py-1 border rounded w-full">
                                 ${['總幹事','秘書','保全','清潔','機電'].map(r=>`<option value="${r}" ${r===defaultRole?'selected':''}>${r}</option>`).join('')}
                               </select>
                             </div>
+
+                            <div class="col-span-2 text-sm text-gray-600">指派人員</div>
+                            <div class="col-span-6"><select id="new-assignee" class="px-2 py-1 border rounded w-full">${usersOptions}</select></div>
 
                             <div id="role-post-row" class="contents">
                               <div class="col-span-2 text-sm text-gray-600">哨點</div>
@@ -6040,8 +6182,7 @@
                             <div class="col-span-2 text-sm text-gray-600">下班時間</div>
                             <div class="col-span-6"><input type="time" id="new-end-time" value="${defaultEnd}" class="px-2 py-1 border rounded w-full"/></div>
 
-                            <div class="col-span-2 text-sm text-gray-600">指派人員</div>
-                            <div class="col-span-6"><select id="new-assignee" class="px-2 py-1 border rounded w-full">${usersOptions}</select></div>
+
                           </div>
                           <div class="mt-4 flex items-center justify-end gap-2">
                             <button id="new-schedule-cancel" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">取消</button>
