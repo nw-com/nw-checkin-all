@@ -5238,7 +5238,7 @@
                                         <input id="import-csv-input" type="file" accept=".csv,text/csv" class="hidden">
                                     </div>
                                 </div>
-                                <div id="shift-monthly-list" class="mt-2"></div>
+                                <div id="shift-monthly-list" class="mt-2" style="height: calc((100vh - 50px) * 0.5); overflow-y: auto;"></div>
                             </div>
                         </div>`;
                     try { lucide.createIcons(); } catch (_) {}
@@ -5915,7 +5915,7 @@
                             });
                         }
                         const csv = lines.join('\r\n');
-                        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                        const blob = new Blob(["\uFEFF", csv], { type: 'text/csv;charset=utf-8;' });
                         const d0 = pageState.monthDate || new Date();
                         const fname = `shifts_${d0.getFullYear()}_${String(d0.getMonth()+1).padStart(2,'0')}.csv`;
                         const url = URL.createObjectURL(blob);
@@ -5932,7 +5932,8 @@
                             const file = evt.target.files?.[0];
                             if (!file) return;
                             try {
-                                const text = await file.text();
+                                let text = await file.text();
+                                text = text.replace(/^\uFEFF/, '');
                                 const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
                                 if (lines.length <= 1) { showToast('CSV 無資料', true); return; }
                                 const header = lines[0].split(',').map(h=>h.replace(/^\s*\"|\"\s*$/g,''));
