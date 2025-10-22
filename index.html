@@ -193,8 +193,12 @@
                 <button type="button" id="apply-account-btn" class="w-full bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 transition duration-150">
                     申請帳號
                 </button>
+                <button type="button" id="forgot-password-btn" class="w-full bg-white border border-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 transition duration-150">
+                    忘記密碼
+                </button>
             </div>
             <p id="login-error" class="text-red-500 text-sm mt-4 text-center"></p>
+            <p id="login-help" class="text-gray-500 text-xs mt-2 text-center">新建立或核准的帳號需要先設定密碼，請使用「忘記密碼」寄送重設信。</p>
         </form>
     </div>
 
@@ -947,10 +951,21 @@
 
 
             // --- Authentication Logic ---
+            const translateAuthError = (error) => {
+                const code = error?.code || '';
+                if (code === 'auth/invalid-email') return '電子郵件格式不正確。';
+                if (code === 'auth/user-not-found') return '查無此帳號，請先由管理端建立或核准。';
+                if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') return '密碼錯誤，如忘記請使用「忘記密碼」。';
+                if (code === 'auth/too-many-requests') return '嘗試次數過多，已暫時封鎖，稍後再試。';
+                if (code === 'auth/operation-not-allowed') return '未啟用 Email/密碼登入，請聯繫系統管理員。';
+                if (code === 'auth/network-request-failed') return '網路異常，請檢查連線。';
+                return '';
+            };
+
             loginForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 showLoading(true);
-                const email = emailInput.value;
+                const email = emailInput.value.trim();
                 const password = passwordInput.value;
                 const loginError = document.getElementById('login-error');
                 loginError.textContent = '';
@@ -964,11 +979,38 @@
                 try {
                     await signInWithEmailAndPassword(auth, email, password);
                 } catch (error) {
-                    loginError.textContent = '登入失敗，請檢查帳號密碼。';
+                    console.error('login error', error);
+                    const msg = translateAuthError(error);
+                    loginError.textContent = msg || '登入失敗，請檢查帳號密碼。';
                 } finally {
                     showLoading(false);
                 }
             });
+
+            // Forgot password
+            const forgotPasswordBtn = document.getElementById('forgot-password-btn');
+            if (forgotPasswordBtn) {
+                forgotPasswordBtn.addEventListener('click', async () => {
+                    const email = emailInput.value.trim();
+                    const loginError = document.getElementById('login-error');
+                    loginError.textContent = '';
+                    if (!email) {
+                        loginError.textContent = '請先輸入您的電子郵件，再點選忘記密碼。';
+                        return;
+                    }
+                    showLoading(true);
+                    try {
+                        await sendPasswordResetEmail(auth, email);
+                        showToast('已寄出重設密碼通知信');
+                    } catch (error) {
+                        console.error('reset password error', error);
+                        const msg = translateAuthError(error);
+                        loginError.textContent = msg || '寄送重設密碼失敗，請稍後再試。';
+                    } finally {
+                        showLoading(false);
+                    }
+                });
+            }
             
             onAuthStateChanged(auth, (user) => {
                 cleanupListeners();
@@ -986,9 +1028,13 @@
                             } else {
                                 updateHeaderAvatar();
                             }
-                        } else { signOut(auth); }
+                        } else { 
+                            showToast('此帳號尚未初始化，請通知管理員建立人員資料', true);
+                            signOut(auth); 
+                        }
                     }, (error) => {
                         console.error("Error listening to user document:", error);
+                        showToast('讀取用戶資料失敗，請稍後再試', true);
                         signOut(auth);
                     });
                     state.activeListeners.push(unsubscribe);
@@ -6600,7 +6646,8 @@
                             const markerIcon = document.createElement('img');
                             markerIcon.src = user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${user.name.charAt(0)}`;
                             const roleColorMap = { '總幹事': 'border-amber-500', '秘書': 'border-purple-500', '保全': 'border-green-800', '清潔': 'border-pink-400', '機電': 'border-blue-500' };
-                            const roleBorderClass = roleColorMap[(user.role || '').trim()] || 'border-white';
+const titleKey = ((user.applicationTitle || user.jobTitle || user.role || '').trim());
+const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                             markerIcon.className = `w-9 h-9 rounded-full border-2 ${roleBorderClass} shadow-md object-cover`;
                             const marker = new AdvancedMarkerElement({ position, map: state.groupMap, title: user.name, content: markerIcon });
                             const infoWindow = new google.maps.InfoWindow({ content: `
@@ -7762,7 +7809,8 @@
                                 const markerIcon = document.createElement('img');
                                 markerIcon.src = user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(user.name || 'U').charAt(0)}`;
                                 const roleColorMap = { '總幹事': 'border-amber-500', '秘書': 'border-purple-500', '保全': 'border-green-800', '清潔': 'border-pink-400', '機電': 'border-blue-500' };
-                                const roleBorderClass = roleColorMap[(user.role || '').trim()] || null;
+const titleKey = ((user.applicationTitle || user.jobTitle || user.role || '').trim());
+const roleBorderClass = roleColorMap[titleKey] || null;
                                 const borderClass = roleBorderClass || (insideRange === true ? 'border-green-500' : (insideRange === false ? 'border-red-500' : 'border-white'));
                                 markerIcon.className = `w-9 h-9 rounded-full border-2 ${borderClass} shadow-md object-cover`;
 
@@ -8323,6 +8371,24 @@
                                         </button>
                                     </div>
                                 </div>
+
+                                <!-- 補建使用者文件（單筆/批次） -->
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <label class="text-gray-700 font-medium">補建使用者文件</label>
+                                        <p class="text-sm text-gray-500">從申請資料補齊 users 文件（單筆或批次）</p>
+                                    </div>
+                                    <div class="flex space-x-2 items-center">
+                                        <input type="email" id="backfill-email-input" class="border rounded-md px-2 py-1 w-56" placeholder="輸入 Email">
+                                        <button id="backfill-by-email-btn" class="bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 flex items-center">
+                                            <i data-lucide="user-plus" class="w-4 h-4 mr-2"></i>補齊單筆
+                                        </button>
+                                        <button id="batch-backfill-users-btn" class="bg-purple-600 text-white px-3 py-2 rounded-md hover:bg-purple-700 flex items-center">
+                                            <i data-lucide="refresh-ccw" class="w-4 h-4 mr-2"></i>批次補齊
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <div id="overtime-results" class="hidden">
                                     <div class="bg-yellow-50 border border-yellow-200 rounded-md p-3">
                                         <h4 class="font-medium text-yellow-800 mb-2">超時員工列表</h4>
@@ -8353,6 +8419,168 @@
                     </div>`;
                 
                 lucide.createIcons();
+
+                // 顯示管理員區塊（管理員或審核角色可見）
+                if (typeof window.checkReviewerStatus === 'function') {
+                    window.checkReviewerStatus().then(isReviewer => {
+                        const adminSection = document.getElementById('admin-overtime-section');
+                        if (adminSection) adminSection.style.display = isReviewer ? 'block' : 'none';
+                    }).catch(() => {});
+                }
+
+                // 別名與工具
+                const dbRef = window.__db;
+                const { doc: fsDoc, getDoc: fsGetDoc, setDoc: fsSetDoc, updateDoc: fsUpdateDoc, collection: fsCollection, query: fsQuery, where: fsWhere, getDocs: fsGetDocs, serverTimestamp: fsServerTimestamp } = window.__fs || {};
+                const authRef = window.__auth;
+
+                // 權限安全的欄位值
+                function normalizeLicense(lic) {
+                    const allowed = ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照'];
+                    return allowed.includes(lic || '') ? lic : '無';
+                }
+
+                async function resolveCommunitiesByCode(code) {
+                    if (!dbRef || !fsCollection || !fsQuery || !fsWhere || !fsGetDocs) return [];
+                    if (!code) return [];
+                    try {
+                        const qs = await fsGetDocs(fsQuery(fsCollection(dbRef, 'communities'), fsWhere('code', '==', code)));
+                        const ids = [];
+                        qs.forEach(d => ids.push(d.id));
+                        return ids;
+                    } catch (_) { return []; }
+                }
+
+                async function backfillByEmail() {
+                    try {
+                        const emailInput = document.getElementById('backfill-email-input');
+                        const email = (emailInput?.value || '').trim();
+                        if (!email) { showToast('請輸入 Email', true); return; }
+                        showLoading(true);
+
+                        // 取得申請資料（若存在）
+                        let app = null;
+                        if (dbRef && fsCollection && fsQuery && fsWhere && fsGetDocs) {
+                            const appsCol = fsCollection(dbRef, 'accountApplications');
+                            const qs = await fsGetDocs(fsQuery(appsCol, fsWhere('email', '==', email)));
+                            let latest = null;
+                            qs.forEach(snap => {
+                                const data = snap.data();
+                                const item = { id: snap.id, ...data };
+                                if (!latest) latest = item; else latest = item; // 不排序，保留最後一筆
+                            });
+                            app = latest;
+                        }
+
+                        // 找使用者 UID
+                        let targetUserId = null;
+                        if (dbRef && fsCollection && fsQuery && fsWhere && fsGetDocs) {
+                            const usersCol = fsCollection(dbRef, 'users');
+                            const uq = await fsGetDocs(fsQuery(usersCol, fsWhere('email', '==', email)));
+                            if (!uq.empty) {
+                                targetUserId = uq.docs[0].id;
+                            }
+                        }
+                        if (!targetUserId && app && app.convertedUserId) targetUserId = app.convertedUserId;
+                        if (!targetUserId) {
+                            showToast('找不到使用者 UID，請先用核准流程建立 Auth 帳號', true);
+                            return;
+                        }
+
+                        // 準備 users 文件資料
+                        const serviceCommunities = await resolveCommunitiesByCode(app?.serviceCommunityCode || '');
+                        const userDoc = {
+                            name: app?.name || email,
+                            phone: app?.phone || '',
+                            email,
+                            role: 'user',
+                            jobTitle: app?.applicationTitle || '',
+                            serviceCommunities,
+                            homeAddress: app?.homeAddress || '',
+                            birthDate: app?.birthDate || '',
+                            idNumber: app?.idNumber || '',
+                            license: normalizeLicense(app?.license),
+                            serviceCommunityCode: app?.serviceCommunityCode || '',
+                            avatarUrl: app?.avatarUrl || null,
+                            points: 0,
+                            status: '未打卡',
+                            createdAt: fsServerTimestamp ? fsServerTimestamp() : new Date(),
+                        };
+
+                        if (!dbRef || !fsDoc || !fsSetDoc) { showToast('環境未就緒，請稍後再試', true); return; }
+                        await fsSetDoc(fsDoc(dbRef, 'users', targetUserId), userDoc, { merge: true });
+
+                        // 同步申請狀態與對應 UID（若有申請）
+                        if (app && fsUpdateDoc && fsDoc) {
+                            const updates = {
+                                status: 'approved',
+                                convertedUserId: targetUserId,
+                                reviewerId: authRef?.currentUser?.uid || '',
+                                reviewedAt: fsServerTimestamp ? fsServerTimestamp() : new Date(),
+                                reviewNotes: '補齊建立'
+                            };
+                            await fsUpdateDoc(fsDoc(dbRef, 'accountApplications', app.id), updates);
+                        }
+
+                        showToast('已補齊使用者文件');
+                    } catch (err) {
+                        console.error('backfillByEmail error', err);
+                        showToast('補齊失敗：' + (err?.message || '未知錯誤'), true);
+                    } finally { showLoading(false); }
+                }
+
+                async function batchBackfillUsers() {
+                    try {
+                        showLoading(true);
+                        if (!dbRef || !fsCollection || !fsQuery || !fsWhere || !fsGetDocs || !fsGetDoc || !fsSetDoc || !fsDoc) {
+                            showToast('環境未就緒，請稍後再試', true); return;
+                        }
+                        const appsCol = fsCollection(dbRef, 'accountApplications');
+                        const qs = await fsGetDocs(fsQuery(appsCol, fsWhere('status', '==', 'approved')));
+                        let done = 0, skipped = 0;
+                        for (const docSnap of qs.docs) {
+                            const app = { id: docSnap.id, ...docSnap.data() };
+                            const uid = app.convertedUserId;
+                            if (!uid) { skipped++; continue; }
+                            const userRef = fsDoc(dbRef, 'users', uid);
+                            const userSnap = await fsGetDoc(userRef);
+                            if (userSnap.exists()) { skipped++; continue; }
+                            const serviceCommunities = await resolveCommunitiesByCode(app?.serviceCommunityCode || '');
+                            const userDoc = {
+                                name: app?.name || app?.email || '未命名',
+                                phone: app?.phone || '',
+                                email: app?.email || '',
+                                role: 'user',
+                                jobTitle: app?.applicationTitle || '',
+                                serviceCommunities,
+                                homeAddress: app?.homeAddress || '',
+                                birthDate: app?.birthDate || '',
+                                idNumber: app?.idNumber || '',
+                                license: normalizeLicense(app?.license),
+                                serviceCommunityCode: app?.serviceCommunityCode || '',
+                                avatarUrl: app?.avatarUrl || null,
+                                points: 0,
+                                status: '未打卡',
+                                createdAt: fsServerTimestamp ? fsServerTimestamp() : new Date(),
+                            };
+                            await fsSetDoc(userRef, userDoc, { merge: true });
+                            done++;
+                        }
+                        if (done > 0) {
+                            showToast(`批次補齊完成：${done} 筆，略過 ${skipped} 筆`);
+                        } else {
+                            showToast('沒有需要補齊的帳號');
+                        }
+                    } catch (err) {
+                        console.error('batchBackfillUsers error', err);
+                        showToast('批次補齊失敗：' + (err?.message || '未知錯誤'), true);
+                    } finally { showLoading(false); }
+                }
+
+                // 綁定按鈕事件
+                const backfillEmailBtn = document.getElementById('backfill-by-email-btn');
+                if (backfillEmailBtn) backfillEmailBtn.addEventListener('click', backfillByEmail);
+                const batchBtn = document.getElementById('batch-backfill-users-btn');
+                if (batchBtn) batchBtn.addEventListener('click', batchBackfillUsers);
                 
                 // 從 Firebase 讀取設定
                 const settingsRef = doc(db, "settings", "general");
@@ -10101,7 +10329,7 @@
                     const jobTitle = document.getElementById('user-title')?.value || '';
                     const employmentStatus = document.getElementById('user-employment-status')?.value || '';
                     const email = document.getElementById('user-email').value;
-                    const role = document.getElementById('user-role').value;
+                    const rawRole = document.getElementById('user-role').value;
                     const homeAddress = document.getElementById('user-address')?.value || '';
                     const birthDate = document.getElementById('user-birthdate')?.value || '';
                     const idNumber = document.getElementById('user-idnumber')?.value || '';
@@ -10116,7 +10344,12 @@
                     // 收集服務社區
                     const scChecks = modal.querySelectorAll('input[name="service-community"]');
                     const serviceCommunities = Array.from(scChecks).filter(c => c.checked).map(c => c.value);
-                    const updateData = { name, phone, role, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode, bloodType, emergencyName, emergencyRelation, emergencyPhone, jobTitle, employmentStatus };
+                    // 權限角色與職務映射：一般員工的權限一律為 user，職務記錄在 applicationTitle
+                    const titleRoles = new Set(['總幹事','秘書','保全','清潔','機電','field']);
+                    const permissionRole = (['admin','hr','manager','junior_manager','community_admin','user'].includes(rawRole)) ? rawRole : 'user';
+                    const applicationTitle = titleRoles.has(rawRole) ? (rawRole === 'field' ? '' : rawRole) : '';
+                    const updateData = { name, phone, role: permissionRole, email, serviceCommunities, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode, bloodType, emergencyName, emergencyRelation, emergencyPhone, jobTitle, employmentStatus };
+                    if (applicationTitle) updateData.applicationTitle = applicationTitle;
 
                     try {
                         let targetUserId = isEditing ? user.id : null;
