@@ -6938,7 +6938,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             
             function renderTrackingMap(container) {
                 container.innerHTML = `
-                    <div class="relative w-full min-h-[336px] md:min-h-[416px]">
+                    <div class="sticky top-[50px] z-20 w-full min-h-[336px] md:min-h-[416px]">
                         <div id="tracking-map" class="w-full h-full min-h-[336px] md:min-h-[416px]"></div>
                         <div id="tracking-map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
                         <button id="tracking-map-center-btn" class="absolute top-3 right-3 z-10 bg-white text-gray-700 border border-gray-300 rounded-full shadow px-3 py-2 flex items-center hover:bg-gray-50">
@@ -7019,22 +7019,18 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 }
 
                 // 清理舊的中心標記與半徑圈
-                try { if (state.trackingCenterMarker) state.trackingCenterMarker.map = null; } catch (_) {}
+                try {
+                    if (state.trackingCenterMarker?.setMap) { state.trackingCenterMarker.setMap(null); }
+                    else if (state.trackingCenterMarker) { state.trackingCenterMarker.map = null; }
+                } catch (_) {}
                 try { if (state.trackingRadiusCircle) state.trackingRadiusCircle.setMap(null); } catch (_) {}
 
-                // 在社區中心點放置圖示
-                const centerIcon = document.createElement('div');
-                centerIcon.className = 'w-10 h-10 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center';
-                const innerDot = document.createElement('div');
-                innerDot.className = 'w-3 h-3 rounded-full bg-red-600 border-2 border-white';
-                centerIcon.appendChild(innerDot);
-
-                state.trackingCenterMarker = new AdvancedMarkerElement({
+                // 在社區中心點放置 Google Maps 經典紅標
+                state.trackingCenterMarker = new google.maps.Marker({
                     position: mapCenter,
                     map: state.trackingMap,
                     title: '社區中心',
-                    content: centerIcon,
-                    zIndex: 1000
+                    icon: 'https://maps.gstatic.com/mapfiles/api-3/images/spotlight-poi2_hdpi.png'
                 });
 
                 // 標示社區打卡半徑
@@ -7713,6 +7709,14 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                             return matchById || matchByCode;
                         });
                     }
+
+                    // 僅顯示指定角色（總幹事、秘書、保全、清潔、機電）
+                    const allowedRoles = ['總幹事','秘書','保全','清潔','機電'];
+                    const getEffectiveRole = (u) => {
+                        const jt = (u.jobTitle || u.applicationTitle || '').trim();
+                        return jt || (u.role || '');
+                    };
+                    baseList = baseList.filter(u => allowedRoles.includes(getEffectiveRole(u)));
 
                     if (baseList.length === 0) {
                         userListEl.innerHTML = `<p class="text-center text-gray-500 p-2">該社區目前沒有可追蹤的人員</p>`;
