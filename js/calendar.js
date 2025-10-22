@@ -75,6 +75,7 @@ function renderCalendarOverview(container) {
                         </button>
                     </div>
                 </div>
+                <div id="role-filter-bar" class="flex flex-wrap items-center gap-2 mb-2"></div>
                 <div id="calendar-grid" class="grid grid-cols-7 gap-1">
                     <!-- 月曆將在這裡動態生成 -->
                 </div>
@@ -698,37 +699,78 @@ function fetchHolidaySettingsOnce() {
     });
 }
 
-// 新增：載入並渲染依職務分組的班表列表
-async function loadRoleRosterList() {
+// 新增：載入並渲染依職務分組的班表列表（支援職務計數與篩選）
+async function loadRoleRosterList(selectedRole = null) {
     try {
         const container = document.getElementById('role-roster-list');
+        const filterBar = document.getElementById('role-filter-bar');
         if (!container) return;
         const fs = window.__fs;
         const db = window.__db;
-        if (!fs || !db || !fs.collection || !fs.getDocs) {
-            container.innerHTML = '<div class="text-sm text-gray-500">目前無法讀取成員資料</div>';
-            return;
-        }
         const roles = ['總幹事','秘書','保全','清潔','機電'];
-        const roster = Object.fromEntries(roles.map(r => [r, []]));
-        const { collection, getDocs } = fs;
-        const usersRef = collection(db, 'users');
-        const snap = await getDocs(usersRef);
-        snap.forEach(doc => {
-            const data = doc.data() || {};
-            const title = (data.jobTitle || data.applicationTitle || '').trim();
-            if (!title) return;
-            if (roles.includes(title)) {
-                roster[title].push({
-                    name: data.name || data.displayName || '（未填姓名）',
-                    email: data.email || '',
-                    phone: data.phone || '',
-                    serviceCommunities: Array.isArray(data.serviceCommunities) ? data.serviceCommunities : []
-                });
+
+        // 先使用快取避免每次重新抓取
+        let roster = window.__roleRosterCache;
+        if (!roster) {
+            if (!fs || !db || !fs.collection || !fs.getDocs) {
+                container.innerHTML = '<div class="text-sm text-gray-500">目前無法讀取成員資料</div>';
+                return;
             }
-        });
+            roster = Object.fromEntries(roles.map(r => [r, []]));
+            const { collection, getDocs } = fs;
+            const usersRef = collection(db, 'users');
+            const snap = await getDocs(usersRef);
+            snap.forEach(doc => {
+                const data = doc.data() || {};
+                const title = (data.jobTitle || data.applicationTitle || '').trim();
+                if (!title) return;
+                if (roles.includes(title)) {
+                    roster[title].push({
+                        name: data.name || data.displayName || '（未填姓名）',
+                        email: data.email || '',
+                        phone: data.phone || '',
+                        serviceCommunities: Array.isArray(data.serviceCommunities) ? data.serviceCommunities : []
+                    });
+                }
+            });
+            window.__roleRosterCache = roster;
+        }
+
+        // 計算各職務人數
+        const counts = Object.fromEntries(roles.map(r => [r, (roster[r] || []).length]));
+
+        // 渲染月曆上方的職務篩選按鈕列
+        if (filterBar) {
+            filterBar.innerHTML = roles.map(role => {
+                const count = counts[role];
+                const disabled = count === 0;
+                const active = selectedRole === role;
+                const base = 'px-3 py-1 rounded-md text-sm border';
+                const state = disabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' :
+                                active ? 'bg-red-100 text-red-600 border-red-300' :
+                                         'bg-white text-gray-700 border-gray-300 hover:bg-gray-50';
+                return `<button data-role="${role}" class="${base} ${state}">${role}（${count}）</button>`;
+            }).join('');
+
+            // 綁定點擊事件（0人時不綁定）
+            filterBar.querySelectorAll('button[data-role]').forEach(btn => {
+                const role = btn.dataset.role;
+                const count = counts[role];
+                const disabled = count === 0;
+                if (disabled) return;
+                btn.addEventListener('click', () => {
+                    const current = window.__currentRoleFilter || null;
+                    const next = (current === role) ? null : role; // 再點同一職務則回到「全部」
+                    window.__currentRoleFilter = next;
+                    loadRoleRosterList(next);
+                });
+            });
+        }
+
+        // 渲染班表列表（預設全部，若選擇某職務則只顯示該組）
         container.innerHTML = '';
-        roles.forEach(role => {
+        const rolesToRender = selectedRole ? [selectedRole] : roles;
+        rolesToRender.forEach(role => {
             const group = document.createElement('div');
             group.className = 'border rounded-md p-3';
             const titleEl = document.createElement('h4');
