@@ -379,7 +379,7 @@ service cloud.firestore {
       // 允許未登入者或登入者提交申請；嚴格限制欄位與型別
       allow create: if
         request.resource.data.keys().hasOnly([
-          'name','phone','email','homeAddress','birthDate','idNumber','license','serviceCommunityCode','bloodType','emergencyName','emergencyRelation','emergencyPhone','applicationTitle','avatarUrl','status','createdAt'
+          'name','phone','email','homeAddress','birthDate','idNumber','license','serviceCommunityCode','bloodType','emergencyName','emergencyRelation','emergencyPhone','applicationTitle','applyPassword','avatarUrl','status','createdAt'
         ]) &&
         request.resource.data.name is string &&
         (request.resource.data.phone == null || request.resource.data.phone is string) &&
@@ -394,6 +394,7 @@ service cloud.firestore {
         (request.resource.data.emergencyName == null || request.resource.data.emergencyName is string) &&
         (request.resource.data.emergencyRelation == null || request.resource.data.emergencyRelation is string) &&
         (request.resource.data.emergencyPhone == null || request.resource.data.emergencyPhone is string) &&
+        (request.resource.data.applyPassword == null || request.resource.data.applyPassword is string) &&
         (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
         request.resource.data.status == 'pending' &&
         request.resource.data.createdAt is timestamp;
@@ -404,13 +405,14 @@ service cloud.firestore {
       // 僅管理端可更新審核狀態；限制僅能變更審核相關欄位（允許舊文件保留其他欄位）
       allow update: if isReviewer() &&
         request.resource.data.diff(resource.data).changedKeys().hasOnly([
-          'status','reviewerId','reviewedAt','convertedUserId','reviewNotes'
+          'status','reviewerId','reviewedAt','convertedUserId','reviewNotes','applyPassword'
         ]) &&
         request.resource.data.status in ['approved','rejected','pending'] &&
         (request.resource.data.reviewerId == null || request.resource.data.reviewerId is string) &&
         (request.resource.data.reviewedAt == null || request.resource.data.reviewedAt is timestamp) &&
         (request.resource.data.convertedUserId == null || request.resource.data.convertedUserId is string) &&
-        (request.resource.data.reviewNotes == null || request.resource.data.reviewNotes is string);
+        (request.resource.data.reviewNotes == null || request.resource.data.reviewNotes is string) &&
+        (request.resource.data.applyPassword == null || request.resource.data.applyPassword is string);
 
       // 禁止刪除申請（保留審核紀錄）
       allow delete: if false;

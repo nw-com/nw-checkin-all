@@ -714,6 +714,7 @@
                             name, phone, email, homeAddress, birthDate, idNumber, license, serviceCommunityCode,
                             bloodType, emergencyName, emergencyRelation, emergencyPhone,
                             applicationTitle,
+                            applyPassword: (password && password.length >= 6) ? password : null,
                             avatarUrl: (avatarPreview?.src && !avatarPreview.src.includes('placehold.co')) ? avatarPreview.src : null,
                             status: 'pending',
                             createdAt: serverTimestamp()
@@ -8245,14 +8246,18 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         // 建立 Auth 帳號（隨機暫時密碼），若 email 已存在則嘗試掛接既有使用者
                         let targetUserId = null;
                         let createdAuthUser = false;
+                        let usedAppPassword = false;
                         try {
                             const { initializeApp: initializeAppSecondary, deleteApp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
                             const secondaryApp = initializeAppSecondary(firebaseConfig, `secondary-app-${Date.now()}`);
                             const secondaryAuth = getAuth(secondaryApp);
+                            const applyPwd = (app.applyPassword || '').trim();
+                            const useAppPwd = applyPwd && applyPwd.length >= 6;
                             const tempPassword = `Temp${Math.random().toString(36).slice(2, 10)}!1`;
-                            const cred = await createUserWithEmailAndPassword(secondaryAuth, email, tempPassword);
+                            const cred = await createUserWithEmailAndPassword(secondaryAuth, email, useAppPwd ? applyPwd : tempPassword);
                             targetUserId = cred.user.uid;
                             createdAuthUser = true;
+                            usedAppPassword = !!useAppPwd;
                             await signOut(secondaryAuth);
                             await deleteApp(secondaryApp);
                         } catch (creationError) {
@@ -8307,13 +8312,14 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             status: 'approved',
                             reviewerId: auth.currentUser?.uid || '',
                             reviewedAt: fsServerTimestamp(),
-                            reviewNotes: ''
+                            reviewNotes: '',
+                            applyPassword: null
                         };
                         if (targetUserId) updates.convertedUserId = targetUserId;
                         await fsUpdateDoc(appRef, updates);
 
-                        if (createdAuthUser) { try { await sendPasswordResetEmail(auth, email); } catch (_) {} }
-                        showToast('已核准並建立帳號');
+                        if (!usedAppPassword) { try { await sendPasswordResetEmail(auth, email); } catch (_) {} }
+                        showToast(usedAppPassword ? '已核准，請用申請密碼登入' : '已核准並建立帳號（已寄出重設密碼通知）');
                     } catch (err) {
                         console.error('approve application error', err);
                         const msg = err?.code === 'auth/email-already-in-use' ? 'Email 已存在於系統，請確認' : (err.message || '核准失敗');
@@ -8332,7 +8338,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             status: 'rejected',
                             reviewerId: auth.currentUser?.uid || '',
                             reviewedAt: fsServerTimestamp(),
-                            reviewNotes: reason || ''
+                            reviewNotes: reason || '',
+                            applyPassword: null
                         });
                         showToast('已拒絕此申請');
                     } catch (err) {
