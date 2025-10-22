@@ -1735,20 +1735,29 @@
                         return age;
                     };
 
-                    // 僅顯示指定角色：總幹事、秘書、保全、清潔、機電（支援 jobTitle/applicationTitle）
+                    // 僅顯示指定角色：總幹事、秘書、保全、清潔、機電（支援 role、jobTitle、applicationTitle 與同義詞）
                     const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
-                    let baseUsers = users.filter(u => {
-                        const roleTag = (u.role || '').trim();
-                        const titleTag = ((u.jobTitle || u.applicationTitle || '') + '').trim();
-                        return allowedRoles.has(roleTag) || allowedRoles.has(titleTag);
-                    });
+                    const resolveRole = (u) => {
+                        const tags = [u.role, u.jobTitle, u.applicationTitle].map(x => ((x||'') + '').trim());
+                        for (const t of tags) {
+                            if (!t) continue;
+                            if (allowedRoles.has(t)) return t;
+                            if (t.includes('保全')) return '保全';
+                            if (t.includes('清潔')) return '清潔';
+                            if (t.includes('機電')) return '機電';
+                            if (t.includes('總幹事')) return '總幹事';
+                            if (t.includes('秘書')) return '秘書';
+                        }
+                        return null;
+                    };
+                    let baseUsers = users.filter(u => resolveRole(u));
                     // 人員依姓氏筆畫少→多（先排序再篩選顯示）
                     baseUsers.sort(compareUsersBySurnameStroke);
 
                     let selectedRole = null; // '總幹事' | '秘書' | '保全' | '清潔' | '機電' | null
 
                     const renderList = () => {
-                        const filtered = selectedRole ? baseUsers.filter(u => (u.role || '') === selectedRole) : baseUsers;
+                        const filtered = selectedRole ? baseUsers.filter(u => resolveRole(u) === selectedRole) : baseUsers;
                         container.innerHTML = `
                             <div class="p-4 space-y-3">
                                 <div class="flex items-center mb-2">
@@ -5679,12 +5688,12 @@
                         const todayIso = fmtYMD(new Date());
                         const docData = pageState.monthDocsMap[iso];
                         const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                        // 判斷日狀態：異常（未打卡）、已完成、有排班
+                        // 狀態：異常（未打卡/未上哨）、已完成、有排班
                         const statuses = shifts.map(s => computeShiftStatus(iso, s));
                         const hasShifts = (shifts.length > 0) || !!docData?.isScheduledDay;
-                        const anyAbnormal = statuses.some(st => st === '未上哨' || st === '已下班-未打卡');
+                        const anyAbnormal = statuses.some(st => st === '未上哨');
                         const allCompleted = hasShifts && statuses.length > 0 && statuses.every(st => st === '已完成');
-                        // 標記斷續（班段合併後超過一段）
+                        // 斷續標章
                         let segCount = 0;
                         try {
                             const mins = shifts.map(s=>({ start: parseHM(s.start), end: parseHM(s.end) }));
@@ -5693,17 +5702,28 @@
                         const discontinuity = segCount > 1;
                         const badgeText = discontinuity ? '斷續' : '';
                         const badge = badgeText ? `<span class="text-[10px] text-blue-600">${badgeText}</span>` : '';
+
                         const isSelected = iso === selectedIso;
                         const isToday = iso === todayIso;
-                        // 背景：今日淺紅，選取淺綠；其他維持白底或灰底（跨月）
-                        const bgCls = cell.inMonth ? (isSelected ? 'bg-green-50' : (isToday ? 'bg-red-50' : 'bg-white')) : 'bg-gray-50';
-                        // 邊框：異常紅、全數完成綠、有排班藍、無排班無框
+                        // 角色框線（僅在選擇了角色過濾時，且該日有該角色的班表）
+                        const hasRole = !!pageState.roleFilter && Array.isArray(shifts) && shifts.some(s => ((s.role || '保全') === pageState.roleFilter));
+                        const roleBorderMap = { '總幹事':'border-amber-500','秘書':'border-purple-500','保全':'border-green-700','清潔':'border-pink-500','機電':'border-blue-500' };
+
+                        // 底色：異常紅、完成綠、有排班藍；跨月灰；無排班白
+                        let bgCls = 'bg-white';
+                        if (!cell.inMonth) bgCls = 'bg-gray-50';
+                        else if (anyAbnormal) bgCls = 'bg-red-100';
+                        else if (allCompleted) bgCls = 'bg-green-100';
+                        else if (hasShifts) bgCls = 'bg-blue-100';
+
+                        // 框線：優先順序：選取淺綠 > 今日淺紅 > 角色框線
                         let borderCls = '';
-                        if (cell.inMonth && hasShifts) {
-                            if (anyAbnormal) borderCls = 'border-2 border-red-500';
-                            else if (allCompleted) borderCls = 'border-2 border-green-500';
-                            else borderCls = 'border-2 border-blue-500';
+                        if (cell.inMonth) {
+                            if (isSelected) borderCls = 'border-2 border-green-300';
+                            else if (isToday) borderCls = 'border-2 border-red-300';
+                            else if (hasRole) borderCls = `border-2 ${roleBorderMap[pageState.roleFilter] || 'border-gray-300'}`;
                         }
+
                         const textTone = cell.inMonth ? 'text-gray-900' : 'text-gray-400';
                         const cls = `${bgCls} ${textTone} ${borderCls} rounded p-2 text-xs h-[30px] flex flex-col`;
                         return `<div class="${cls}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
