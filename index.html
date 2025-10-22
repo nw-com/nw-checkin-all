@@ -5676,9 +5676,15 @@
                     }
                     grid.innerHTML = cells.map(cell => {
                         const iso = fmtYMD(cell.date);
+                        const todayIso = fmtYMD(new Date());
                         const docData = pageState.monthDocsMap[iso];
                         const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                        const cov = coverageMinutes(shifts);
+                        // 判斷日狀態：異常（未打卡）、已完成、有排班
+                        const statuses = shifts.map(s => computeShiftStatus(iso, s));
+                        const hasShifts = (shifts.length > 0) || !!docData?.isScheduledDay;
+                        const anyAbnormal = statuses.some(st => st === '未上哨' || st === '已下班-未打卡');
+                        const allCompleted = hasShifts && statuses.length > 0 && statuses.every(st => st === '已完成');
+                        // 標記斷續（班段合併後超過一段）
                         let segCount = 0;
                         try {
                             const mins = shifts.map(s=>({ start: parseHM(s.start), end: parseHM(s.end) }));
@@ -5687,20 +5693,20 @@
                         const discontinuity = segCount > 1;
                         const badgeText = discontinuity ? '斷續' : '';
                         const badge = badgeText ? `<span class="text-[10px] text-blue-600">${badgeText}</span>` : '';
-                        const bgStyle = (()=>{
-                            if (!cell.inMonth) return '';
-                            if (!cov) return '';
-                            if (cov >= 18*60) return 'background-color:#A7F3D0;';
-                            if (cov >= 12*60) return 'background-color:#D1FAE5;';
-                            if (cov >= 6*60) return 'background-color:#FEF3C7;';
-                            return 'background-color:#FFF7ED;';
-                        })();
                         const isSelected = iso === selectedIso;
-                        const hasRole = !!pageState.roleFilter && Array.isArray(shifts) && shifts.some(s => ((s.role || '保全') === pageState.roleFilter));
-                        const roleBorderMap = { '總幹事':'border-amber-500','秘書':'border-purple-500','保全':'border-green-700','清潔':'border-pink-500','機電':'border-blue-500' };
-                        const roleCls = hasRole ? `border-2 ${roleBorderMap[pageState.roleFilter] || 'border-gray-400'}` : '';
-                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500': roleCls} hover:bg-red-50 rounded p-2 text-xs h-[30px] flex flex-col ${cell.inMonth?'bg-white':''}`;
-                        return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
+                        const isToday = iso === todayIso;
+                        // 背景：今日淺紅，選取淺綠；其他維持白底或灰底（跨月）
+                        const bgCls = cell.inMonth ? (isSelected ? 'bg-green-50' : (isToday ? 'bg-red-50' : 'bg-white')) : 'bg-gray-50';
+                        // 邊框：異常紅、全數完成綠、有排班藍、無排班無框
+                        let borderCls = '';
+                        if (cell.inMonth && hasShifts) {
+                            if (anyAbnormal) borderCls = 'border-2 border-red-500';
+                            else if (allCompleted) borderCls = 'border-2 border-green-500';
+                            else borderCls = 'border-2 border-blue-500';
+                        }
+                        const textTone = cell.inMonth ? 'text-gray-900' : 'text-gray-400';
+                        const cls = `${bgCls} ${textTone} ${borderCls} rounded p-2 text-xs h-[30px] flex flex-col`;
+                        return `<div class="${cls}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
                     }).join('');
                     grid.querySelectorAll('[data-iso]').forEach(el=>{
                         el.addEventListener('click', ()=>{
