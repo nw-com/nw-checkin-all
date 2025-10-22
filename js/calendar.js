@@ -709,7 +709,21 @@ async function loadRoleRosterList(selectedRole = null) {
         const db = window.__db;
         const roles = ['總幹事','秘書','保全','清潔','機電'];
 
-        // 先使用快取避免每次重新抓取
+        // 取得目前社區脈絡（優先使用 URL 的 communityId；若頁面有設定 currentCommunity 則優先）
+        let currentCommId = null;
+        let currentCommCode = null;
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const qp = params.get('communityId') || null;
+            // URL 可能帶的是 id 或 code，兩者都嘗試
+            currentCommId = qp;
+            currentCommCode = qp;
+            // 若 index 有維護 currentCommunity，則優先使用
+            currentCommId = (window?.state?.currentCommunity?.id) || currentCommId;
+            currentCommCode = (window?.state?.currentCommunity?.code) || (window?.state?.currentCommunity?.communityCode) || currentCommCode;
+        } catch (_) {}
+
+        // 先使用快取避免每次重新抓取（快取的是「所有社區」的原始名單）
         let roster = window.__roleRosterCache;
         if (!roster) {
             if (!fs || !db || !fs.collection || !fs.getDocs) {
@@ -725,21 +739,38 @@ async function loadRoleRosterList(selectedRole = null) {
                 const title = (data.jobTitle || data.applicationTitle || '').trim();
                 if (!title) return;
                 if (roles.includes(title)) {
+                    // 收集可用的社區資訊欄位（id 與 code 皆可能存在）
                     roster[title].push({
                         name: data.name || data.displayName || '（未填姓名）',
                         email: data.email || '',
                         phone: data.phone || '',
-                        serviceCommunities: Array.isArray(data.serviceCommunities) ? data.serviceCommunities : []
+                        serviceCommunities: Array.isArray(data.serviceCommunities) ? data.serviceCommunities : [],
+                        serviceCommunityCode: data.serviceCommunityCode || '',
+                        serviceCommunityCodes: Array.isArray(data.serviceCommunityCodes) ? data.serviceCommunityCodes : []
                     });
                 }
             });
             window.__roleRosterCache = roster;
         }
 
-        // 計算各職務人數
-        const counts = Object.fromEntries(roles.map(r => [r, (roster[r] || []).length]));
+        // 依目前社區過濾名單
+        const filterByCommunity = (members) => {
+            if (!currentCommId && !currentCommCode) return members || [];
+            return (members || []).filter(m => {
+                const ids = Array.isArray(m.serviceCommunities) ? m.serviceCommunities : [];
+                const codesArr = Array.isArray(m.serviceCommunityCodes) ? m.serviceCommunityCodes : [];
+                const codeSingle = m.serviceCommunityCode || '';
+                const byId = currentCommId ? ids.includes(currentCommId) : false;
+                const byCode = currentCommCode ? (codesArr.includes(currentCommCode) || codeSingle === currentCommCode) : false;
+                return byId || byCode;
+            });
+        };
 
-        // 渲染月曆上方的職務篩選按鈕列
+        // 產生「目前社區」的名單與計數
+        const filteredRoster = Object.fromEntries(roles.map(r => [r, filterByCommunity(roster[r])]));
+        const counts = Object.fromEntries(roles.map(r => [r, (filteredRoster[r] || []).length]));
+
+        // 渲染月曆上方的職務篩選按鈕列（數量為 0 的按鈕呈現灰色並不可點擊）
         if (filterBar) {
             filterBar.innerHTML = roles.map(role => {
                 const count = counts[role];
@@ -749,15 +780,14 @@ async function loadRoleRosterList(selectedRole = null) {
                 const state = disabled ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' :
                                 active ? 'bg-red-100 text-red-600 border-red-300' :
                                          'bg-white text-gray-700 border-gray-300 hover:bg-gray-50';
-                return `<button data-role="${role}" class="${base} ${state}">${role}（${count}）</button>`;
+                return `<button data-role="${role}" class="${base} ${state}" ${disabled ? 'disabled' : ''}>${role}（${count}）</button>`;
             }).join('');
 
-            // 綁定點擊事件（0人時不綁定）
+            // 綁定點擊事件（0 人時不綁定）
             filterBar.querySelectorAll('button[data-role]').forEach(btn => {
                 const role = btn.dataset.role;
                 const count = counts[role];
-                const disabled = count === 0;
-                if (disabled) return;
+                if (count === 0) return;
                 btn.addEventListener('click', () => {
                     const current = window.__currentRoleFilter || null;
                     const next = (current === role) ? null : role; // 再點同一職務則回到「全部」
@@ -767,7 +797,7 @@ async function loadRoleRosterList(selectedRole = null) {
             });
         }
 
-        // 渲染班表列表（預設全部，若選擇某職務則只顯示該組）
+        // 渲染班表列表（預設全部，若選擇某職務則只顯示該組；僅顯示目前社區的成員）
         container.innerHTML = '';
         const rolesToRender = selectedRole ? [selectedRole] : roles;
         rolesToRender.forEach(role => {
@@ -777,7 +807,7 @@ async function loadRoleRosterList(selectedRole = null) {
             titleEl.className = 'font-semibold text-gray-700 mb-2';
             titleEl.textContent = role;
             group.appendChild(titleEl);
-            const members = roster[role];
+            const members = filteredRoster[role];
             if (!members || members.length === 0) {
                 const empty = document.createElement('div');
                 empty.className = 'text-sm text-gray-500';
