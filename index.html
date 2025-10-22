@@ -7058,7 +7058,14 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             function renderTrackingAttendance(container, params = {}) {
                 container.innerHTML = `
                     <div class="p-4 space-y-4">
-                        <div class="flex flex-wrap items-center gap-4 mb-4">
+                        <div class="relative w-full min-h-[420px] md:min-h-[520px]">
+                            <div id="tracking-map" class="w-full h-full min-h-[420px] md:min-h-[520px]"></div>
+                            <div id="tracking-map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
+                            <button id="tracking-map-center-btn" class="absolute top-3 right-3 z-10 bg-white text-gray-700 border border-gray-300 rounded-full shadow px-3 py-2 flex items-center hover:bg-gray-50">
+                                <i data-lucide="focus" class="w-4 h-4 mr-2"></i>回到社區
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-4 mb-4 mt-4">
                             <div class="flex items-center space-x-2">
                                 <label for="user-select" class="text-sm font-medium">選擇人員:</label>
                                 <select id="user-select" class="border border-gray-300 rounded-md px-2 py-1">
@@ -7076,6 +7083,17 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                         </div>
                     </div>
                 `;
+                try { lucide.createIcons(); } catch(e) {}
+                if (state.googleMapsLoaded) {
+                    initTrackingMap();
+                } else {
+                    const interval = setInterval(() => {
+                        if (state.googleMapsLoaded) {
+                            clearInterval(interval);
+                            initTrackingMap();
+                        }
+                    }, 100);
+                }
                 
                 // 載入所有用戶
                 const { collection, getDocs } = window.__fs || {};
