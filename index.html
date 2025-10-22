@@ -7948,7 +7948,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const isHRPage = state.currentPage === 'hr';
                 const isGlobalSettings = state.currentPage === 'settings' || state.currentPage === 'navigation';
                 const rolesHR = ['總幹事','秘書','保全','清潔','機電'];
-                const rolesGlobal = ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'];
+                const rolesGlobal = ['admin','hr','manager','junior_manager','user','總幹事','秘書','保全','清潔','機電'];
                 const roleOpts = (isHRPage ? rolesHR : rolesGlobal)
                     .map(r => `<option value="${r}">${roleLabel(r)}</option>`)
                     .join('');
@@ -7997,6 +7997,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const roleSelect = document.getElementById('filter-role');
                 const communitySelect = document.getElementById('filter-community');
                 let communitiesCache = [];
+                const getEffectiveRole = (u) => {
+                    const jt = ((u?.jobTitle || u?.applicationTitle || '').trim());
+                    return isFieldLikeRole(jt) ? jt : (u?.role || 'user');
+                };
 
                 roleSelect.addEventListener('change', renderUserList);
                 if (isGlobalSettings && communitySelect) {
@@ -8029,7 +8033,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     }
                     const selectedRole = roleSelect.value || '';
                     const allowedRoles = isHRPage ? rolesHR : rolesGlobal;
-                    let filtered = allUsers.filter(u => selectedRole ? (u.role === selectedRole) : allowedRoles.includes(u.role));
+                    let filtered = allUsers.filter(u => {
+                        const eff = getEffectiveRole(u);
+                        return selectedRole ? (eff === selectedRole) : allowedRoles.includes(eff);
+                    });
 
                     if (isHRPage) {
                         // 依目前社區過濾服務成員（僅顯示服務該社區的人員）
@@ -8069,15 +8076,16 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     filtered.forEach(user => {
                         const userElement = document.createElement('div');
                         userElement.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
+                        const effRole = getEffectiveRole(user);
                         userElement.innerHTML = `
                             <div class="flex items-center">
                                 <img src="${user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(user.name||'?').charAt(0)}`}" class="w-10 h-10 rounded-full mr-3 object-cover">
                                 <div>
-                                    <p class="font-medium text-gray-800">${user.name || '(未命名)'}</p>
+                                    <p class="font-medium text-gray-800">${user.name || '(未命名)'} </p>
                                     <p class="text-sm text-gray-500">${user.email || ''}</p>
                                     <div class="flex items-center flex-wrap gap-2 mt-1">
                                         <p class="text-xs text-gray-400 mr-2">${user.phone || ''}</p>
-                                        <span class="text-xs px-2 py-1 rounded-full ${roleBadgeClass(user.role)}">${roleLabel(user.role)}</span>
+                                        <span class="text-xs px-2 py-1 rounded-full ${roleBadgeClass(effRole)}">${roleLabel(effRole)}</span>
                                     </div>
                                 </div>
                             </div>
