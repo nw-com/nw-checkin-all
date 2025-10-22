@@ -86,7 +86,15 @@ function renderCalendarOverview(container) {
                     <!-- 標註日期的行程與提醒將在這裡顯示 -->
                 </div>
             </div>
-    </div>`;
+            
+            <!-- 班表列表（依職務） -->
+            <div class="bg-white rounded-lg shadow-sm border p-4">
+                <h3 class="text-lg font-bold text-gray-800 mb-3">班表列表（總幹事、秘書、保全、清潔、機電）</h3>
+                <div id="role-roster-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- 依職務分組之人員列表將在此顯示 -->
+                </div>
+            </div>
+        </div>`;
     
     // 載入假日設定後生成月曆，讓假日套用灰底
     fetchHolidaySettingsOnce()
@@ -94,6 +102,8 @@ function renderCalendarOverview(container) {
         .finally(() => {
             generateCalendar(displayedDate.getFullYear(), displayedDate.getMonth());
             loadMarkedSchedule(displayedDate.getFullYear(), displayedDate.getMonth());
+            // 新增：載入班表列表
+            loadRoleRosterList();
         });
     
     // 月份切換事件
@@ -686,4 +696,68 @@ function fetchHolidaySettingsOnce() {
             reject(e);
         }
     });
+}
+
+// 新增：載入並渲染依職務分組的班表列表
+async function loadRoleRosterList() {
+    try {
+        const container = document.getElementById('role-roster-list');
+        if (!container) return;
+        const fs = window.__fs;
+        const db = window.__db;
+        if (!fs || !db || !fs.collection || !fs.getDocs) {
+            container.innerHTML = '<div class="text-sm text-gray-500">目前無法讀取成員資料</div>';
+            return;
+        }
+        const roles = ['總幹事','秘書','保全','清潔','機電'];
+        const roster = Object.fromEntries(roles.map(r => [r, []]));
+        const { collection, getDocs } = fs;
+        const usersRef = collection(db, 'users');
+        const snap = await getDocs(usersRef);
+        snap.forEach(doc => {
+            const data = doc.data() || {};
+            const title = (data.jobTitle || data.applicationTitle || '').trim();
+            if (!title) return;
+            if (roles.includes(title)) {
+                roster[title].push({
+                    name: data.name || data.displayName || '（未填姓名）',
+                    email: data.email || '',
+                    phone: data.phone || '',
+                    serviceCommunities: Array.isArray(data.serviceCommunities) ? data.serviceCommunities : []
+                });
+            }
+        });
+        container.innerHTML = '';
+        roles.forEach(role => {
+            const group = document.createElement('div');
+            group.className = 'border rounded-md p-3';
+            const titleEl = document.createElement('h4');
+            titleEl.className = 'font-semibold text-gray-700 mb-2';
+            titleEl.textContent = role;
+            group.appendChild(titleEl);
+            const members = roster[role];
+            if (!members || members.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'text-sm text-gray-500';
+                empty.textContent = '目前沒有成員';
+                group.appendChild(empty);
+            } else {
+                const ul = document.createElement('ul');
+                ul.className = 'space-y-1';
+                members.forEach(m => {
+                    const li = document.createElement('li');
+                    li.className = 'text-sm text-gray-700';
+                    const communities = m.serviceCommunities && m.serviceCommunities.length > 0 ? `（${m.serviceCommunities.join('、')}）` : '';
+                    li.textContent = `${m.name}${communities}`;
+                    ul.appendChild(li);
+                });
+                group.appendChild(ul);
+            }
+            container.appendChild(group);
+        });
+    } catch (e) {
+        console.error('載入班表列表失敗', e);
+        const container = document.getElementById('role-roster-list');
+        if (container) container.innerHTML = `<div class="text-sm text-red-600">載入失敗：${e.message || e}</div>`;
+    }
 }
