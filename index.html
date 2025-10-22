@@ -5838,7 +5838,7 @@
                         const day = String(d.getDate()).padStart(2, '0');
                         const hh = String(d.getHours()).padStart(2, '0');
                         const mm = String(d.getMinutes()).padStart(2, '0');
-                        return `${y}-${m}-${day} ${hh}:${mm}`;
+                        return `${y}/${m}/${day} ${hh}:${mm}`;
                     };
                     const filterIso = pageState.selectedDayIso || null;
                     const titleEl = document.getElementById('shift-list-title');
@@ -5881,7 +5881,7 @@
                                     <button class="ml-1 px-2 py-1 text-xs rounded bg-amber-500 text-white hover:bg-amber-600" data-share-month="${iso}__${idx}">分享(轉現金班)</button>
                                   </td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">
-                                    ${ (() => { const editorId = s.lastEditedBy || doc.updatedBy || ''; const editorName = editorId ? getUserNameById(editorId) : '—'; const tm = fmtDateTime(s.lastEditedAt || doc.updatedAt || doc.createdAt); return `帳號：${editorName}<br/>時間：${tm || '—'}`; })() }
+                                    ${ (() => { const editorId = s.lastEditedBy || doc.updatedBy || ''; const editorName = editorId ? getUserNameById(editorId) : '—'; const tm = fmtDateTime(s.lastEditedAt || doc.updatedAt || doc.createdAt); return `更新者：${editorName}<br/>更新時間：${tm || '—'}`; })() }
                                   </td>
                                 </tr>`);
                         });
