@@ -611,13 +611,6 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="apply-criminal" class="block text-sm font-medium text-gray-700">有無前科</label>
-                                    <select id="apply-criminal" class="w-full mt-1 px-3 py-2 border rounded-md">
-                                        <option value="無">無</option>
-                                        <option value="有">有</option>
-                                    </select>
-                                </div>
-                                <div>
                                     <label for="apply-service-code" class="block text-sm font-medium text-gray-700">服務社區代號 (手動輸入)</label>
                                     <input type="text" id="apply-service-code" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
@@ -693,7 +686,6 @@
                         const emergencyRelation = document.getElementById('apply-emergency-relation').value.trim();
                         const emergencyPhone = document.getElementById('apply-emergency-phone').value.trim();
                         const license = document.getElementById('apply-license').value;
-                        const hasCriminalRecord = document.getElementById('apply-criminal').value === '有';
                         const serviceCommunityCode = document.getElementById('apply-service-code').value.trim();
 
                         if (!name || !email) throw new Error('請填寫姓名與電子郵件');
@@ -703,7 +695,7 @@
                         }
 
                         const data = {
-                            name, phone, email, homeAddress, birthDate, idNumber, license, hasCriminalRecord, serviceCommunityCode,
+                            name, phone, email, homeAddress, birthDate, idNumber, license, serviceCommunityCode,
                             bloodType, emergencyName, emergencyRelation, emergencyPhone,
                             avatarUrl: (avatarPreview?.src && !avatarPreview.src.includes('placehold.co')) ? avatarPreview.src : null,
                             status: 'pending',
@@ -8087,7 +8079,6 @@
                         const el = document.createElement('div');
                         el.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
                         const licenseStr = app.license || '無';
-                        const hasCriminalStr = app.hasCriminalRecord ? '有' : '無';
                         let createdAtText = '';
                         try {
                             const dt = app.createdAt?.toDate ? app.createdAt.toDate() : (app.createdAt ? new Date(app.createdAt) : null);
@@ -8106,7 +8097,6 @@
                                         <span class="mr-2">生日：${app.birthDate || ''}</span>
                                         <span class="mr-2">身分證：${app.idNumber || ''}</span>
                                         <span class="mr-2">證照：${licenseStr}</span>
-                                        <span class="mr-2">前科：${hasCriminalStr}</span>
                                         <span class="mr-2">社區代號：${app.serviceCommunityCode || ''}</span>
                                     </div>
                                     ${createdAtText ? `<p class="text-xs text-gray-400 mt-1">申請時間：${createdAtText}</p>` : ''}
@@ -8191,7 +8181,6 @@
                             birthDate: app.birthDate || '',
                             idNumber: app.idNumber || '',
                             license: app.license || '無',
-                            hasCriminalRecord: !!app.hasCriminalRecord,
                             serviceCommunityCode: app.serviceCommunityCode || '',
                             avatarUrl: app.avatarUrl || null,
                             points: 0,
