@@ -7833,7 +7833,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                         augmentedUsers.forEach(user => {
                             const recLoc = user.__latestRecord?.location || null;
                             const recLat = recLoc && typeof recLoc.latitude === 'number' ? recLoc.latitude : (user.__latestRecord?.locationLat ?? null);
-                            const recLng = recLoc && typeof recLoc.longitude === 'number' ? recLng : (user.__latestRecord?.locationLng ?? null);
+                            const recLng = recLoc && typeof recLoc.longitude === 'number' ? recLoc.longitude : (user.__latestRecord?.locationLng ?? null);
                             const hasRecordLocation = typeof recLat === 'number' && typeof recLng === 'number';
                             const hasLastLocation = user.lastLocation && typeof user.lastLocation.latitude === 'number' && typeof user.lastLocation.longitude === 'number';
                             const hasLocation = hasRecordLocation || hasLastLocation;
