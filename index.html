@@ -164,7 +164,7 @@
         <div class="text-center mb-8">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
             <h1 class="text-2xl font-bold text-gray-800 mt-4">西北社區打卡系統</h1>
-            <p class="text-gray-500">社區版V1.2.1</p>
+            <p class="text-gray-500">社區版V2.1.2</p>
         </div>
         <form id="login-form">
             <div class="mb-4">
@@ -1001,6 +1001,11 @@
                     const headerLogo = document.getElementById('header-logo');
                     if (headerLogo) {
                         headerLogo.addEventListener('click', (ev) => {
+                            // 僅服務 >=2 社區或管理角色可返回導覽頁
+                            if (!isNavigationAllowed(state.currentUserData)) {
+                                ev.preventDefault();
+                                return;
+                            }
                             // 若存在 SPA 環境，避免整頁重載，直接切換到導覽頁
                             ev.preventDefault();
                             try { renderFooterNavForNavigation('community'); } catch (e) { /* noop */ }
@@ -1453,10 +1458,15 @@
                             headerLogo.classList.add('pointer-events-none', 'cursor-default');
                             headerLogo.removeAttribute('href');
                         } else {
-                            // 其他頁：顯示社區名稱（若有），啟用返回導覽的點擊行為
-                            headerLogo.classList.remove('pointer-events-none', 'cursor-default');
-                            headerLogo.setAttribute('href', 'index.html?goto=navigation&sub=community');
+                            // 其他頁：顯示社區名稱（若有）；僅允許可返回導覽的帳號啟用點擊
                             try { updateHeaderCommunity(); } catch (e) { /* noop */ }
+                            if (isNavigationAllowed(state.currentUserData)) {
+                                headerLogo.classList.remove('pointer-events-none', 'cursor-default');
+                                headerLogo.setAttribute('href', 'index.html?goto=navigation&sub=community');
+                            } else {
+                                headerLogo.classList.add('pointer-events-none', 'cursor-default');
+                                headerLogo.removeAttribute('href');
+                            }
                         }
                     }
                 } catch (_) {}

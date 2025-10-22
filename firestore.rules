@@ -398,10 +398,10 @@ service cloud.firestore {
       // 僅管理端（管理員、人事、主管）可讀取所有申請（用於審核）
       allow read: if isReviewer();
 
-      // 僅管理端可更新審核狀態；限制可更新欄位與型別
+      // 僅管理端可更新審核狀態；限制僅能變更審核相關欄位（允許舊文件保留其他欄位）
       allow update: if isReviewer() &&
-        request.resource.data.keys().hasOnly([
-          'name','phone','email','homeAddress','birthDate','idNumber','license','serviceCommunityCode','bloodType','emergencyName','emergencyRelation','emergencyPhone','avatarUrl','status','createdAt','reviewerId','reviewedAt','convertedUserId','reviewNotes'
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'status','reviewerId','reviewedAt','convertedUserId','reviewNotes'
         ]) &&
         request.resource.data.status in ['approved','rejected','pending'] &&
         (request.resource.data.reviewerId == null || request.resource.data.reviewerId is string) &&
