@@ -1538,6 +1538,30 @@
                             try { computeAvailableCommunities(); } catch (_) {}
                             renderNavByCommunity(container);
                             try { lucide.createIcons(); } catch (_) {}
+                    // 綁定角色過濾按鈕
+                    const summaryEl = document.getElementById('shift-summary');
+                    const updateRoleButtonsActive = () => {
+                        if (!summaryEl) return;
+                        summaryEl.querySelectorAll('button[data-role]').forEach(b => {
+                            const r = b.getAttribute('data-role');
+                            const active = (pageState.roleFilter === r);
+                            b.classList.toggle('ring-2', active);
+                            b.classList.toggle('ring-offset-1', active);
+                            b.classList.toggle('opacity-80', !active && pageState.roleFilter !== null);
+                        });
+                    };
+                    if (summaryEl) {
+                        summaryEl.querySelectorAll('button[data-role]').forEach(btn => {
+                            btn.addEventListener('click', () => {
+                                const role = btn.getAttribute('data-role');
+                                pageState.roleFilter = (pageState.roleFilter === role) ? null : role;
+                                updateRoleButtonsActive();
+                                renderCalendar();
+                                renderMonthlyList();
+                            });
+                        });
+                        updateRoleButtonsActive();
+                    }
                         });
                     } catch (_) {}
                     try { lucide.createIcons(); } catch (_) {}
@@ -5159,7 +5183,8 @@
                     selectedPostId: null,
                     monthDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
                     monthDocsMap: {},
-                    selectedDayIso: null
+                    selectedDayIso: null,
+                    roleFilter: null
                 };
 
                 const fmtYMD = (d) => {
@@ -5206,12 +5231,12 @@
                 const renderShell = () => {
                     mainContent.innerHTML = `
                         <div class="h-[50px] flex items-center justify-between border-b border-gray-200 bg-white px-3">
-                            <div id="shift-summary" class="flex items-center gap-3 flex-wrap">
-                                <span id="count-gm" class="text-sm text-gray-700">總幹事：0</span>
-                                <span id="count-sec" class="text-sm text-gray-700">秘書：0</span>
-                                <span id="count-guard" class="text-sm text-gray-700">保全：0</span>
-                                <span id="count-clean" class="text-sm text-gray-700">清潔：0</span>
-                                <span id="count-mech" class="text-sm text-gray-700">機電：0</span>
+                            <div id="shift-summary" class="flex items-center gap-2 flex-wrap">
+                                <button class="px-2 py-1 text-xs rounded-md bg-amber-500 text-white" data-role="總幹事"><span id="count-gm">總幹事：0</span></button>
+                                <button class="px-2 py-1 text-xs rounded-md bg-purple-500 text-white" data-role="秘書"><span id="count-sec">秘書：0</span></button>
+                                <button class="px-2 py-1 text-xs rounded-md bg-green-700 text-white" data-role="保全"><span id="count-guard">保全：0</span></button>
+                                <button class="px-2 py-1 text-xs rounded-md bg-pink-500 text-white" data-role="清潔"><span id="count-clean">清潔：0</span></button>
+                                <button class="px-2 py-1 text-xs rounded-md bg-blue-500 text-white" data-role="機電"><span id="count-mech">機電：0</span></button>
                             </div>
                         </div>
                         <div class="overflow-y-auto" style="height: calc(100% - 50px);">
@@ -5242,6 +5267,30 @@
                             </div>
                         </div>`;
                     try { lucide.createIcons(); } catch (_) {}
+                    // 綁定角色過濾按鈕
+                    const summaryEl = document.getElementById('shift-summary');
+                    const updateRoleButtonsActive = () => {
+                        if (!summaryEl) return;
+                        summaryEl.querySelectorAll('button[data-role]').forEach(b => {
+                            const r = b.getAttribute('data-role');
+                            const active = (pageState.roleFilter === r);
+                            b.classList.toggle('ring-2', active);
+                            b.classList.toggle('ring-offset-1', active);
+                            b.classList.toggle('opacity-80', !active && pageState.roleFilter !== null);
+                        });
+                    };
+                    if (summaryEl) {
+                        summaryEl.querySelectorAll('button[data-role]').forEach(btn => {
+                            btn.addEventListener('click', () => {
+                                const role = btn.getAttribute('data-role');
+                                pageState.roleFilter = (pageState.roleFilter === role) ? null : role;
+                                updateRoleButtonsActive();
+                                renderCalendar();
+                                renderMonthlyList();
+                            });
+                        });
+                        updateRoleButtonsActive();
+                    }
                 };
 
                 const loadPosts = async () => {
@@ -5558,7 +5607,10 @@
                             return 'background-color:#FFF7ED;';
                         })();
                         const isSelected = iso === selectedIso;
-                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[30px] flex flex-col ${cell.inMonth?'bg-white':''}`;
+                        const hasRole = !!pageState.roleFilter && Array.isArray(shifts) && shifts.some(s => ((s.role || '保全') === pageState.roleFilter));
+                        const roleBorderMap = { '總幹事':'border-amber-500','秘書':'border-purple-500','保全':'border-green-700','清潔':'border-pink-500','機電':'border-blue-500' };
+                        const roleCls = hasRole ? `border-2 ${roleBorderMap[pageState.roleFilter] || 'border-gray-400'}` : '';
+                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500': roleCls} hover:bg-red-50 rounded p-2 text-xs h-[30px] flex flex-col ${cell.inMonth?'bg-white':''}`;
                         return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto">${badge}</div></div>`;
                     }).join('');
                     grid.querySelectorAll('[data-iso]').forEach(el=>{
@@ -5587,6 +5639,12 @@
                     const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
                     const isScheduledDay = !!docData?.isScheduledDay;
 
+                    // 角色過濾：保留原始索引，事件仍指向原陣列索引
+                    const roleFilter = pageState.roleFilter || null;
+                    const filteredList = roleFilter
+                        ? shifts.map((s,idx)=>({ s, idx })).filter(x => ((x.s.role || '保全') === roleFilter))
+                        : shifts.map((s,idx)=>({ s, idx }));
+
                     await loadCommunityUsers();
                     const userOptions = pageState.userOptionsHTML && pageState.userOptionsHTML.length ? pageState.userOptionsHTML : '<option value="" disabled>請先建立或指派人員</option>';
                     panel.innerHTML = `
@@ -5598,12 +5656,13 @@
                             <button id="save-day-rules" class="ml-auto px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">儲存設定</button>
                         </div>
                         <div>
-                            ${(shifts.length===0) ? `<div class="text-gray-500 text-sm">尚未排班</div>` : ''}
+                            ${(filteredList.length===0) ? `<div class=\"text-gray-500 text-sm\">尚未排班${roleFilter? '（或被角色過濾）' : ''}</div>` : ''}
                             <div id="shift-list" class="space-y-3">
-                                ${shifts.map((s,idx)=>`
+                                ${filteredList.map(({s,idx})=>`
                                     <div class="flex items-start gap-2">
                                         <div class="text-sm w-48">
                                             <span data-time-label="${idx}">${s.start || '—'} ~ ${s.end || '—'}</span>
+                                            <span class="ml-1 text-[10px] px-1 rounded bg-gray-100">${s.role || '保全'}</span>
                                             <div class="mt-1 space-x-1">
                                                 <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-edit="${idx}">編輯</button>
                                                 <span class="inline-flex items-center gap-1 hidden" data-edit-area="${idx}">
@@ -5617,7 +5676,7 @@
                                         <div class="flex-1">
                                             <div class="text-xs text-gray-500 mb-1">指定人員</div>
                                             <select class="px-2 py-1 border rounded text-xs min-w-[220px]" data-assign="${idx}">
-                                                ${pageState.communityUsers.length ? pageState.communityUsers.map(u=>`<option value="${u.id}" ${(Array.isArray(s.assignees)&&s.assignees[0]===u.id)?'selected':''}>${(u.name||u.displayName||u.id)}｜${u.role||''}</option>`).join('') : '<option value="" disabled>請先建立或指派人員</option>'}
+                                                ${pageState.communityUsers.length ? pageState.communityUsers.map(u=>`<option value=\"${u.id}\" ${(Array.isArray(s.assignees)&&s.assignees[0]===u.id)?'selected':''}>${(u.name||u.displayName||u.id)}｜${u.role||''}</option>`).join('') : '<option value=\"\" disabled>請先建立或指派人員</option>'}
                                             </select>
                                             <button class="ml-2 px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-assign-save="${idx}">儲存指派</button>
                                         </div>
@@ -5820,8 +5879,9 @@
                     if (!el) return;
                     await loadCommunityUsers();
                     const filterIso = pageState.selectedDayIso || null;
+                    const roleFilter = pageState.roleFilter || null;
                     const titleEl = document.getElementById('shift-list-title');
-                    if (titleEl) titleEl.textContent = filterIso ? '當日班表列表' : '每月班表列表';
+                    if (titleEl) titleEl.textContent = `${filterIso ? '當日' : '每月'}班表列表${roleFilter ? `（角色：${roleFilter}）` : ''}`;
                     const entries = Object.entries(pageState.monthDocsMap).sort(([a],[b]) => a.localeCompare(b));
                     const rows = [];
                     const currentPost = pageState.posts.find(p=>p.id===pageState.selectedPostId);
@@ -5830,6 +5890,7 @@
                         if (filterIso && iso !== filterIso) continue;
                         const shifts = Array.isArray(doc.shifts) ? doc.shifts : [];
                         shifts.forEach((s, idx) => {
+                            if (roleFilter && ((s.role || '保全') !== roleFilter)) return;
                             const start = s.start || '07:00';
                             const end = s.end || '19:00';
                             const assId = Array.isArray(s.assignees) ? (s.assignees[0] || '') : '';
@@ -5899,6 +5960,7 @@
                             if (filterIso && iso2 !== filterIso) continue;
                             const shifts2 = Array.isArray(doc2.shifts) ? doc2.shifts : [];
                             shifts2.forEach((s2) => {
+                                if (roleFilter && ((s2.role || '保全') !== roleFilter)) return;
                                 const start = s2.start || '07:00';
                                 const end = s2.end || '19:00';
                                 const assId = Array.isArray(s2.assignees) ? (s2.assignees[0] || '') : '';
