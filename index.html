@@ -7844,8 +7844,8 @@
             async function renderSettingsAccounts(container) {
                 const isHRPage = state.currentPage === 'hr';
                 const isGlobalSettings = state.currentPage === 'settings' || state.currentPage === 'navigation';
-                const rolesHR = ['總幹事','秘書','保全','清潔','機電'];
-                const rolesGlobal = ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'];
+                const rolesHR = ['user','總幹事','秘書','保全','清潔','機電'];
+                const rolesGlobal = ['user','admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'];
                 const roleOpts = (isHRPage ? rolesHR : rolesGlobal)
                     .map(r => `<option value="${r}">${roleLabel(r)}</option>`)
                     .join('');

@@ -45,9 +45,47 @@ service cloud.firestore {
           'lastUpdated',
           'firstClockInDeviceId'
         ])
+      ) || (
+        isReviewer() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt'
+        ]) &&
+        (request.resource.data.name == null || request.resource.data.name is string) &&
+        (request.resource.data.phone == null || request.resource.data.phone is string) &&
+        (request.resource.data.email == null || request.resource.data.email is string) &&
+        (request.resource.data.role == null || request.resource.data.role == 'user') &&
+        (request.resource.data.serviceCommunities == null || request.resource.data.serviceCommunities is list) &&
+        (request.resource.data.homeAddress == null || request.resource.data.homeAddress is string) &&
+        (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
+        (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&
+        (request.resource.data.license == null || request.resource.data.license in ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照']) &&
+        (request.resource.data.serviceCommunityCode == null || request.resource.data.serviceCommunityCode is string) &&
+        (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
+        (request.resource.data.points == null || request.resource.data.points is number) &&
+        (request.resource.data.status == null || request.resource.data.status is string) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp)
       );
-      // 只有管理員可以建立或刪除使用者文件
-      allow create, delete: if isAdmin();
+      // 允許管理員刪除；允許審核角色建立使用者（核准帳號申請）
+      allow delete: if isAdmin();
+      allow create: if isAdmin() || (isReviewer() &&
+        request.resource.data.keys().hasOnly([
+          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.phone == null || request.resource.data.phone is string) &&
+        request.resource.data.email is string &&
+        request.resource.data.role == 'user' &&
+        (request.resource.data.serviceCommunities == null || request.resource.data.serviceCommunities is list) &&
+        (request.resource.data.homeAddress == null || request.resource.data.homeAddress is string) &&
+        (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
+        (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&
+        request.resource.data.license in ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照'] &&
+        (request.resource.data.serviceCommunityCode == null || request.resource.data.serviceCommunityCode is string) &&
+        (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
+        (request.resource.data.points == null || request.resource.data.points is number) &&
+        (request.resource.data.status == null || request.resource.data.status is string) &&
+        request.resource.data.createdAt is timestamp
+      );
     }
     
     // 允許所有登入的使用者讀取所有人的打卡紀錄。
