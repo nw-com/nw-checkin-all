@@ -1735,9 +1735,13 @@
                         return age;
                     };
 
-                    // 僅顯示指定角色：總幹事、秘書、保全、清潔、機電
+                    // 僅顯示指定角色：總幹事、秘書、保全、清潔、機電（支援 jobTitle/applicationTitle）
                     const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
-                    let baseUsers = users.filter(u => allowedRoles.has((u.role || '')));
+                    let baseUsers = users.filter(u => {
+                        const roleTag = (u.role || '').trim();
+                        const titleTag = ((u.jobTitle || u.applicationTitle || '') + '').trim();
+                        return allowedRoles.has(roleTag) || allowedRoles.has(titleTag);
+                    });
                     // 人員依姓氏筆畫少→多（先排序再篩選顯示）
                     baseUsers.sort(compareUsersBySurnameStroke);
 
@@ -5558,9 +5562,12 @@
                 const updateCounts = () => {
                     const list = (pageState.communityUsers || []);
                     const counts = { '總幹事': 0, '秘書': 0, '保全': 0, '清潔': 0, '機電': 0 };
+                    const allowedRoles = new Set(Object.keys(counts));
                     for (const u of list) {
-                        const r = (u.role || '').trim();
-                        if (counts.hasOwnProperty(r)) counts[r] += 1;
+                        const roleTag = (u.role || '').trim();
+                        const titleTag = ((u.jobTitle || u.applicationTitle || '') + '').trim();
+                        const eff = allowedRoles.has(roleTag) ? roleTag : (allowedRoles.has(titleTag) ? titleTag : null);
+                        if (eff) counts[eff] += 1;
                     }
                     const gmEl = document.getElementById('count-gm');
                     const secEl = document.getElementById('count-sec');
@@ -5572,6 +5579,21 @@
                     if (guardEl) guardEl.textContent = `保全：${counts['保全']}`;
                     if (cleanEl) cleanEl.textContent = `清潔：${counts['清潔']}`;
                     if (mechEl) mechEl.textContent = `機電：${counts['機電']}`;
+                    // 依人數禁用/淡化角色按鈕
+                    const summaryEl = document.getElementById('shift-summary');
+                    if (summaryEl) {
+                        summaryEl.querySelectorAll('button[data-role]').forEach(btn => {
+                            const r = btn.getAttribute('data-role') || '';
+                            const c = counts[r] || 0;
+                            if (c <= 0) {
+                                btn.setAttribute('disabled','true');
+                                btn.classList.add('opacity-50','cursor-not-allowed');
+                            } else {
+                                btn.removeAttribute('disabled');
+                                btn.classList.remove('opacity-50','cursor-not-allowed');
+                            }
+                        });
+                    }
                 };
 
                 const loadMonth = async () => {
@@ -5609,10 +5631,15 @@
                                 s.forEach(d=> { if (!users.find(u=>u.id===d.id)) users.push({ id: d.id, ...d.data() }); });
                             } catch (_) {}
                         }
-                        // 僅依各社區帳號列表角色計數（總幹事、秘書、保全、清潔、機電）
+                        // 僅依各社區帳號列表角色（總幹事、秘書、保全、清潔、機電），同時支援 jobTitle/applicationTitle
                         const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
-                        const filtered = users.filter(u=> allowedRoles.has((u.role||'').trim()))
-                                              .sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+                        const filtered = users
+                            .filter(u => {
+                                const roleTag = (u.role || '').trim();
+                                const titleTag = ((u.jobTitle || u.applicationTitle || '') + '').trim();
+                                return allowedRoles.has(roleTag) || allowedRoles.has(titleTag);
+                            })
+                            .sort((a,b)=> (a.name||'').localeCompare(b.name||''));
                         pageState.communityUsers = filtered;
                         pageState.userOptionsHTML = filtered.map(u=>`<option value="${u.id}">${u.name||u.displayName||u.id}</option>`).join('');
                     } catch (e) { console.warn('載入社區成員失敗', e); pageState.communityUsers = []; pageState.userOptionsHTML = ''; }
@@ -5916,7 +5943,7 @@
 
                 const getUserTitleById = (uid) => {
                     const u = (pageState.communityUsers || []).find(x => x.id === uid);
-                    return u ? (u.jobTitle || '') : '';
+                    return u ? ((u.jobTitle || u.applicationTitle || u.role || '') + '') : '';
                 };
 
                 const computeShiftStatus = (iso, shift) => {
