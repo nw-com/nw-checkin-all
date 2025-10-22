@@ -6107,7 +6107,7 @@
                             const __uidDel = window.__auth?.currentUser?.uid || state.currentUser?.uid || '';
                             const __roleDel = state.currentUserData?.role || '';
                             const canDelete = await (window.checkCommunityEditorStatus ? window.checkCommunityEditorStatus() : Promise.resolve(false));
-                            console.debug('Permission context', { action: 'delete-schedule', canDelete, uid: __uidDel, role: __roleDel, communityId, postId: pageState.selectedPostId, iso, id });
+                            console.info('Permission context', { action: 'delete-schedule', canDelete, uid: __uidDel, role: __roleDel, communityId, postId: pageState.selectedPostId, iso, id });
                             if (!canDelete) { showToast('沒有社區寫入權限，請使用管理端或社區管理員身分', true); return; }
                             let payload;
                             try {
@@ -6161,7 +6161,7 @@
                                 const canEdit = await (window.checkCommunityEditorStatus ? window.checkCommunityEditorStatus() : Promise.resolve(false));
                                 const __uidShare = window.__auth?.currentUser?.uid || state.currentUser?.uid || '';
                                 const __roleShare = state.currentUserData?.role || '';
-                                console.debug('Permission context', { action: 'share-cashmark', canEdit, uid: __uidShare, role: __roleShare, communityId, postId: pageState.selectedPostId, iso });
+                                console.info('Permission context', { action: 'share-cashmark', canEdit, uid: __uidShare, role: __roleShare, communityId, postId: pageState.selectedPostId, iso });
                                 if (!canEdit) { showToast('沒有社區寫入權限，請使用管理端或社區管理員身分', true); return; }
                                 if (navigator.share) {
                                     await navigator.share({ title: '班表', text: content });
@@ -6369,7 +6369,7 @@
                             const canEdit = await (window.checkCommunityEditorStatus ? window.checkCommunityEditorStatus() : Promise.resolve(false));
                             const __uidSave = window.__auth?.currentUser?.uid || state.currentUser?.uid || '';
                             const __roleSave = state.currentUserData?.role || '';
-                            console.debug('Permission context', { action: edit ? 'edit-schedule' : 'add-schedule', canEdit, uid: __uidSave, role: __roleSave, communityId, postId: effPostId, iso });
+                            console.info('Permission context', { action: edit ? 'edit-schedule' : 'add-schedule', canEdit, uid: __uidSave, role: __roleSave, communityId, postId: effPostId, iso });
                             if (!canEdit) { showToast('沒有社區寫入權限，請使用管理端或社區管理員身分', true); return; }
                             const { Timestamp } = window.__fs || {};
                             const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${effPostId}__${iso}`);
