@@ -2433,7 +2433,7 @@
                     const visibleUsersList = users.filter(user => visibleUsers[user.id] !== false);
                     // 進一步過濾：僅顯示服務「目前社區」的外勤相關角色（總幹事、秘書、保全、清潔、機電）
                     const currentCommId = state.currentCommunity?.id || null;
-                    const currentCommCode = state.currentCommunity?.code || null;
+                    const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
                     const filteredUsersList = visibleUsersList.filter(u => {
                         // 角色過濾（排除管理員、人事、主管）
                         if (!isFieldLikeRole(u.role)) return false;
@@ -7702,7 +7702,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                     // 顯示該社區所有人員（帳號），不受一般可見人員設定限制
                     let baseList = users;
                     const currentCommId = state.currentCommunity?.id || null;
-                    const currentCommCode = state.currentCommunity?.code || null;
+                    const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
                     if (currentCommId || currentCommCode) {
                         baseList = baseList.filter(u => {
                             const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
