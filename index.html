@@ -7025,13 +7025,27 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 } catch (_) {}
                 try { if (state.trackingRadiusCircle) state.trackingRadiusCircle.setMap(null); } catch (_) {}
 
-                // 在社區中心點放置 Google Maps 經典紅標
+                // 在社區中心點放置 Google Maps 經典紅標（縮小為原本的40%）
+                const redIconUrl = 'https://maps.gstatic.com/mapfiles/api-3/images/spotlight-poi2_hdpi.png';
                 state.trackingCenterMarker = new google.maps.Marker({
                     position: mapCenter,
                     map: state.trackingMap,
                     title: '社區中心',
-                    icon: 'https://maps.gstatic.com/mapfiles/api-3/images/spotlight-poi2_hdpi.png'
+                    icon: redIconUrl
                 });
+                try {
+                    const img = new Image();
+                    img.onload = () => {
+                        const scale = 0.4;
+                        const w = img.naturalWidth || 40;
+                        const h = img.naturalHeight || 40;
+                        const scaledSize = new google.maps.Size(Math.round(w * scale), Math.round(h * scale));
+                        const anchor = new google.maps.Point(Math.round((w / 2) * scale), Math.round(h * scale));
+                        state.trackingCenterMarker.setIcon({ url: redIconUrl, scaledSize, anchor });
+                    };
+                    img.src = redIconUrl;
+                } catch (_) {}
+
 
                 // 標示社區打卡半徑
                 if (typeof circleRadius === 'number' && circleRadius > 0) {
