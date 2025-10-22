@@ -48,7 +48,7 @@ service cloud.firestore {
       ) || (
         isReviewer() &&
         request.resource.data.diff(resource.data).changedKeys().hasOnly([
-          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt'
+          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt','jobTitle'
         ]) &&
         (request.resource.data.name == null || request.resource.data.name is string) &&
         (request.resource.data.phone == null || request.resource.data.phone is string) &&
@@ -63,13 +63,14 @@ service cloud.firestore {
         (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
         (request.resource.data.points == null || request.resource.data.points is number) &&
         (request.resource.data.status == null || request.resource.data.status is string) &&
-        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp)
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.jobTitle == null || request.resource.data.jobTitle is string)
       );
       // 允許管理員刪除；允許審核角色建立使用者（核准帳號申請）
       allow delete: if isAdmin();
       allow create: if isAdmin() || (isReviewer() &&
         request.resource.data.keys().hasOnly([
-          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt'
+          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt','jobTitle'
         ]) &&
         request.resource.data.name is string &&
         (request.resource.data.phone == null || request.resource.data.phone is string) &&
@@ -80,11 +81,13 @@ service cloud.firestore {
         (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
         (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&
         request.resource.data.license in ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照'] &&
+        (request.resource.data.applicationTitle == null || request.resource.data.applicationTitle in ['總幹事','秘書','保全','清潔','機電']) &&
         (request.resource.data.serviceCommunityCode == null || request.resource.data.serviceCommunityCode is string) &&
         (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
         (request.resource.data.points == null || request.resource.data.points is number) &&
         (request.resource.data.status == null || request.resource.data.status is string) &&
-        request.resource.data.createdAt is timestamp
+        request.resource.data.createdAt is timestamp &&
+        (request.resource.data.jobTitle == null || request.resource.data.jobTitle is string)
       );
     }
     
@@ -376,7 +379,7 @@ service cloud.firestore {
       // 允許未登入者或登入者提交申請；嚴格限制欄位與型別
       allow create: if
         request.resource.data.keys().hasOnly([
-          'name','phone','email','homeAddress','birthDate','idNumber','license','serviceCommunityCode','bloodType','emergencyName','emergencyRelation','emergencyPhone','avatarUrl','status','createdAt'
+          'name','phone','email','homeAddress','birthDate','idNumber','license','serviceCommunityCode','bloodType','emergencyName','emergencyRelation','emergencyPhone','applicationTitle','avatarUrl','status','createdAt'
         ]) &&
         request.resource.data.name is string &&
         (request.resource.data.phone == null || request.resource.data.phone is string) &&

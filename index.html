@@ -554,6 +554,17 @@
                                     <input type="tel" id="apply-phone" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
                                 <div>
+                                    <label for="apply-title" class="block text-sm font-medium text-gray-700">申請職稱</label>
+                                    <select id="apply-title" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                        <option value="">未選擇</option>
+                                        <option value="總幹事">總幹事</option>
+                                        <option value="秘書">秘書</option>
+                                        <option value="保全">保全</option>
+                                        <option value="清潔">清潔</option>
+                                        <option value="機電">機電</option>
+                                    </select>
+                                </div>
+                                <div>
                                     <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件 (必填)</label>
                                     <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
@@ -687,6 +698,7 @@
                         const emergencyPhone = document.getElementById('apply-emergency-phone').value.trim();
                         const license = document.getElementById('apply-license').value;
                         const serviceCommunityCode = document.getElementById('apply-service-code').value.trim();
+                        const applicationTitle = document.getElementById('apply-title').value;
 
                         if (!name || !email) throw new Error('請填寫姓名與電子郵件');
                         if (password || confirmPassword) {
@@ -697,6 +709,7 @@
                         const data = {
                             name, phone, email, homeAddress, birthDate, idNumber, license, serviceCommunityCode,
                             bloodType, emergencyName, emergencyRelation, emergencyPhone,
+                            applicationTitle,
                             avatarUrl: (avatarPreview?.src && !avatarPreview.src.includes('placehold.co')) ? avatarPreview.src : null,
                             status: 'pending',
                             createdAt: serverTimestamp()
@@ -6822,14 +6835,14 @@
             
             function renderTrackingMap(container) {
                 container.innerHTML = `
-                    <div class="h-full w-full relative">
-                        <div id="tracking-map" class="h-full w-full"></div>
+                    <div class="relative w-full min-h-[420px] md:min-h-[520px]">
+                        <div id="tracking-map" class="w-full h-full min-h-[420px] md:min-h-[520px]"></div>
                         <div id="tracking-map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
 <button id="tracking-map-center-btn" class="absolute top-3 right-3 z-10 bg-white text-gray-700 border border-gray-300 rounded-full shadow px-3 py-2 flex items-center hover:bg-gray-50">
                             <i data-lucide="focus" class="w-4 h-4 mr-2"></i>回到社區
                         </button>
                         <div class="absolute bottom-0 left-0 right-0 p-2">
-                            <div id="user-tracking-list" class="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg max-h-[150px] overflow-y-auto p-2 space-y-2">
+                            <div id="user-tracking-list" class="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg max-h-[180px] overflow-y-auto p-2 space-y-2">
                                 <!-- User list will be populated here -->
                             </div>
                         </div>
@@ -6883,7 +6896,7 @@
                 
                 state.trackingMap = new google.maps.Map(mapDiv, {
                     center: mapCenter,
-                    zoom: 12,
+                    zoom: 16,
                     disableDefaultUI: true,
                     zoomControl: true,
                     mapId: 'DEMO_MAP_ID' // Required for Advanced Markers
@@ -7694,7 +7707,7 @@
                         augmentedUsers.forEach(user => {
                             const recLoc = user.__latestRecord?.location || null;
                             const recLat = recLoc && typeof recLoc.latitude === 'number' ? recLoc.latitude : (user.__latestRecord?.locationLat ?? null);
-                            const recLng = recLoc && typeof recLoc.longitude === 'number' ? recLoc.longitude : (user.__latestRecord?.locationLng ?? null);
+                            const recLng = recLoc && typeof recLoc.longitude === 'number' ? recLng : (user.__latestRecord?.locationLng ?? null);
                             const hasRecordLocation = typeof recLat === 'number' && typeof recLng === 'number';
                             const hasLastLocation = user.lastLocation && typeof user.lastLocation.latitude === 'number' && typeof user.lastLocation.longitude === 'number';
                             const hasLocation = hasRecordLocation || hasLastLocation;
@@ -7702,12 +7715,41 @@
                             const userElement = document.createElement('div');
                             userElement.className = `flex items-center justify-between p-2 rounded-md cursor-pointer hover:bg-gray-100 ${!hasLocation ? 'opacity-50' : ''}`;
                             const statusColorClass = getStatusColor(user.__statusText || '未打卡');
+
+                            // 距離與圈內外顯示
+                            let distanceText = '';
+                            let rangeText = '';
+                            let insideRange = null;
+                            let position = null;
+                            if (hasLocation) {
+                                position = hasRecordLocation
+                                    ? { lat: recLat, lng: recLng }
+                                    : { lat: user.lastLocation.latitude, lng: user.lastLocation.longitude };
+                                const center = state.companyCenter || (state.trackingMap ? state.trackingMap.getCenter().toJSON() : null);
+                                const radius = state.trackingRadiusCircle ? state.trackingRadiusCircle.getRadius() : null;
+                                if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
+                                    const toRad = d => d * Math.PI / 180;
+                                    const R = 6371000;
+                                    const dLat = toRad(position.lat - center.lat);
+                                    const dLng = toRad(position.lng - center.lng);
+                                    const a = Math.sin(dLat/2) ** 2 + Math.cos(toRad(center.lat)) * Math.cos(toRad(position.lat)) * Math.sin(dLng/2) ** 2;
+                                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                                    const dist = R * c;
+                                    distanceText = `距社區約 ${Math.round(dist)}m`;
+                                    if (typeof radius === 'number') {
+                                        insideRange = dist <= radius;
+                                        rangeText = insideRange ? '（範圍內）' : '（範圍外）';
+                                    }
+                                }
+                            }
+
                             userElement.innerHTML = `
                                 <div class="flex items-center">
                                     <img src="${user.avatarUrl || `https://placehold.co/32x32/EFEFEF/333333?text=${(user.name || 'U').charAt(0)}`}" class="w-8 h-8 rounded-full mr-3 object-cover">
                                     <div>
                                         <p class="font-medium text-sm text-gray-800">${user.name || '未知用戶'}</p>
                                         <p class="text-xs font-semibold ${statusColorClass}">${user.__statusText || '未打卡'}</p>
+                                        ${distanceText ? `<p class=\"text-xs text-gray-500\">${distanceText}${rangeText}</p>` : ''}
                                     </div>
                                 </div>
                                 <span class="text-xs text-gray-400">${user.__lastStatusTime ? '最近狀態時間：' + timeAgo(user.__lastStatusTime) : '無紀錄'}</span>
@@ -7715,12 +7757,10 @@
                             userListEl.appendChild(userElement);
 
                             if (hasLocation) {
-                                const position = hasRecordLocation
-                                    ? { lat: recLat, lng: recLng }
-                                    : { lat: user.lastLocation.latitude, lng: user.lastLocation.longitude };
                                 const markerIcon = document.createElement('img');
                                 markerIcon.src = user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(user.name || 'U').charAt(0)}`;
-                                markerIcon.className = "w-9 h-9 rounded-full border-2 border-white shadow-md object-cover";
+                                const borderClass = insideRange === true ? 'border-green-500' : (insideRange === false ? 'border-red-500' : 'border-white');
+                                markerIcon.className = `w-9 h-9 rounded-full border-2 ${borderClass} shadow-md object-cover`;
 
                                 const marker = new AdvancedMarkerElement({
                                     position,
@@ -7739,6 +7779,7 @@
                                             <p>狀態: ${user.__statusText || '未打卡'}</p>
                                             <p>最近狀態時間: ${user.__lastStatusTime ? formatDateTime(user.__lastStatusTime) : 'N/A'}</p>
                                             ${locationName ? `<p>打卡地點: ${locationName}</p>` : ''}
+                                            ${distanceText ? `<p>距社區：${distanceText.replace('距社區約 ', '').replace('m',' 公尺')} ${insideRange === null ? '' : (insideRange ? '(圈內)' : '(圈外)')}</p>` : ''}
                                         </div>
                                     `
                                 });
@@ -8186,6 +8227,7 @@
                             phone: app.phone || '',
                             email,
                             role: 'user',
+                            jobTitle: app.applicationTitle || '',
                             serviceCommunities,
                             homeAddress: app.homeAddress || '',
                             birthDate: app.birthDate || '',
