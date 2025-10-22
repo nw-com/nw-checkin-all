@@ -6599,7 +6599,9 @@
                             const position = { lat: user.lastLocation.latitude, lng: user.lastLocation.longitude };
                             const markerIcon = document.createElement('img');
                             markerIcon.src = user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${user.name.charAt(0)}`;
-                            markerIcon.className = "w-9 h-9 rounded-full border-2 border-white shadow-md object-cover";
+                            const roleColorMap = { '總幹事': 'border-amber-500', '秘書': 'border-purple-500', '保全': 'border-green-800', '清潔': 'border-pink-400', '機電': 'border-blue-500' };
+                            const roleBorderClass = roleColorMap[(user.role || '').trim()] || 'border-white';
+                            markerIcon.className = `w-9 h-9 rounded-full border-2 ${roleBorderClass} shadow-md object-cover`;
                             const marker = new AdvancedMarkerElement({ position, map: state.groupMap, title: user.name, content: markerIcon });
                             const infoWindow = new google.maps.InfoWindow({ content: `
                                 <div class="p-1">
@@ -7759,7 +7761,9 @@
                             if (hasLocation) {
                                 const markerIcon = document.createElement('img');
                                 markerIcon.src = user.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(user.name || 'U').charAt(0)}`;
-                                const borderClass = insideRange === true ? 'border-green-500' : (insideRange === false ? 'border-red-500' : 'border-white');
+                                const roleColorMap = { '總幹事': 'border-amber-500', '秘書': 'border-purple-500', '保全': 'border-green-800', '清潔': 'border-pink-400', '機電': 'border-blue-500' };
+                                const roleBorderClass = roleColorMap[(user.role || '').trim()] || null;
+                                const borderClass = roleBorderClass || (insideRange === true ? 'border-green-500' : (insideRange === false ? 'border-red-500' : 'border-white'));
                                 markerIcon.className = `w-9 h-9 rounded-full border-2 ${borderClass} shadow-md object-cover`;
 
                                 const marker = new AdvancedMarkerElement({
@@ -7895,8 +7899,8 @@
             async function renderSettingsAccounts(container) {
                 const isHRPage = state.currentPage === 'hr';
                 const isGlobalSettings = state.currentPage === 'settings' || state.currentPage === 'navigation';
-                const rolesHR = ['user','總幹事','秘書','保全','清潔','機電'];
-                const rolesGlobal = ['user','admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'];
+                const rolesHR = ['總幹事','秘書','保全','清潔','機電'];
+                const rolesGlobal = ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'];
                 const roleOpts = (isHRPage ? rolesHR : rolesGlobal)
                     .map(r => `<option value="${r}">${roleLabel(r)}</option>`)
                     .join('');
@@ -9964,6 +9968,29 @@
                 const avatarUploadInput = document.getElementById('user-avatar-upload');
                 const serviceCommunityListEl = document.getElementById('service-community-list');
                 const serviceCommunitySelectAllEl = document.getElementById('service-community-select-all');
+
+                // 限制角色選項（設定分頁與人員分頁）
+                try {
+                    const roleSelectEl = document.getElementById('user-role');
+                    if (roleSelectEl) {
+                        const allowedHR = new Set(['總幹事','秘書','保全','清潔','機電']);
+                        const allowedGlobal = new Set(['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電']);
+                        const isHRPage = state.currentPage === 'hr';
+                        const isGlobalSettings = state.currentPage === 'settings' || state.currentPage === 'navigation';
+                        const allowedSet = isHRPage ? allowedHR : (isGlobalSettings ? allowedGlobal : null);
+                        if (allowedSet) {
+                            const currentVal = roleSelectEl.value;
+                            Array.from(roleSelectEl.options).forEach(opt => {
+                                if (!allowedSet.has(opt.value)) {
+                                    opt.remove();
+                                }
+                            });
+                            if (!allowedSet.has(currentVal) && roleSelectEl.options.length > 0) {
+                                roleSelectEl.selectedIndex = 0;
+                            }
+                        }
+                    }
+                } catch (e) { /* noop */ }
 
                 // 壓縮圖片為 Base64，限制大小與尺寸
                 const compressToBase64 = async (file, maxW = 320, maxH = 320, quality = 0.8) => {
