@@ -6938,8 +6938,8 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             
             function renderTrackingMap(container) {
                 container.innerHTML = `
-                    <div class="relative w-full min-h-[420px] md:min-h-[520px]">
-                        <div id="tracking-map" class="w-full h-full min-h-[420px] md:min-h-[520px]"></div>
+                    <div class="relative w-full min-h-[336px] md:min-h-[416px]">
+                        <div id="tracking-map" class="w-full h-full min-h-[336px] md:min-h-[416px]"></div>
                         <div id="tracking-map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
                         <button id="tracking-map-center-btn" class="absolute top-3 right-3 z-10 bg-white text-gray-700 border border-gray-300 rounded-full shadow px-3 py-2 flex items-center hover:bg-gray-50">
                             <i data-lucide="focus" class="w-4 h-4 mr-2"></i>回到社區
@@ -7699,21 +7699,8 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                     const users = [];
                     querySnapshot.forEach(doc => users.push({ id: doc.id, ...doc.data() }));
 
-                    // 依一般設定過濾可見人員
-                    let visibilityMap = {};
-                    try {
-                        const saved = localStorage.getItem('app_general_settings');
-                        if (saved) {
-                            const settings = JSON.parse(saved);
-                            visibilityMap = settings.visibleUsers || {};
-                        }
-                    } catch (e) {
-                        console.warn('載入可見人員設定失敗', e);
-                    }
-                    const filteredUsers = users.filter(u => visibilityMap[u.id] !== false);
-
-                    // 僅顯示指定社區角色（總幹事、秘書、保全、清潔、機電）；若已選擇社區，僅顯示該社區成員
-                    let baseList = filteredUsers.filter(u => isFieldLikeRole(u.role));
+                    // 顯示該社區所有人員（帳號），不受一般可見人員設定限制
+                    let baseList = users;
                     const currentCommId = state.currentCommunity?.id || null;
                     const currentCommCode = state.currentCommunity?.code || null;
                     if (currentCommId || currentCommCode) {
