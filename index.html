@@ -6082,6 +6082,7 @@
                         btn.addEventListener('click', async ()=>{
                             const [iso, idxStr] = btn.getAttribute('data-del-month').split('__');
                             const idx = parseInt(idxStr,10);
+                            if (!pageState.selectedPostId) { showToast('請先選擇哨點', true); return; }
                             const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
                             // 僅管理員可刪除
                             const canDelete = await (window.checkAdminStatus ? window.checkAdminStatus() : Promise.resolve(false));
@@ -6107,13 +6108,18 @@
                                 renderCalendar();
                                 renderMonthlyList();
                                 renderDayPanel();
-                            } catch(e) { showToast('刪除失敗', true); }
+                            } catch(e) {
+                                console.error('刪除排班失敗:', e?.code, e?.message || e, { id, payload });
+                                const msg = (e && e.code === 'permission-denied') ? '沒有社區寫入權限，請使用管理端或社區管理員身分' : '刪除失敗';
+                                showToast(msg, true);
+                            }
                         });
                     });
                     el.querySelectorAll('[data-share-month]').forEach(btn=>{
                         btn.addEventListener('click', async ()=>{
                             const [iso, idxStr] = btn.getAttribute('data-share-month').split('__');
                             const idx = parseInt(idxStr,10);
+                            if (!pageState.selectedPostId) { showToast('請先選擇哨點', true); return; }
                             const d = pageState.monthDocsMap[iso];
                             const s = Array.isArray(d?.shifts) ? d.shifts[idx] : null;
                             if (!s) return;
@@ -6150,7 +6156,11 @@
                                     updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                                 };
                                 await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload, { merge: true });
-                            } catch(_) {}
+                            } catch(e) {
+                                console.error('分享標記現金班失敗:', e?.code, e?.message || e, { payload });
+                                const msg = (e && e.code === 'permission-denied') ? '沒有社區寫入權限，請使用管理端或社區管理員身分' : '更新現金班失敗';
+                                showToast(msg, true);
+                            }
                         });
                     });
                     /* 已移除複製功能 */
@@ -6357,6 +6367,7 @@
                             renderMonthlyList();
                             renderDayPanel();
                         } catch(e) {
+                            console.error('儲存排班失敗:', e?.code, e?.message || e, { postId: effPostId, iso, payload });
                             const msg = (e && e.code === 'permission-denied') ? '沒有社區寫入權限，請使用管理端或社區管理員身分' : '儲存失敗';
                             showToast(msg, true);
                         }

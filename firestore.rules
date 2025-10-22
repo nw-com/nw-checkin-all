@@ -8,7 +8,7 @@ service cloud.firestore {
     // 社區維護角色：允許管理員、人事、主管、初階主管、社區管理員
     function isCommunityEditor() {
       return (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager','community_admin','社區管理員']
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','administrator','管理員','hr','manager','junior_manager','community_admin','社區管理員']
       );
     }
     // 補打申請審核角色：管理員、人事、高階主管
@@ -118,134 +118,18 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
       ) || (
         // 本人可將自己提交且為 pending 的假單取消（更新為 canceled）
-        request.auth.uid == resource.data.userId &&
-        resource.data.status == 'pending' &&
-        request.resource.data.status == 'canceled' &&
-        request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'canceledAt'])
+        request.auth != null && request.resource.data.userId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.status == 'canceled'
       );
-      allow delete: if false;
-    }
-    
-    // 允許用戶提交特殊勤務申請，並允許管理員審核
-    match /specialDuties/{dutyId} {
-      allow create: if request.auth != null;
-      allow read: if request.auth != null;
-      // 允許管理員更新特殊勤務申請狀態（審核功能）
-      allow update: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-      allow delete: if false;
+      // 只有管理員可刪除
+      allow delete: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // 補打卡申請：使用者提交，管理員審核
-    match /retroClockRequests/{requestId} {
-      // 本人可提交申請；限制欄位與型別
-      allow create: if request.auth != null &&
-        request.auth.uid == request.resource.data.userId &&
-        request.resource.data.keys().hasOnly([
-          'userId','type','reason','locationName','requestedAt','targetTime','status'
-        ]) &&
-        request.resource.data.type in ['上班','下班','外出','抵達','離開'] &&
-        (request.resource.data.reason == null || request.resource.data.reason is string) &&
-        (request.resource.data.locationName == null || request.resource.data.locationName is string) &&
-        request.resource.data.requestedAt is timestamp &&
-        request.resource.data.targetTime is timestamp &&
-        request.resource.data.status == 'pending';
-
-      // 任何登入者可讀（供管理員審核、一般使用者查看自己的申請狀態）
-      allow read: if request.auth != null;
-
-      // 管理員、人事、高階主管可審核並更新狀態；限制可更新欄位與型別
-      allow update: if isReviewer() &&
-        request.resource.data.keys().hasOnly([
-          'userId','type','reason','locationName','requestedAt','targetTime','status','reviewerId','reviewedAt'
-        ]) &&
-        request.resource.data.type in ['上班','下班','外出','抵達','離開'] &&
-        (request.resource.data.reason == null || request.resource.data.reason is string) &&
-        (request.resource.data.locationName == null || request.resource.data.locationName is string) &&
-        request.resource.data.requestedAt is timestamp &&
-        request.resource.data.targetTime is timestamp &&
-        request.resource.data.status in ['approved','rejected','pending'] &&
-        (request.resource.data.reviewerId == null || request.resource.data.reviewerId is string) &&
-        (request.resource.data.reviewedAt == null || request.resource.data.reviewedAt is timestamp);
-
-      // 禁止刪除
-      allow delete: if false;
-    }
-    
-    // 允許讀取所有人員狀態資訊（用於人員地圖和追蹤功能）
-    match /userStatus/{userId} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth.uid == userId || 
-                             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-      allow delete: if false;
-    }
-
-    // 設定資料：general 與 group
-    // general：任何登入者可讀，僅管理員可寫
-    match /settings/general {
-      allow read: if request.auth != null;
-      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    // group：供群組頁載入指定可見成員名單
-    // 管理員與初階主管可讀，僅管理員可寫
-    match /settings/group {
-      allow read: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'junior_manager';
-      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    // 位置設定：任何登入者可讀，僅管理員可寫
-    match /settings/location {
-      allow read: if request.auth != null;
-      allow write: if isAdmin() &&
-        request.resource.data.keys().hasOnly([
-          'companyLat','companyLng','companyRadius','markAbnormalLocation','otherLocations','updatedAt'
-        ]) &&
-        (request.resource.data.companyLat == null || request.resource.data.companyLat is number) &&
-        (request.resource.data.companyLng == null || request.resource.data.companyLng is number) &&
-        (request.resource.data.companyRadius == null || request.resource.data.companyRadius is number) &&
-        (request.resource.data.markAbnormalLocation == null || request.resource.data.markAbnormalLocation is bool) &&
-        (request.resource.data.otherLocations == null || request.resource.data.otherLocations is list) &&
-        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
-    }
-
-    // 社區列表：任何登入者可讀，僅社區維護角色可寫
+    // 社區資料（讀）
     match /communities/{communityId} {
       allow read: if request.auth != null;
-      // 僅社區維護角色可新增社區；限制欄位與型別
-      allow create: if isCommunityEditor() &&
-        request.resource.data.keys().hasOnly([
-          'name','address','region','code','shortName','location','radius','createdAt','updatedAt'
-        ]) &&
-        request.resource.data.name is string &&
-        (request.resource.data.address == null || request.resource.data.address is string) &&
-        (request.resource.data.shortName == null || request.resource.data.shortName is string) &&
-        request.resource.data.region in ['台北','新北','桃園'] &&
-        request.resource.data.code is string &&
-        request.resource.data.location is latlng &&
-        (request.resource.data.radius == null || (request.resource.data.radius is number && request.resource.data.radius >= 0)) &&
-        request.resource.data.createdAt is timestamp &&
-        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
-
-      // 僅社區維護角色可更新社區；限制欄位與型別
-      allow update: if isCommunityEditor() &&
-        request.resource.data.keys().hasOnly([
-          'name','address','region','code','shortName','location','radius','createdAt','updatedAt'
-        ]) &&
-        request.resource.data.name is string &&
-        (request.resource.data.address == null || request.resource.data.address is string) &&
-        (request.resource.data.shortName == null || request.resource.data.shortName is string) &&
-        request.resource.data.region in ['台北','新北','桃園'] &&
-        request.resource.data.code is string &&
-        request.resource.data.location is latlng &&
-        (request.resource.data.radius == null || (request.resource.data.radius is number && request.resource.data.radius >= 0)) &&
-        request.resource.data.updatedAt is timestamp;
-
-      // 僅社區維護角色可刪除社區
-      allow delete: if isCommunityEditor();
     }
 
-    // 哨點（排班頁的子分頁）：可自定義名稱，允許重名
+    // 社區根集合：哨點清單
     match /posts/{postId} {
       allow read: if request.auth != null;
       // 建立時需要完整欄位
