@@ -5649,7 +5649,7 @@
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                 createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             };
-                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), data);
+                            await setDoc(doc(db,'communities', communityId, 'postSchedules', id), data, { merge: true });
                             showToast('已儲存設定');
                             await loadMonth();
                             renderCalendar();
@@ -5670,7 +5670,7 @@
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
                                 const payloadDel = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadDel);
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadDel, { merge: true });
                                 showToast('已刪除班表');
                                 await loadMonth();
                                 renderCalendar();
@@ -5694,7 +5694,7 @@
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
                                 const payloadAssign = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAssign);
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAssign, { merge: true });
                                 showToast('已更新指派');
                                 await loadMonth();
                                 renderCalendar();
@@ -5732,7 +5732,7 @@
                                     createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                                 } : {};
                                 const payloadEdit = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadEdit);
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadEdit, { merge: true });
                                 showToast('已更新班表時間');
                                 await loadMonth();
                                 renderCalendar();
@@ -5758,7 +5758,7 @@
                                 createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
                             } : {};
                             const payloadAdd = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAdd);
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAdd, { merge: true });
                             showToast('已新增班表');
                             await loadMonth();
                             renderCalendar();
@@ -6052,7 +6052,7 @@
                                         updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                         updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                                     };
-                                    await setDoc(dref, payload);
+                                    await setDoc(dref, payload, { merge: true });
                                 }
                                 showToast('CSV 匯入完成');
                                 await loadMonth();
@@ -6101,7 +6101,7 @@
                                     updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                     updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                                 };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload);
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload, { merge: true });
                                 showToast('已刪除班表');
                                 await loadMonth();
                                 renderCalendar();
@@ -6149,7 +6149,7 @@
                                     updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                     updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                                 };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload);
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payload, { merge: true });
                             } catch(_) {}
                         });
                     });
@@ -6345,7 +6345,7 @@
                                 updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
                                 updatedBy: (window.__auth?.currentUser?.uid || state.currentUser?.uid || '')
                             };
-                            await setDoc(dref, payload);
+                            await setDoc(dref, payload, { merge: true });
                             showToast(edit ? '已更新排班' : '已新增排班');
                             modal.classList.add('hide');
                             pageState.selectedPostId = effPostId;
