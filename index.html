@@ -6938,14 +6938,14 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             
             function renderTrackingMap(container) {
                 container.innerHTML = `
-                    <div class="sticky top-[50px] z-20 w-full min-h-[336px] md:min-h-[416px]">
+                    <div class="sticky top-0 z-20 w-full min-h-[336px] md:min-h-[416px]">
                         <div id="tracking-map" class="w-full h-full min-h-[336px] md:min-h-[416px]"></div>
                         <div id="tracking-map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
                         <button id="tracking-map-center-btn" class="absolute top-3 right-3 z-10 bg-white text-gray-700 border border-gray-300 rounded-full shadow px-3 py-2 flex items-center hover:bg-gray-50">
                             <i data-lucide="focus" class="w-4 h-4 mr-2"></i>回到社區
                         </button>
                     </div>
-                    <div class="mt-3">
+                    <div class="mt-0">
                         <div id="user-tracking-list" class="bg-white rounded-lg shadow-lg max-h-[260px] overflow-y-auto p-2 space-y-2">
                             <!-- 人員列表會在此處載入 -->
                         </div>
@@ -7036,7 +7036,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 try {
                     const img = new Image();
                     img.onload = () => {
-                        const scale = 0.4;
+                        const scale = 0.6;
                         const w = img.naturalWidth || 40;
                         const h = img.naturalHeight || 40;
                         const scaledSize = new google.maps.Size(Math.round(w * scale), Math.round(h * scale));
