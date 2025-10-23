@@ -6066,16 +6066,31 @@
                     if (deleteBtn) deleteBtn.onclick = async () => {
                         const filterIso = pageState.selectedDayIso || null;
                         try {
+                            const { collection, getDocs, query, where, Timestamp, deleteDoc, doc } = window.__fs || {};
+                            const db2 = window.__db || db;
+                            if (!db2 || !collection || !getDocs || !query || !where) { showToast('資料庫尚未就緒', true); return; }
+
                             if (filterIso) {
-                                if (!confirm('確定刪除當日班表資料？')) return;
-                                const id = `${communityId}__${pageState.selectedPostId}__${filterIso}`;
-                                await deleteDoc(doc(db,'communities', communityId, 'postSchedules', id));
-                                showToast('已刪除當日班表');
+                                if (!confirm('確定刪除當日「全社區」所有哨點的班表資料？')) return;
+                                const schedulesRef = collection(db2, 'communities', communityId, 'postSchedules');
+                                const dsnap = await getDocs(query(schedulesRef, where('dateIso', '==', filterIso)));
+                                const tasks = [];
+                                dsnap.forEach(d => tasks.push(deleteDoc(doc(db2, 'communities', communityId, 'postSchedules', d.id))));
+                                await Promise.all(tasks);
+                                showToast('已刪除當日全社區班表');
                             } else {
-                                if (!confirm('確定刪除本月所有班表資料？')) return;
-                                const ids = Object.values(pageState.monthDocsMap).map(d => d?.id).filter(Boolean);
-                                await Promise.all(ids.map(x => deleteDoc(doc(db,'communities', communityId, 'postSchedules', x))));
-                                showToast('已刪除本月班表');
+                                if (!confirm('確定刪除本月「全社區」所有哨點的班表資料？')) return;
+                                const schedulesRef = collection(db2, 'communities', communityId, 'postSchedules');
+                                const m = pageState.monthDate || new Date();
+                                const monthStart = new Date(m.getFullYear(), m.getMonth(), 1);
+                                const monthEnd = new Date(m.getFullYear(), m.getMonth()+1, 0);
+                                const startTS = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${monthStart.toISOString().slice(0,10)}T00:00:00`)) : monthStart;
+                                const endTS = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${monthEnd.toISOString().slice(0,10)}T23:59:59`)) : monthEnd;
+                                const dsnap = await getDocs(query(schedulesRef, where('dateTS', '>=', startTS), where('dateTS', '<=', endTS)));
+                                const tasks = [];
+                                dsnap.forEach(d => tasks.push(deleteDoc(doc(db2, 'communities', communityId, 'postSchedules', d.id))));
+                                await Promise.all(tasks);
+                                showToast('已刪除本月全社區班表');
                             }
                             await loadMonth();
                             renderCalendar();
@@ -6083,7 +6098,7 @@
                             renderDayPanel();
                         } catch (e) {
                             console.error('刪除班表失敗', e);
-                            showToast('刪除失敗', true);
+                            showToast('刪除失敗：請檢查權限與網路', true);
                         }
                     };
 
