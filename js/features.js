@@ -5,6 +5,7 @@ function renderFeatures(subPage) {
         <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
             <button data-subtab="training" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'training' ? 'active' : ''}">教育訓練</button>
             <button data-subtab="downloads" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'downloads' ? 'active' : ''}">文件下載</button>
+            <button data-subtab="patrol" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'patrol' ? 'active' : ''}">巡邏任務</button>
         </div>
         <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
     
@@ -13,6 +14,8 @@ function renderFeatures(subPage) {
         renderFeaturesTraining(subPageContent);
     } else if (subPage === 'downloads') {
         renderFeaturesDownloads(subPageContent);
+    } else if (subPage === 'patrol') {
+        renderFeaturesPatrolTasks(subPageContent);
     } else {
         renderFeaturesTraining(subPageContent);
     }
@@ -79,6 +82,25 @@ function renderFeaturesDownloads(container) {
             <div class="text-center">
                 <i data-lucide="construction" class="w-16 h-16 text-gray-400 mx-auto mb-4"></i>
                 <h2 class="text-xl font-semibold text-gray-700 mb-2">功能開發中</h2>
+            </div>
+        </div>`;
+    if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+        lucide.createIcons();
+    }
+}
+
+// 功能分頁 - 巡邏任務子分頁
+function renderFeaturesPatrolTasks(container) {
+    if (typeof window !== 'undefined' && typeof window.renderPatrolTasks === 'function') {
+        window.renderPatrolTasks(container);
+        return;
+    }
+    container.innerHTML = `
+        <div class="p-4 flex flex-col items-center justify-center h-full">
+            <div class="text-center">
+                <i data-lucide="alert-triangle" class="w-16 h-16 text-gray-400 mx-auto mb-4"></i>
+                <h2 class="text-xl font-semibold text-gray-700 mb-2">巡邏任務無法載入</h2>
+                <p class="text-gray-500">系統尚未初始化巡邏任務模組或權限不足。</p>
             </div>
         </div>`;
     if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {

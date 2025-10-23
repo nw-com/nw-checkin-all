@@ -5241,7 +5241,7 @@
             function renderGroup(subPage) {
                 const role = state.currentUserData?.role || '';
                 const isManagement = new Set(['admin','hr','manager','junior_manager']).has(role);
-                const firstLabel = isManagement ? '巡邏任務' : '開始巡邏';
+                const firstLabel = '開始巡邏';
                 const secondLabel = '巡邏紀錄';
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
@@ -7640,6 +7640,8 @@
                 newPointBtn.addEventListener('click', openNewPointModal);
                 renderAll();
             }
+
+            window.renderPatrolTasks = renderGroupPatrolList;
 
             function renderGroupMap(container) {
                 container.innerHTML = `
