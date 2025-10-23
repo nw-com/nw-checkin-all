@@ -377,6 +377,79 @@ service cloud.firestore {
     }
 
     // 帳號申請：任何人可提交（未登入也可），僅管理端可讀取與審核
+    // 巡邏：巡邏點、任務、紀錄
+    match /communities/{communityId}/patrolPoints/{pointId} {
+      allow read: if request.auth != null;
+      // 僅社區維護角色可新增/更新/刪除巡邏點；限制欄位與型別
+      allow create, update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','pointId','name','code','expectedStartHour','expectedEndHour','expectedStartHM','expectedEndHM','weekly','daysOfWeek','defaultAssigneeRole','defaultAssigneeId','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        request.resource.data.pointId is string &&
+        request.resource.data.name is string &&
+        request.resource.data.code is string &&
+        (request.resource.data.code.size() == 12) &&
+        (request.resource.data.expectedStartHour == null || request.resource.data.expectedStartHour is int) &&
+        (request.resource.data.expectedEndHour == null || request.resource.data.expectedEndHour is int) &&
+        (request.resource.data.expectedStartHM == null || request.resource.data.expectedStartHM is string) &&
+        (request.resource.data.expectedEndHM == null || request.resource.data.expectedEndHM is string) &&
+        (request.resource.data.weekly == null || request.resource.data.weekly is bool) &&
+        (request.resource.data.daysOfWeek == null || request.resource.data.daysOfWeek is list) &&
+        (request.resource.data.defaultAssigneeRole == null || request.resource.data.defaultAssigneeRole is string) &&
+        (request.resource.data.defaultAssigneeId == null || request.resource.data.defaultAssigneeId is string) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      allow delete: if isCommunityEditor();
+    }
+
+    match /communities/{communityId}/patrolTasks/{taskId} {
+      allow read: if request.auth != null;
+      // 僅社區維護角色可新增/更新/刪除巡邏任務；限制欄位與型別
+      allow create, update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','pointId','pointName','pointCode','dateIso','dateTS','assignedRole','assignedUserId','expectedStartHM','expectedEndHM','actualStartTS','actualEndTS','status','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        request.resource.data.pointId is string &&
+        (request.resource.data.pointName == null || request.resource.data.pointName is string) &&
+        (request.resource.data.pointCode == null || request.resource.data.pointCode is string) &&
+        request.resource.data.dateIso is string &&
+        request.resource.data.dateTS is timestamp &&
+        (request.resource.data.assignedRole == null || request.resource.data.assignedRole is string) &&
+        (request.resource.data.assignedUserId == null || request.resource.data.assignedUserId is string) &&
+        (request.resource.data.expectedStartHM == null || request.resource.data.expectedStartHM is string) &&
+        (request.resource.data.expectedEndHM == null || request.resource.data.expectedEndHM is string) &&
+        (request.resource.data.actualStartTS == null || request.resource.data.actualStartTS is timestamp) &&
+        (request.resource.data.actualEndTS == null || request.resource.data.actualEndTS is timestamp) &&
+        (request.resource.data.status == null || request.resource.data.status in ['尚未開始','進行中','已完成','未執行']) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      allow delete: if isCommunityEditor();
+    }
+
+    match /communities/{communityId}/patrolLogs/{logId} {
+      // 巡邏感應紀錄：任何登入者可讀；允許建立，但限制欄位與型別
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+        request.resource.data.keys().hasOnly([
+          'communityId','pointId','pointCode','action','timestamp','deviceId','userId','createdAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        (request.resource.data.pointId == null || request.resource.data.pointId is string) &&
+        (request.resource.data.pointCode == null || request.resource.data.pointCode is string) &&
+        request.resource.data.action in ['start','end'] &&
+        request.resource.data.timestamp is timestamp &&
+        (request.resource.data.deviceId == null || request.resource.data.deviceId is string) &&
+        (request.resource.data.userId == null || request.resource.data.userId is string) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp);
+      // 僅社區維護角色可更新、刪除紀錄（修正錯誤用）
+      allow update, delete: if isCommunityEditor();
+    }
+
     match /accountApplications/{appId} {
       // 允許未登入者或登入者提交申請；嚴格限制欄位與型別
       allow create: if

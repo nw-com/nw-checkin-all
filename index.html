@@ -5230,7 +5230,7 @@
                 if (subPage === 'attendance') {
                     renderGroupAttendance(subPageContent);
                 } else {
-                    renderGroupMap(subPageContent);
+                    renderGroupPatrolList(subPageContent);
                 }
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('group', btn.dataset.subtab)));
             }
@@ -6583,6 +6583,369 @@
                 init();
             }
 
+            function renderGroupPatrolList(container) {
+                const db = window.__db;
+                const fs = window.__fs || {};
+                const { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp, serverTimestamp } = fs;
+                const comm = state.currentCommunity;
+                if (!comm || !comm.id) {
+                    container.innerHTML = `<div class="p-6 text-center text-gray-500">請先選擇社區</div>`;
+                    return;
+                }
+
+                const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
+                const local = {
+                    monthDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+                    usersCache: [],
+                    pointsCache: [],
+                    tasksCache: [],
+                    logsByKey: {}
+                };
+
+                const fmtHM = (date) => {
+                    if (!date || isNaN(date.getTime())) return '';
+                    return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+                };
+                const toDate = (tsOrDate) => tsOrDate?.toDate?.() || (tsOrDate instanceof Date ? tsOrDate : (tsOrDate ? new Date(tsOrDate) : null));
+                const monthStart = () => new Date(local.monthDate.getFullYear(), local.monthDate.getMonth(), 1, 0, 0, 0, 0);
+                const monthEnd = () => new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()+1, 0, 23, 59, 59, 999);
+                const fmtMonthLabel = () => `${local.monthDate.getFullYear()}年 ${local.monthDate.getMonth()+1}月`;
+
+                const computeStatus = (expectedStartHM, expectedEndHM, actualStartTS, actualEndTS) => {
+                    try {
+                        const today = new Date();
+                        const dayIso = `${local.monthDate.getFullYear()}-${String(local.monthDate.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+                        const sDate = expectedStartHM ? new Date(`${dayIso}T${expectedStartHM}:00`) : null;
+                        const eDate = expectedEndHM ? new Date(`${dayIso}T${expectedEndHM}:00`) : null;
+                        const aStart = toDate(actualStartTS);
+                        const aEnd = toDate(actualEndTS);
+                        if (!aStart && sDate && today < sDate) return '尚未開始';
+                        if (aStart && !aEnd) return '進行中';
+                        if (aStart && aEnd) return '已完成';
+                        if (!aStart && eDate && today > eDate) return '未執行';
+                        return '尚未開始';
+                    } catch (_) { return '尚未開始'; }
+                };
+
+                container.innerHTML = `
+                    <div class="p-3 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <button id="patrol-prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
+                                <div id="patrol-current-month" class="text-lg font-semibold">${fmtMonthLabel()}</div>
+                                <button id="patrol-next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
+                            </div>
+                            <button id="patrol-new-point" class="px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700">新增巡邏點</button>
+                        </div>
+                        <div class="bg-white rounded-lg shadow overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">日期</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">巡邏點編號</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">巡邏點名稱</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">指派人員</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">預計開始時間</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">實際開始時間</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">預計結束時間</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">實際結束時間</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">狀態</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="patrol-rows">
+                                    <tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">正在載入當月巡邏列表...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>`;
+                try { lucide.createIcons(); } catch(_) {}
+
+                const monthLabel = document.getElementById('patrol-current-month');
+                const prevBtn = document.getElementById('patrol-prev-month');
+                const nextBtn = document.getElementById('patrol-next-month');
+                const rowsEl = document.getElementById('patrol-rows');
+                const newPointBtn = document.getElementById('patrol-new-point');
+
+                const ensureUsers = async () => {
+                    // 盡量使用 pageState 已載入的社區使用者
+                    let users = Array.isArray(window.pageState?.communityUsers) ? window.pageState.communityUsers.slice() : [];
+                    if (!users.length && db && collection && getDocs) {
+                        const snap = await getDocs(collection(db, 'users'));
+                        users = [];
+                        snap.forEach(d => users.push({ id: d.id, name: d.data().name || d.data().displayName || d.id, ...d.data() }));
+                    }
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                    const usersByCommunity = (currentCommId || currentCommCode) ? users.filter(u => {
+                        const byId = Array.isArray(u.serviceCommunities) && currentCommId ? u.serviceCommunities.includes(currentCommId) : false;
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const byCode = currentCommCode ? (codesArr.includes(currentCommCode) || (u.serviceCommunityCode === currentCommCode)) : false;
+                        const byLegacy = currentCommId ? ((u.serviceCommunityCode === currentCommId) || (codesArr.includes(currentCommId))) : false;
+                        return byId || byCode || byLegacy;
+                    }) : users;
+                    local.usersCache = usersByCommunity.filter(u => allowedRoles.has((u.jobTitle || u.applicationTitle || u.role || '').trim()))
+                        .sort((a,b)=> (a.name||'').localeCompare(b.name||'', 'zh-Hant'));
+                };
+
+                const loadPoints = async () => {
+                    try {
+                        const snap = await getDocs(collection(db, 'communities', comm.id, 'patrolPoints'));
+                        local.pointsCache = [];
+                        snap.forEach(d => local.pointsCache.push({ id: d.id, ...d.data() }));
+                    } catch (e) { console.warn('載入巡邏點失敗', e); }
+                };
+
+                const ensureTasksForMonth = async () => {
+                    if (!local.pointsCache.length) return;
+                    const start = monthStart();
+                    const end = monthEnd();
+                    const y = local.monthDate.getFullYear();
+                    const m = local.monthDate.getMonth();
+                    for (let day=1; day<=new Date(y, m+1, 0).getDate(); day++) {
+                        const d = new Date(y, m, day);
+                        const dow = d.getDay();
+                        const iso = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                        for (const p of local.pointsCache) {
+                            const scheduled = (p.weekly === true) || (Array.isArray(p.daysOfWeek) && p.daysOfWeek.includes(dow));
+                            if (!scheduled) continue;
+                            const docId = `${comm.id}__${p.pointId || p.id}__${iso}`;
+                            try {
+                                const dref = doc(db, 'communities', comm.id, 'patrolTasks', docId);
+                                const dsnap = await getDoc(dref);
+                                if (!dsnap.exists()) {
+                                    await setDoc(dref, {
+                                        communityId: comm.id,
+                                        pointId: p.pointId || p.id,
+                                        pointName: p.name || '',
+                                        pointCode: p.code || '',
+                                        dateIso: iso,
+                                        dateTS: Timestamp.fromDate(new Date(`${iso}T00:00:00`)),
+                                        assignedRole: p.defaultAssigneeRole || '',
+                                        assignedUserId: p.defaultAssigneeId || '',
+                                        expectedStartHM: (typeof p.expectedStartHour === 'number' ? String(p.expectedStartHour).padStart(2,'0')+':00' : (p.expectedStartHM || '')),
+                                        expectedEndHM: (typeof p.expectedEndHour === 'number' ? String(p.expectedEndHour).padStart(2,'0')+':00' : (p.expectedEndHM || '')),
+                                        actualStartTS: null,
+                                        actualEndTS: null,
+                                        status: '尚未開始',
+                                        createdAt: Timestamp.fromDate(new Date()),
+                                        updatedAt: Timestamp.fromDate(new Date())
+                                    });
+                                }
+                            } catch (e) { console.warn('建立巡邏任務失敗', e); }
+                        }
+                    }
+                };
+
+                const loadTasksAndLogs = async () => {
+                    const startTS = Timestamp.fromDate(monthStart());
+                    const endTS = Timestamp.fromDate(monthEnd());
+                    const tasksSnap = await getDocs(query(collection(db, 'communities', comm.id, 'patrolTasks'), where('dateTS','>=', startTS), where('dateTS','<=', endTS), orderBy('dateTS')));
+                    local.tasksCache = [];
+                    tasksSnap.forEach(d => local.tasksCache.push({ id: d.id, ...d.data() }));
+                    // 讀取感應紀錄（本月）
+                    local.logsByKey = {};
+                    try {
+                        const logsSnap = await getDocs(query(collection(db, 'communities', comm.id, 'patrolLogs'), where('timestamp','>=', startTS), where('timestamp','<=', endTS)));
+                        logsSnap.forEach(ld => {
+                            const log = { id: ld.id, ...ld.data() };
+                            const key = `${log.pointCode || ''}__${(log.timestamp?.toDate?.() || new Date(log.timestamp)).toISOString().split('T')[0]}`;
+                            if (!local.logsByKey[key]) local.logsByKey[key] = [];
+                            local.logsByKey[key].push(log);
+                        });
+                    } catch (e) { /* 無紀錄亦可 */ }
+                };
+
+                const renderRows = () => {
+                    if (!Array.isArray(local.tasksCache) || !local.tasksCache.length) {
+                        rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">本月尚無巡邏任務</td></tr>`;
+                        return;
+                    }
+                    const userOptions = local.usersCache.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+                    const rows = local.tasksCache.map(t => {
+                        const key = `${t.pointCode || ''}__${t.dateIso}`;
+                        const logs = local.logsByKey[key] || [];
+                        const startLog = logs.filter(l => l.action === 'start').sort((a,b)=> toDate(a.timestamp) - toDate(b.timestamp))[0] || null;
+                        const endLog = logs.filter(l => l.action === 'end').sort((a,b)=> toDate(b.timestamp) - toDate(a.timestamp))[0] || null;
+                        const actualStartStr = startLog ? fmtHM(toDate(startLog.timestamp)) : '';
+                        const actualEndStr = endLog ? fmtHM(toDate(endLog.timestamp)) : '';
+                        const statusText = computeStatus(t.expectedStartHM, t.expectedEndHM, startLog?.timestamp, endLog?.timestamp);
+                        return `
+                            <tr data-task-id="${t.id}">
+                                <td class="px-3 py-2 whitespace-nowrap">${t.dateIso}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${t.pointId || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${t.pointName || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">
+                                    <select class="assign-select border rounded px-2 py-1">
+                                        <option value="">未指派</option>
+                                        ${userOptions}
+                                    </select>
+                                </td>
+                                <td class="px-3 py-2 whitespace-nowrap">
+                                    <input type="time" step="3600" class="expected-start border rounded px-2 py-1" value="${t.expectedStartHM || ''}" />
+                                </td>
+                                <td class="px-3 py-2 whitespace-nowrap">${actualStartStr}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">
+                                    <input type="time" step="3600" class="expected-end border rounded px-2 py-1" value="${t.expectedEndHM || ''}" />
+                                </td>
+                                <td class="px-3 py-2 whitespace-nowrap">${actualEndStr}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${statusText}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">
+                                    <div class="flex items-center gap-2">
+                                        <button class="save-task bg-amber-500 text-white px-2 py-1 rounded text-xs">編輯</button>
+                                        <button class="delete-task bg-red-600 text-white px-2 py-1 rounded text-xs">刪除</button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                    });
+                    rowsEl.innerHTML = rows.join('');
+                    try { lucide.createIcons(); } catch(_) {}
+
+                    rowsEl.querySelectorAll('tr').forEach(tr => {
+                        const taskId = tr.getAttribute('data-task-id');
+                        const t = local.tasksCache.find(x => x.id === taskId);
+                        const assignSel = tr.querySelector('.assign-select');
+                        const expStart = tr.querySelector('.expected-start');
+                        const expEnd = tr.querySelector('.expected-end');
+                        if (assignSel) assignSel.value = t?.assignedUserId || '';
+                        tr.querySelector('.save-task')?.addEventListener('click', async () => {
+                            const newAssignedId = assignSel?.value || '';
+                            const newAssignedRole = local.usersCache.find(u => u.id === newAssignedId)?.role || '';
+                            const newStart = expStart?.value || t.expectedStartHM || '';
+                            const newEnd = expEnd?.value || t.expectedEndHM || '';
+                            try {
+                                const dref = doc(db, 'communities', comm.id, 'patrolTasks', taskId);
+                                await updateDoc(dref, {
+                                    assignedUserId: newAssignedId,
+                                    assignedRole: newAssignedRole || '',
+                                    expectedStartHM: newStart,
+                                    expectedEndHM: newEnd,
+                                    updatedAt: Timestamp.fromDate(new Date())
+                                });
+                                showToast('已更新巡邏任務');
+                                await loadTasksAndLogs();
+                                renderRows();
+                            } catch (e) { console.error('更新巡邏任務失敗', e); showToast('更新失敗：請檢查權限', true); }
+                        });
+                        tr.querySelector('.delete-task')?.addEventListener('click', async () => {
+                            if (!confirm('確定刪除此巡邏任務？')) return;
+                            try {
+                                await deleteDoc(doc(db, 'communities', comm.id, 'patrolTasks', taskId));
+                                showToast('已刪除巡邏任務');
+                                await loadTasksAndLogs();
+                                renderRows();
+                            } catch (e) { console.error('刪除巡邏任務失敗', e); showToast('刪除失敗：請檢查權限', true); }
+                        });
+                    });
+                };
+
+                const renderAll = async () => {
+                    monthLabel.textContent = fmtMonthLabel();
+                    rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">正在載入當月巡邏列表...</td></tr>`;
+                    await ensureUsers();
+                    await loadPoints();
+                    await ensureTasksForMonth();
+                    await loadTasksAndLogs();
+                    renderRows();
+                };
+
+                prevBtn.addEventListener('click', () => { local.monthDate = new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()-1, 1); renderAll(); });
+                nextBtn.addEventListener('click', () => { local.monthDate = new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()+1, 1); renderAll(); });
+
+                const openNewPointModal = () => {
+                    const modal = document.createElement('div');
+                    modal.className = 'fixed inset-0 bg-black/30 flex items-center justify-center z-50';
+                    modal.innerHTML = `
+                        <div class="bg-white rounded-lg shadow p-4 w-[360px]">
+                            <div class="text-lg font-semibold mb-2">新增巡邏點</div>
+                            <div class="space-y-2">
+                                <div>
+                                    <label class="text-sm">巡邏點編號</label>
+                                    <input id="pt-id" class="w-full border rounded px-2 py-1" placeholder="如 P-001" />
+                                </div>
+                                <div>
+                                    <label class="text-sm">巡邏點名稱</label>
+                                    <input id="pt-name" class="w-full border rounded px-2 py-1" placeholder="如 A棟中庭" />
+                                </div>
+                                <div>
+                                    <label class="text-sm">巡邏點 code (12位數)</label>
+                                    <input id="pt-code" class="w-full border rounded px-2 py-1" placeholder="例如 123456789012" />
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-sm">預計開始時間(時)</label>
+                                        <input id="pt-start" type="time" step="3600" class="w-full border rounded px-2 py-1" value="08:00" />
+                                    </div>
+                                    <div>
+                                        <label class="text-sm">預計結束時間(時)</label>
+                                        <input id="pt-end" type="time" step="3600" class="w-full border rounded px-2 py-1" value="09:00" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-sm">執行行程</label>
+                                    <div class="space-y-1 text-sm">
+                                        <label class="inline-flex items-center gap-2"><input type="checkbox" id="pt-weekly" /> 每週 (7天)</label>
+                                        <div class="grid grid-cols-7 gap-1">
+                                            <label class="inline-flex items-center gap-1"><input type="checkbox" class="pt-dow" value="0" />日</label>
+                                            <label class="inline-flex items-center gap-1"><input type="checkbox" class="pt-dow" value="1" />一</label>
+                                            <label class="inline-flex items-center gap-1"><input type="checkbox" class="pt-dow" value="2" />二</label>
+                                            <label class="inline-flex items-center gap-1"><input type="checkbox" class="pt-dow" value="3" />三</label>
+                                            <label class="inline-flex items-center gap-1"><input type="checkbox" class="pt-dow" value="4" />四</label>
+                                            <label class="inline-flex items-center gap-1"><input type="checkbox" class="pt-dow" value="5" />五</label>
+                                            <label class="inline-flex items-center gap-1"><input type="checkbox" class="pt-dow" value="6" />六</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-3 flex justify-end gap-2">
+                                <button id="pt-cancel" class="px-3 py-1 rounded border">取消</button>
+                                <button id="pt-save" class="px-3 py-1 rounded bg-amber-600 text-white">儲存</button>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(modal);
+                    const close = () => { try { document.body.removeChild(modal); } catch(_){} };
+                    modal.querySelector('#pt-cancel')?.addEventListener('click', close);
+                    modal.querySelector('#pt-save')?.addEventListener('click', async () => {
+                        const pointId = modal.querySelector('#pt-id')?.value.trim() || '';
+                        const name = modal.querySelector('#pt-name')?.value.trim() || '';
+                        const code = modal.querySelector('#pt-code')?.value.trim() || '';
+                        const startHM = modal.querySelector('#pt-start')?.value || '';
+                        const endHM = modal.querySelector('#pt-end')?.value || '';
+                        const weekly = modal.querySelector('#pt-weekly')?.checked || false;
+                        const dows = Array.from(modal.querySelectorAll('.pt-dow')).filter(x => x.checked).map(x => parseInt(x.value,10));
+                        if (!pointId || !name || !/^\d{12}$/.test(code)) { showToast('請完整填寫，code須為12位數字', true); return; }
+                        try {
+                            const pDocId = pointId; // 用使用者輸入的編號作為文件ID，方便管理
+                            await setDoc(doc(db, 'communities', comm.id, 'patrolPoints', pDocId), {
+                                communityId: comm.id,
+                                pointId: pointId,
+                                name: name,
+                                code: code,
+                                expectedStartHour: parseInt((startHM||'00:00').split(':')[0],10)||0,
+                                expectedEndHour: parseInt((endHM||'00:00').split(':')[0],10)||0,
+                                expectedStartHM: startHM,
+                                expectedEndHM: endHM,
+                                weekly: weekly,
+                                daysOfWeek: weekly ? [] : dows,
+                                defaultAssigneeRole: '',
+                                defaultAssigneeId: '',
+                                createdAt: Timestamp.fromDate(new Date()),
+                                updatedAt: Timestamp.fromDate(new Date())
+                            });
+                            showToast('已新增巡邏點');
+                            close();
+                            await loadPoints();
+                            await ensureTasksForMonth();
+                            await loadTasksAndLogs();
+                            renderRows();
+                        } catch (e) { console.error('新增巡邏點失敗', e); showToast('新增失敗：請檢查權限', true); }
+                    });
+                };
+
+                newPointBtn.addEventListener('click', openNewPointModal);
+                renderAll();
+            }
+
             function renderGroupMap(container) {
                 container.innerHTML = `
                     <div class="h-full w-full relative">
@@ -7454,7 +7817,10 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
       }
     }
 
-    scheduleUsers.sort((a,b)=> (a.name||'').localeCompare(b.name||'', 'zh-Hant')).forEach(u => {
+    // 僅保留「總幹事、秘書、保全、清潔、機電」
+    const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
+    const filteredUsers = scheduleUsers.filter(u => allowedRoles.has((u.jobTitle || u.applicationTitle || u.role || '').trim()));
+    filteredUsers.sort((a,b)=> (a.name||'').localeCompare(b.name||'', 'zh-Hant')).forEach(u => {
       const opt = document.createElement('option');
       opt.value = u.id; opt.textContent = u.name || u.displayName || u.id;
       userSelect.appendChild(opt);
