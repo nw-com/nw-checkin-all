@@ -5332,6 +5332,7 @@
                                         <button id="export-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯出CSV</button>
                                         <button id="import-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯入CSV</button>
                                         <button id="open-add-schedule" class="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
+                                        <button id="delete-schedule" class="px-2 py-1 text-xs rounded bg-rose-600 text-white hover:bg-rose-700">刪除</button>
                                         <input id="import-csv-input" type="file" accept=".csv,text/csv" class="hidden">
                                     </div>
                                 </div>
@@ -6060,6 +6061,31 @@
                         </div>`;
                     const addBtn = document.getElementById('open-add-schedule');
                     if (addBtn) { addBtn.onclick = () => openAddScheduleModal(); }
+
+                    const deleteBtn = document.getElementById('delete-schedule');
+                    if (deleteBtn) deleteBtn.onclick = async () => {
+                        const filterIso = pageState.selectedDayIso || null;
+                        try {
+                            if (filterIso) {
+                                if (!confirm('確定刪除當日班表資料？')) return;
+                                const id = `${communityId}__${pageState.selectedPostId}__${filterIso}`;
+                                await deleteDoc(doc(db,'communities', communityId, 'postSchedules', id));
+                                showToast('已刪除當日班表');
+                            } else {
+                                if (!confirm('確定刪除本月所有班表資料？')) return;
+                                const ids = Object.values(pageState.monthDocsMap).map(d => d?.id).filter(Boolean);
+                                await Promise.all(ids.map(x => deleteDoc(doc(db,'communities', communityId, 'postSchedules', x))));
+                                showToast('已刪除本月班表');
+                            }
+                            await loadMonth();
+                            renderCalendar();
+                            renderMonthlyList();
+                            renderDayPanel();
+                        } catch (e) {
+                            console.error('刪除班表失敗', e);
+                            showToast('刪除失敗', true);
+                        }
+                    };
 
                     const exportBtn = document.getElementById('export-csv');
                     if (exportBtn) exportBtn.onclick = async () => {
