@@ -477,9 +477,33 @@
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
             const db = getFirestore(app);
-            
-            // 已停用離線持久化以避免不同 SDK 版本衝突
-            // 若需啟用，請僅保留單一 SDK 版本並測試瀏覽器支援
+
+            // 啟用 Firestore 離線持久化與線上/離線提示
+            enableIndexedDbPersistence(db).then(() => {
+                window.__persistenceEnabled = true;
+            }).catch((err) => {
+                if (err?.code === 'failed-precondition') {
+                    console.warn('Firestore persistence failed-precondition', err);
+                    try { showToast('提示：離線模式僅支援單一分頁，請關閉其他分頁', true); } catch (_) {}
+                } else if (err?.code === 'unimplemented') {
+                    console.warn('Firestore persistence unimplemented', err);
+                    try { showToast('提示：瀏覽器不支援離線存取，需連線使用', true); } catch (_) {}
+                } else {
+                    console.warn('啟用離線持久化失敗', err);
+                }
+            });
+            const notifyOnlineState = (online) => {
+                window.__isOnline = !!online;
+                try {
+                    if (online) showToast('已恢復連線，正在同步');
+                    else showToast('目前離線，資料將暫存並在連線後同步', true);
+                } catch (_) {}
+            };
+            try { notifyOnlineState(navigator.onLine); } catch (_) {}
+            try {
+                window.addEventListener('online', () => notifyOnlineState(true));
+                window.addEventListener('offline', () => notifyOnlineState(false));
+            } catch (_) {}
             
             const storage = getStorage(app);
 
@@ -6721,19 +6745,11 @@
                     });
                 };
 
-                // 管理某個巡邏項目名稱對應的巡邏點：編輯或刪除
+                // 編輯或刪除「巡邏項目」（以項目為單位，不操作單一巡邏點）
                 const openManageItemModal = (itemName) => {
                     let points = (Array.isArray(local.pointsCache) ? local.pointsCache : [])
-                        .filter(p => {
-                            const iname = (p.itemName || '').trim();
-                            if (iname === itemName) return true;
-                            const arr = Array.isArray(p.tasks) ? p.tasks : [];
-                            return arr.some(t => {
-                                const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
-                                return nm === itemName;
-                            });
-                        });
-                    // 後備：若巡邏點未設定 tasks，改以本月任務 checklist 對應 pointId
+                        .filter(p => ((p.itemName || '').trim() === itemName));
+                    // 後備：若少數舊資料無 itemName，改以本月任務 checklist 名稱對應 pointId
                     if (!points.length) {
                         const matchedPointIds = new Set();
                         const tasks = Array.isArray(local.tasksCache) ? local.tasksCache : [];
@@ -6749,55 +6765,25 @@
                         points = (Array.isArray(local.pointsCache) ? local.pointsCache : []).filter(p => matchedPointIds.has(p.pointId || p.id));
                     }
                     if (!points.length) { showToast('找不到此巡邏項目', true); return; }
-                    if (points.length === 1) { openEditPointModal(points[0]); return; }
 
                     const modal = document.createElement('div');
                     modal.className = 'fixed inset-0 bg-black/30 flex items-center justify-center z-50';
                     modal.innerHTML = `
                         <div class="bg-white rounded-lg shadow p-4 w-[420px]">
-                            <div class="text-lg font-semibold mb-2">管理巡邏項目：${itemName}</div>
-                            <div class="space-y-2 max-h-[300px] overflow-y-auto" id="manage-list">
-                                ${points.map(p => `
-                                    <div class="flex items-center justify-between border rounded px-2 py-1">
-                                        <div class="text-sm">
-                                            <div>編號：${p.pointId || p.id || ''}</div>
-                                            <div>code：${p.code || ''}</div>
-                                            <div>任務數：${Array.isArray(p.tasks) ? p.tasks.length : 0}</div>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                            <button class="btn-edit px-2 py-1 rounded border text-xs" data-id="${p.id || p.pointId}">編輯</button>
-                                            <button class="btn-del px-2 py-1 rounded border text-xs text-red-600" data-id="${p.id || p.pointId}">刪除</button>
-                                        </div>
-                                    </div>
-                                `).join('')}
+                            <div class="text-lg font-semibold mb-2">編輯巡邏項目</div>
+                            <div class="text-sm text-gray-600 mb-3">目前「${itemName}」包含 ${points.length} 個巡邏點。</div>
+                            <div class="flex items-center gap-2 mb-3">
+                                <input id="manage-rename-input" class="px-2 py-1 rounded border text-sm w-full" placeholder="輸入新項目名稱" value="${itemName}" />
+                                <button id="manage-rename-apply" class="px-3 py-1 rounded bg-amber-600 text-white">儲存名稱</button>
                             </div>
-                            <div class="mt-3 flex justify-between">
+                            <div class="mt-2 flex justify-between">
                                 <button id="manage-cancel" class="px-3 py-1 rounded border">取消</button>
-                                <div class="flex items-center gap-2">
-                                    <input id="manage-rename-input" class="px-2 py-1 rounded border text-sm" placeholder="輸入新項目名稱" />
-                                    <button id="manage-rename-apply" class="px-3 py-1 rounded bg-amber-600 text-white">改名</button>
-                                    <button id="manage-delete-all" class="px-3 py-1 rounded bg-red-600 text-white">刪除此項目全部</button>
-                                </div>
+                                <button id="manage-delete-all" class="px-3 py-1 rounded bg-red-600 text-white">刪除此巡邏項目</button>
                             </div>
                         </div>`;
                     document.body.appendChild(modal);
                     const close = () => { try { document.body.removeChild(modal); } catch(_){} };
                     modal.querySelector('#manage-cancel')?.addEventListener('click', close);
-                    modal.querySelectorAll('.btn-edit').forEach(b => b.addEventListener('click', () => {
-                        const pid = b.getAttribute('data-id');
-                        const p = points.find(x => (x.id || x.pointId) === pid);
-                        close();
-                        if (p) openEditPointModal(p);
-                    }));
-                    modal.querySelectorAll('.btn-del').forEach(b => b.addEventListener('click', async () => {
-                        const pid = b.getAttribute('data-id');
-                        const p = points.find(x => (x.id || x.pointId) === pid);
-                        if (!p) return;
-                        const ok = confirm('確定要刪除此巡邏點及其相關任務？');
-                        if (!ok) return;
-                        close();
-                        await deletePointAndRelatedTasks(p);
-                    }));
                     modal.querySelector('#manage-delete-all')?.addEventListener('click', async () => {
                         const ok = confirm('確定要刪除該項目下所有巡邏點及其相關任務？');
                         if (!ok) return;
@@ -6881,39 +6867,24 @@
                 };
 
 
-                // 批次改名同一項目名稱的所有巡邏點與本月任務
+                // 批次改名同一項目名稱的所有巡邏點（僅更新 itemName，不改巡邏點名稱）
                 const renameItemPointsAndTasks = async (oldName, newName) => {
                     try {
                         showLoading(true);
                         const db2 = window.__db; const { collection, getDocs, query, where, doc, writeBatch } = window.__fs || {};
                         if (!db2 || !collection || !getDocs || !query || !where || !doc || !writeBatch) throw new Error('Firestore 未初始化');
-                        // 找出舊名稱的所有巡邏點
-                        const points = (Array.isArray(local.pointsCache) ? local.pointsCache : []).filter(p => (p.name || '').trim() === oldName);
-                        if (!points.length) { showToast('找不到要改名的巡邏點'); return; }
+                        // 找出舊項目名稱的所有巡邏點（以 itemName 比對）
+                        const points = (Array.isArray(local.pointsCache) ? local.pointsCache : []).filter(p => ((p.itemName || '').trim() === oldName));
+                        if (!points.length) { showToast('找不到要改名的巡邏項目'); return; }
                         const pids = points.map(p => p.id || p.pointId).filter(Boolean);
                         let batch = writeBatch(db2); let count = 0;
-                        // 更新巡邏點名稱
+                        // 更新巡邏點的 itemName
                         for (const pid of pids) {
-                            batch.update(doc(db2, 'communities', comm.id, 'patrolPoints', pid), { name: newName, updatedAt: new Date() });
+                            batch.update(doc(db2, 'communities', comm.id, 'patrolPoints', pid), { itemName: newName, updatedAt: new Date() });
                             count++; if (count % 400 === 0) { await batch.commit(); batch = writeBatch(db2); }
                         }
                         await batch.commit();
-                        // 更新本月任務中的名稱（pointId 對應）
-                        const taskIds = []; const taskDocs = [];
-                        for (let i = 0; i < pids.length; i += 10) {
-                            const chunk = pids.slice(i, i+10);
-                            const ts = await getDocs(query(collection(db2, 'communities', comm.id, 'patrolTasks'), where('pointId','in', chunk)));
-                            ts.forEach(d => { taskIds.push(d.id); taskDocs.push(d); });
-                        }
-                        if (taskIds.length) {
-                            let batch2 = writeBatch(db2); let c2 = 0;
-                            for (const d of taskDocs) {
-                                batch2.update(doc(db2, 'communities', comm.id, 'patrolTasks', d.id), { pointName: newName, updatedAt: new Date() });
-                                c2++; if (c2 % 400 === 0) { await batch2.commit(); batch2 = writeBatch(db2); }
-                            }
-                            await batch2.commit();
-                        }
-                        showToast('已完成改名');
+                        showToast('已完成巡邏項目改名');
                     } catch(e) {
                         console.error('改名失敗', e);
                         showToast('改名失敗：請檢查權限', true);
@@ -6955,7 +6926,17 @@
                         const snap = await getDocs(collection(db, 'communities', comm.id, 'patrolPoints'));
                         local.pointsCache = [];
                         snap.forEach(d => local.pointsCache.push({ id: d.id, ...d.data() }));
-                    } catch (e) { console.warn('載入巡邏點失敗', e); }
+                    } catch (e) {
+                        console.warn('載入巡邏點失敗', e);
+                        const isOffline = (!navigator.onLine) || ((e?.message || '').includes('offline'));
+                        if (isOffline) {
+                            if (!local.__offlinePointsWarned) {
+                                try { showToast('目前離線，巡邏項目可能無法載入；將顯示快取資料', true); } catch (_) {}
+                                local.__offlinePointsWarned = true;
+                            }
+                            local.pointsCache = Array.isArray(local.pointsCache) ? local.pointsCache : [];
+                        }
+                    }
                 };
 
                 const ensureTasksForMonth = async () => {
