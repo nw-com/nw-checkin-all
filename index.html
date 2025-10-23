@@ -1719,6 +1719,122 @@
                         });
                     });
                     try { lucide.createIcons(); } catch (_) {}
+
+                    // 載入並套用社區層級異常標色（紅>橙>黃）
+                    (async () => {
+                        try {
+                            const fs = window.__fs || {}; const db = window.__db;
+                            const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                            const start = new Date(); start.setHours(0,0,0,0);
+                            const end = new Date(); end.setHours(23,59,59,999);
+                            const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
+                            const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
+                            const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+
+                            // 取今日打卡紀錄（依使用者分組）
+                            const recordsByUser = {};
+                            try {
+                                const recSnap = await getDocs(query(collection(db, 'clockInRecords'), where('timestamp','>=', tsStart), where('timestamp','<=', tsEnd)));
+                                recSnap.forEach(d => {
+                                    const r = { id: d.id, ...d.data() };
+                                    (recordsByUser[r.userId] ||= []).push(r);
+                                });
+                            } catch (_) {}
+
+                            // 取使用者資料（用於篩選社區成員）
+                            const users = [];
+                            try {
+                                const usnap = await getDocs(collection(db, 'users'));
+                                usnap.forEach(d => users.push({ id: d.id, ...d.data() }));
+                            } catch (_) {}
+
+                            const parseHM = (iso, hm) => {
+                                if (!iso || !hm) return null;
+                                const dt = new Date(`${iso}T00:00:00`);
+                                const [hh, mm] = (hm||'').split(':');
+                                dt.setHours(parseInt(hh,10)||0, parseInt(mm,10)||0, 0, 0);
+                                return isNaN(dt.getTime()) ? null : dt;
+                            };
+
+                            const currentList = selectedRegion ? [...list].sort(compareCommunitiesByCode).filter(c => (c?.region || '') === selectedRegion) : [...list].sort(compareCommunitiesByCode);
+                            for (const c of currentList) {
+                                const btn = container.querySelector(`.enter-community[data-id="${c.id}"]`);
+                                if (!btn) continue;
+
+                                let hasAbnormalLocation = false;
+                                let hasShiftOverdueNotStarted = false;
+                                let hasPatrolOverdueStart = false;
+                                let hasPatrolNotExecuted = false;
+
+                                // 篩選屬於此社區的使用者
+                                const communityUsers = users.filter(u => {
+                                    const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                                    if (ids.includes(c.id)) return true;
+                                    const code = (u.serviceCommunityCode || '').trim();
+                                    return code && code === (c.code || '').trim();
+                                });
+
+                                // 位置異常：任一成員的任一打卡在社區半徑外
+                                for (const u of communityUsers) {
+                                    const recs = recordsByUser[u.id] || [];
+                                    for (const r of recs) {
+                                        const abnormal = computeRecordAbnormal(r, [c.id]);
+                                        if (abnormal && abnormal.isAbnormal) { hasAbnormalLocation = true; break; }
+                                    }
+                                    if (hasAbnormalLocation) break;
+                                }
+
+                                // 班表逾時未上班：有排班、過了開始時間仍無「上班」紀錄
+                                try {
+                                    const ssnap = await getDocs(query(collection(db, 'communities', c.id, 'postSchedules'), where('dateIso','==', ymdToday)));
+                                    const shifts = [];
+                                    ssnap.forEach(d => { const data = d.data() || {}; if (Array.isArray(data.shifts)) shifts.push(...data.shifts); });
+                                    for (const s of shifts) {
+                                        const assignee = Array.isArray(s.assignees) && s.assignees.length ? s.assignees[0] : null;
+                                        if (!assignee) continue;
+                                        const startDt = parseHM(ymdToday, s.start || '');
+                                        if (!startDt) continue;
+                                        if (new Date() > startDt) {
+                                            const recs = recordsByUser[assignee] || [];
+                                            const hasStart = recs.some(r => r.type === '上班');
+                                            if (!hasStart) { hasShiftOverdueNotStarted = true; break; }
+                                        }
+                                    }
+                                } catch (_) {}
+
+                                // 巡邏逾時未開始／未執行
+                                try {
+                                    const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
+                                    const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
+                                    const tSnap = await getDocs(query(collection(db, 'communities', c.id, 'patrolTasks'), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2), orderBy('dateTS')));
+                                    const tasks = []; tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() }));
+                                    const now = new Date();
+                                    for (const t of tasks) {
+                                        const sHM = (t.expectedStartHM || '').trim();
+                                        const eHM = (t.expectedEndHM || '').trim();
+                                        const sDt = sHM ? parseHM(ymdToday, sHM) : null;
+                                        const eDt = eHM ? parseHM(ymdToday, eHM) : null;
+                                        const started = !!t.actualStartTS;
+                                        if (!started && sDt && now > sDt) hasPatrolOverdueStart = true;
+                                        if (!started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
+                                    }
+                                } catch (_) {}
+
+                                // 套用樣式（紅>橙>黃）
+                                const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
+                                const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
+                                if (hasPatrolNotExecuted || hasShiftOverdueNotStarted) {
+                                    remove(['bg-white','hover:bg-red-50']); add(['bg-red-50','border-red-300','text-red-800']);
+                                } else if (hasPatrolOverdueStart) {
+                                    remove(['bg-white','hover:bg-red-50']); add(['bg-orange-50','border-orange-300','text-orange-800']);
+                                } else if (hasAbnormalLocation) {
+                                    remove(['bg-white','hover:bg-red-50']); add(['bg-yellow-50','border-yellow-300','text-yellow-800']);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('套用社區異常標色失敗', e);
+                        }
+                    })();
                 };
                 renderList();
                 try { lucide.createIcons(); } catch (_) {}
@@ -1827,6 +1943,125 @@
                             });
                         });
                         try { lucide.createIcons(); } catch (_) {}
+
+                        // 載入並套用人員層級異常標色（紅>橙>黃）
+                        (async () => {
+                            try {
+                                const fs = window.__fs || {}; const db = window.__db;
+                                const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                                const start = new Date(); start.setHours(0,0,0,0);
+                                const end = new Date(); end.setHours(23,59,59,999);
+                                const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
+                                const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
+                                const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+
+                                // 確保社區快取可用（供 code -> id 對應）
+                                try { await ensureCommunitiesCache(); } catch (_) {}
+                                const communitiesById = state.communitiesById || {};
+                                const resolveCommunityIdByCode = (code) => {
+                                    const trimmed = (code || '').trim();
+                                    if (!trimmed) return null;
+                                    const target = Object.values(communitiesById).find(c => (c.code || '').trim() === trimmed);
+                                    return target ? target.id : null;
+                                };
+
+                                // 今日打卡紀錄（依使用者分組）
+                                const recordsByUser = {};
+                                try {
+                                    const recSnap = await getDocs(query(collection(db, 'clockInRecords'), where('timestamp','>=', tsStart), where('timestamp','<=', tsEnd)));
+                                    recSnap.forEach(d => {
+                                        const r = { id: d.id, ...d.data() };
+                                        (recordsByUser[r.userId] ||= []).push(r);
+                                    });
+                                } catch (_) {}
+
+                                const parseHM = (iso, hm) => {
+                                    if (!iso || !hm) return null;
+                                    const dt = new Date(`${iso}T00:00:00`);
+                                    const [hh, mm] = (hm||'').split(':');
+                                    dt.setHours(parseInt(hh,10)||0, parseInt(mm,10)||0, 0, 0);
+                                    return isNaN(dt.getTime()) ? null : dt;
+                                };
+
+                                for (const u of filtered) {
+                                    const btn = container.querySelector(`.view-att[data-id="${u.id}"]`);
+                                    if (!btn) continue;
+
+                                    let hasAbnormalLocation = false;
+                                    let hasShiftOverdueNotStarted = false;
+                                    let hasPatrolOverdueStart = false;
+                                    let hasPatrolNotExecuted = false;
+
+                                    let svcIds = Array.isArray(u.serviceCommunities) ? u.serviceCommunities.slice() : [];
+                                    if ((!svcIds || svcIds.length === 0) && u.serviceCommunityCode) {
+                                        const mapped = resolveCommunityIdByCode(u.serviceCommunityCode);
+                                        if (mapped) svcIds = [mapped];
+                                    }
+
+                                    const recs = recordsByUser[u.id] || [];
+                                    // 位置異常：打卡不在服務社區半徑
+                                    if (svcIds && svcIds.length > 0) {
+                                        for (const r of recs) {
+                                            const abnormal = computeRecordAbnormal(r, svcIds);
+                                            if (abnormal && abnormal.isAbnormal) { hasAbnormalLocation = true; break; }
+                                        }
+                                    }
+
+                                    // 班表逾時未上班
+                                    try {
+                                        for (const commId of svcIds) {
+                                            const ssnap = await getDocs(query(collection(db, 'communities', commId, 'postSchedules'), where('dateIso','==', ymdToday)));
+                                            const shifts = []; ssnap.forEach(d => { const data = d.data() || {}; if (Array.isArray(data.shifts)) shifts.push(...data.shifts); });
+                                            for (const s of shifts) {
+                                                const assigned = Array.isArray(s.assignees) ? s.assignees : [];
+                                                if (!assigned.includes(u.id)) continue;
+                                                const startDt = parseHM(ymdToday, s.start || '');
+                                                if (!startDt) continue;
+                                                if (new Date() > startDt) {
+                                                    const hasStart = recs.some(r => r.type === '上班');
+                                                    if (!hasStart) { hasShiftOverdueNotStarted = true; break; }
+                                                }
+                                            }
+                                            if (hasShiftOverdueNotStarted) break;
+                                        }
+                                    } catch (_) {}
+
+                                    // 巡邏逾時未開始／未執行
+                                    try {
+                                        const now = new Date();
+                                        const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
+                                        const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
+                                        for (const commId of svcIds) {
+                                            const tSnap = await getDocs(query(collection(db, 'communities', commId, 'patrolTasks'), where('assignedUserId','==', u.id), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2), orderBy('dateTS')));
+                                            const tasks = []; tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() }));
+                                            for (const t of tasks) {
+                                                const sHM = (t.expectedStartHM || '').trim();
+                                                const eHM = (t.expectedEndHM || '').trim();
+                                                const sDt = sHM ? parseHM(ymdToday, sHM) : null;
+                                                const eDt = eHM ? parseHM(ymdToday, eHM) : null;
+                                                const started = !!t.actualStartTS;
+                                                if (!started && sDt && now > sDt) hasPatrolOverdueStart = true;
+                                                if (!started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
+                                            }
+                                            if (hasPatrolNotExecuted) break;
+                                        }
+                                    } catch (_) {}
+
+                                    // 套用樣式（紅>橙>黃）
+                                    const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
+                                    const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
+                                    if (hasPatrolNotExecuted || hasShiftOverdueNotStarted) {
+                                        remove(['bg-white','hover:bg-blue-50']); add(['bg-red-50','border-red-300','text-red-800']);
+                                    } else if (hasPatrolOverdueStart) {
+                                        remove(['bg-white','hover:bg-blue-50']); add(['bg-orange-50','border-orange-300','text-orange-800']);
+                                    } else if (hasAbnormalLocation) {
+                                        remove(['bg-white','hover:bg-blue-50']); add(['bg-yellow-50','border-yellow-300','text-yellow-800']);
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn('套用人員異常標色失敗', e);
+                            }
+                        })();
                     };
 
                     renderList();
