@@ -6640,6 +6640,11 @@
                                 <button id="patrol-next-day" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下一日</button>
                             </div>
                             <div class="flex items-center gap-2">
+                                <label class="text-xs text-gray-600">列表</label>
+                                <select id="patrol-view-mode" class="px-2 py-1 rounded border text-xs">
+                                    <option value="tasks">巡邏任務</option>
+                                    <option value="points">巡邏點</option>
+                                </select>
                                 <button id="patrol-new-point" class="px-2 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 text-xs">新增巡邏項目</button>
                                 <button id="patrol-delete-all" class="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs">全部刪除</button>
                             </div>
@@ -6675,6 +6680,12 @@
                 const rowsEl = document.getElementById('patrol-rows');
                 const newPointBtn = document.getElementById('patrol-new-point');
                 const pointTabsEl = document.getElementById('point-tabs');
+                const viewModeSel = document.getElementById('patrol-view-mode');
+                if (viewModeSel) {
+                    if (!local.viewMode) local.viewMode = 'points';
+                    viewModeSel.value = local.viewMode;
+                    viewModeSel.addEventListener('change', () => { local.viewMode = viewModeSel.value; renderRows(); });
+                }
 
                 const renderPointTabs = () => {
                     if (!pointTabsEl) return;
@@ -6731,6 +6742,8 @@
                             <div class="mt-3 flex justify-between">
                                 <button id="manage-cancel" class="px-3 py-1 rounded border">取消</button>
                                 <div class="flex items-center gap-2">
+                                    <input id="manage-rename-input" class="px-2 py-1 rounded border text-sm" placeholder="輸入新項目名稱" />
+                                    <button id="manage-rename-apply" class="px-3 py-1 rounded bg-amber-600 text-white">改名</button>
                                     <button id="manage-delete-all" class="px-3 py-1 rounded bg-red-600 text-white">刪除此項目全部</button>
                                 </div>
                             </div>
@@ -6758,6 +6771,16 @@
                         if (!ok) return;
                         close();
                         await deleteMultiplePointsByName(points);
+                    });
+                    const renameInput = modal.querySelector('#manage-rename-input');
+                    modal.querySelector('#manage-rename-apply')?.addEventListener('click', async () => {
+                        const newName = (renameInput?.value || '').trim();
+                        if (!newName) { showToast('請輸入新名稱', true); return; }
+                        if (newName === itemName) { showToast('名稱未變更'); return; }
+                        const ok = confirm(`確定將「${itemName}」改名為「${newName}」？`);
+                        if (!ok) return;
+                        close();
+                        await renameItemPointsAndTasks(itemName, newName);
                     });
                 };
 
@@ -6825,6 +6848,54 @@
                     }
                 };
 
+
+                // 批次改名同一項目名稱的所有巡邏點與本月任務
+                const renameItemPointsAndTasks = async (oldName, newName) => {
+                    try {
+                        showLoading(true);
+                        const db2 = window.__db; const { collection, getDocs, query, where, doc, writeBatch } = window.__fs || {};
+                        if (!db2 || !collection || !getDocs || !query || !where || !doc || !writeBatch) throw new Error('Firestore 未初始化');
+                        // 找出舊名稱的所有巡邏點
+                        const points = (Array.isArray(local.pointsCache) ? local.pointsCache : []).filter(p => (p.name || '').trim() === oldName);
+                        if (!points.length) { showToast('找不到要改名的巡邏點'); return; }
+                        const pids = points.map(p => p.id || p.pointId).filter(Boolean);
+                        let batch = writeBatch(db2); let count = 0;
+                        // 更新巡邏點名稱
+                        for (const pid of pids) {
+                            batch.update(doc(db2, 'communities', comm.id, 'patrolPoints', pid), { name: newName, updatedAt: new Date() });
+                            count++; if (count % 400 === 0) { await batch.commit(); batch = writeBatch(db2); }
+                        }
+                        await batch.commit();
+                        // 更新本月任務中的名稱（pointId 對應）
+                        const taskIds = []; const taskDocs = [];
+                        for (let i = 0; i < pids.length; i += 10) {
+                            const chunk = pids.slice(i, i+10);
+                            const ts = await getDocs(query(collection(db2, 'communities', comm.id, 'patrolTasks'), where('pointId','in', chunk)));
+                            ts.forEach(d => { taskIds.push(d.id); taskDocs.push(d); });
+                        }
+                        if (taskIds.length) {
+                            let batch2 = writeBatch(db2); let c2 = 0;
+                            for (const d of taskDocs) {
+                                batch2.update(doc(db2, 'communities', comm.id, 'patrolTasks', d.id), { pointName: newName, updatedAt: new Date() });
+                                c2++; if (c2 % 400 === 0) { await batch2.commit(); batch2 = writeBatch(db2); }
+                            }
+                            await batch2.commit();
+                        }
+                        showToast('已完成改名');
+                    } catch(e) {
+                        console.error('改名失敗', e);
+                        showToast('改名失敗：請檢查權限', true);
+                    } finally {
+                        showLoading(false);
+                        await loadPoints();
+                        // 將目前選取的項目切至新名稱
+                        local.selectedPointId = newName;
+                        renderPointTabs();
+                        await ensureTasksForMonth();
+                        await loadTasksAndLogs();
+                        renderRows();
+                    }
+                };
 
                 const ensureUsers = async () => {
                     // 盡量使用 pageState 已載入的社區使用者
@@ -6921,6 +6992,9 @@
 
                 const renderRows = () => {
                     const dayIso = fmtDayLabel();
+                    if (local.viewMode === 'points') {
+                        return renderPointsListRows();
+                    }
                     const base = Array.isArray(local.tasksCache) ? local.tasksCache.filter(t => t.dateIso === dayIso) : [];
                     const filtered = local.selectedPointId === 'all' ? base : base.filter(t => (t.pointName || '') === local.selectedPointId);
                     if (!Array.isArray(filtered) || !filtered.length) {
@@ -7081,6 +7155,59 @@
                         tr.querySelector('.photos-task')?.addEventListener('click', async () => {
                             const photos = await fetchClockInPhotosForTask(t);
                             openPhotosModal(t, photos);
+                        });
+                    });
+                };
+
+                const renderPointsListRows = () => {
+                    const dayIso = fmtDayLabel();
+                    const points = Array.isArray(local.pointsCache) ? local.pointsCache : [];
+                    const filteredPoints = local.selectedPointId === 'all' ? points : points.filter(p => (p.name || '') === local.selectedPointId);
+                    if (!Array.isArray(filteredPoints) || !filteredPoints.length) {
+                        rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">尚無巡邏點</td></tr>`;
+                        return;
+                    }
+                    const rows = filteredPoints.map(p => {
+                        const pid = p.pointId || p.id || '';
+                        const todayTasksCount = Array.isArray(local.tasksCache) ? local.tasksCache.filter(t => t.dateIso === dayIso && (t.pointId || '') === pid).length : 0;
+                        const startHM = (typeof p.expectedStartHour === 'number' ? String(p.expectedStartHour).padStart(2,'0')+':00' : (p.expectedStartHM || ''));
+                        const endHM = (typeof p.expectedEndHour === 'number' ? String(p.expectedEndHour).padStart(2,'0')+':00' : (p.expectedEndHM || ''));
+                        return `
+                            <tr data-point-id="${pid}">
+                                <td class="px-3 py-2 whitespace-nowrap text-amber-700 underline cursor-pointer point-edit">${pid}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${p.name || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${todayTasksCount ? `${todayTasksCount}件` : ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">-</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${startHM}</td>
+                                <td class="px-3 py-2 whitespace-nowrap"></td>
+                                <td class="px-3 py-2 whitespace-nowrap">${endHM}</td>
+                                <td class="px-3 py-2 whitespace-nowrap"></td>
+                                <td class="px-3 py-2 whitespace-nowrap"></td>
+                                <td class="px-3 py-2 whitespace-nowrap">
+                                    <div class="flex items-center gap-2">
+                                        <button class="point-edit bg-amber-500 text-white px-2 py-1 rounded text-xs">編輯</button>
+                                        <button class="point-delete bg-red-600 text-white px-2 py-1 rounded text-xs">刪除</button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                    });
+                    rowsEl.innerHTML = rows.join('');
+                    try { lucide.createIcons(); } catch(_) {}
+                    rowsEl.querySelectorAll('tr').forEach(tr => {
+                        const pointId = tr.getAttribute('data-point-id');
+                        const p = filteredPoints.find(pp => (pp.pointId || pp.id) === pointId);
+                        tr.querySelector('.point-edit')?.addEventListener('click', () => { if (p) openEditPointModal(p); });
+                        tr.querySelector('.point-delete')?.addEventListener('click', async () => {
+                            if (!p) return;
+                            if (!confirm('確定刪除此巡邏點及其相關任務？')) return;
+                            try {
+                                await deletePointAndRelatedTasks(p);
+                                showToast('已刪除巡邏點及本月任務');
+                                await loadPoints();
+                                await loadTasksAndLogs();
+                                renderPointTabs();
+                                renderRows();
+                            } catch (e) { console.error('刪除巡邏點失敗', e); showToast('刪除失敗：請檢查權限', true); }
                         });
                     });
                 };
