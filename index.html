@@ -6640,16 +6640,11 @@
                                 <button id="patrol-next-day" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下一日</button>
                             </div>
                             <div class="flex items-center gap-2">
-                                <label class="text-xs text-gray-600">列表</label>
-                                <select id="patrol-view-mode" class="px-2 py-1 rounded border text-xs">
-                                    <option value="tasks">巡邏任務</option>
-                                    <option value="points">巡邏點</option>
-                                </select>
                                 <button id="patrol-new-point" class="px-2 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 text-xs">新增巡邏項目</button>
                                 <button id="patrol-delete-all" class="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs">全部刪除</button>
                             </div>
                         </div>
-                        <div id="point-tabs" class="flex gap-2 overflow-x-auto px-1"></div>
+                        <div class="flex items-center gap-2 px-1"><span class="text-xs text-gray-600">巡邏項目</span><div id="point-tabs" class="flex gap-2 overflow-x-auto"></div></div>
                         <div class="bg-white rounded-lg shadow overflow-x-auto">
                             <table class="min-w-full divide-y divide-gray-200 text-sm">
                                 <thead class="bg-gray-50">
@@ -6680,12 +6675,6 @@
                 const rowsEl = document.getElementById('patrol-rows');
                 const newPointBtn = document.getElementById('patrol-new-point');
                 const pointTabsEl = document.getElementById('point-tabs');
-                const viewModeSel = document.getElementById('patrol-view-mode');
-                if (viewModeSel) {
-                    if (!local.viewMode) local.viewMode = 'points';
-                    viewModeSel.value = local.viewMode;
-                    viewModeSel.addEventListener('change', () => { local.viewMode = viewModeSel.value; renderRows(); });
-                }
 
                 const renderPointTabs = () => {
                     if (!pointTabsEl) return;
@@ -6992,15 +6981,7 @@
 
                 const renderRows = () => {
                     const dayIso = fmtDayLabel();
-                    if (local.viewMode === 'points') {
-                        return renderPointsListRows();
-                    }
-                    const base = Array.isArray(local.tasksCache) ? local.tasksCache.filter(t => t.dateIso === dayIso) : [];
-                    const filtered = local.selectedPointId === 'all' ? base : base.filter(t => (t.pointName || '') === local.selectedPointId);
-                    if (!Array.isArray(filtered) || !filtered.length) {
-                        rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">本日尚無巡邏任務</td></tr>`;
-                        return;
-                    }
+                    return renderPointsListRows();
 
                     const openPhotosModal = (t, photos) => {
                         const modal = document.createElement('div');
