@@ -6678,18 +6678,26 @@
 
                 const renderPointTabs = () => {
                     if (!pointTabsEl) return;
-                    // 以「巡邏項目」名稱生成分頁（優先 itemName；沒有則用 name）
+                    // 以「巡邏項目」名稱生成分頁（先從巡邏點 tasks，若為空則從本月任務 checklist）
                     const names = (() => {
-                        const all = [];
+                        const set = new Set();
                         const pts = Array.isArray(local.pointsCache) ? local.pointsCache : [];
                         pts.forEach(p => {
                             const arr = Array.isArray(p.tasks) ? p.tasks : [];
                             arr.forEach(t => {
                                 const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
-                                if (nm) all.push(nm);
+                                if (nm) set.add(nm);
                             });
                         });
-                        return Array.from(new Set(all));
+                        const tasks = Array.isArray(local.tasksCache) ? local.tasksCache : [];
+                        tasks.forEach(tt => {
+                            const cl = Array.isArray(tt.checklist) ? tt.checklist : [];
+                            cl.forEach(ci => {
+                                const nm = (typeof ci === 'string' ? ci : ((ci.title || ci.name || ci.itemName || '')).trim());
+                                if (nm) set.add(nm);
+                            });
+                        });
+                        return Array.from(set);
                     })();
                     const tabsData = [{ id: 'all', label: '全部' }].concat(names.map(n => ({ id: n, label: n })));
                     pointTabsEl.innerHTML = tabsData.map(t => `
@@ -6713,7 +6721,7 @@
 
                 // 管理某個巡邏項目名稱對應的巡邏點：編輯或刪除
                 const openManageItemModal = (itemName) => {
-                    const points = (Array.isArray(local.pointsCache) ? local.pointsCache : [])
+                    let points = (Array.isArray(local.pointsCache) ? local.pointsCache : [])
                         .filter(p => {
                             const arr = Array.isArray(p.tasks) ? p.tasks : [];
                             return arr.some(t => {
@@ -6721,6 +6729,21 @@
                                 return nm === itemName;
                             });
                         });
+                    // 後備：若巡邏點未設定 tasks，改以本月任務 checklist 對應 pointId
+                    if (!points.length) {
+                        const matchedPointIds = new Set();
+                        const tasks = Array.isArray(local.tasksCache) ? local.tasksCache : [];
+                        tasks.forEach(tt => {
+                            const cl = Array.isArray(tt.checklist) ? tt.checklist : [];
+                            if (cl.some(ci => {
+                                const nm = (typeof ci === 'string' ? ci : ((ci.title || ci.name || ci.itemName || '')).trim());
+                                return nm === itemName;
+                            })) {
+                                if (tt.pointId) matchedPointIds.add(tt.pointId);
+                            }
+                        });
+                        points = (Array.isArray(local.pointsCache) ? local.pointsCache : []).filter(p => matchedPointIds.has(p.pointId || p.id));
+                    }
                     if (!points.length) { showToast('找不到此巡邏項目', true); return; }
                     if (points.length === 1) { openEditPointModal(points[0]); return; }
 
@@ -7161,10 +7184,17 @@
                     const points = Array.isArray(local.pointsCache) ? local.pointsCache : [];
                     const filteredPoints = local.selectedPointId === 'all' ? points : points.filter(p => {
                         const arr = Array.isArray(p.tasks) ? p.tasks : [];
-                        return arr.some(t => {
+                        const matchFromPointTasks = arr.some(t => {
                             const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
                             return nm === local.selectedPointId;
                         });
+                        if (matchFromPointTasks) return true;
+                        const pid = p.pointId || p.id;
+                        const tasks = Array.isArray(local.tasksCache) ? local.tasksCache : [];
+                        return tasks.some(tt => (tt.pointId === pid) && Array.isArray(tt.checklist) && tt.checklist.some(ci => {
+                            const nm = (typeof ci === 'string' ? ci : ((ci.title || ci.name || ci.itemName || '')).trim());
+                            return nm === local.selectedPointId;
+                        }));
                     });
                     if (!Array.isArray(filteredPoints) || !filteredPoints.length) {
                         rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">尚無巡邏點</td></tr>`;
@@ -7217,12 +7247,13 @@
 
                 const renderAll = async () => {
                     dayLabel.textContent = fmtDayLabel();
+                    if (!local.selectedPointId) local.selectedPointId = 'all';
                     rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">正在載入當日巡邏列表...</td></tr>`;
                     await ensureUsers();
                     await loadPoints();
-                    renderPointTabs();
                     await ensureTasksForMonth();
                     await loadTasksAndLogs();
+                    renderPointTabs();
                     renderRows();
                 };
 
