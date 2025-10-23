@@ -383,12 +383,13 @@ service cloud.firestore {
       // 僅社區維護角色可新增/更新/刪除巡邏點；限制欄位與型別
       allow create, update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
-          'communityId','pointId','name','code','expectedStartHour','expectedEndHour','expectedStartHM','expectedEndHM','weekly','daysOfWeek','tasks','defaultAssigneeRole','defaultAssigneeId','createdAt','updatedAt'
+          'communityId','pointId','name','itemName','code','expectedStartHour','expectedEndHour','expectedStartHM','expectedEndHM','weekly','daysOfWeek','tasks','defaultAssigneeRole','defaultAssigneeId','createdAt','updatedAt'
         ]) &&
         request.resource.data.communityId is string &&
         request.resource.data.communityId == communityId &&
         request.resource.data.pointId is string &&
         request.resource.data.name is string &&
+        (request.resource.data.itemName == null || request.resource.data.itemName is string) &&
         request.resource.data.code is string &&
         (request.resource.data.code.size() == 12) &&
         request.resource.data.code.matches('^[A-Za-z0-9]{12}$') &&
