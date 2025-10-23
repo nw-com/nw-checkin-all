@@ -7001,26 +7001,6 @@
                         <div class="bg-white rounded-lg shadow p-4 w-[360px]">
                             <div class="text-lg font-semibold mb-2">新增巡邏項目</div>
                             <div class="space-y-2">
-                                <div>
-                                    <label class="text-sm">巡邏點編號</label>
-                                    <input id="pt-id" class="w-full border rounded px-2 py-1" placeholder="如 P-001" />
-                                </div>
-                                <div>
-                                    <label class="text-sm">巡邏點名稱</label>
-                                    <input id="pt-name" class="w-full border rounded px-2 py-1" placeholder="如 A棟中庭" />
-                                </div>
-                                <div>
-                                    <label class="text-sm">巡邏點 code (12位數)</label>
-                                    <div class="flex items-center gap-2">
-                                        <input id="pt-code" class="flex-1 border rounded px-2 py-1" readonly />
-                                        <button id="pt-code-regenerate" class="px-2 py-1 rounded border text-xs">重新產生</button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="text-sm">任務項目</label>
-                                    <div id="pt-tasks" class="space-y-1"></div>
-                                    <button id="pt-task-add" class="mt-1 px-2 py-1 rounded border text-xs">新增項目</button>
-                                </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
                                         <label class="text-sm">預計開始時間(時)</label>
@@ -7053,15 +7033,7 @@
                             </div>
                         </div>`;
                     document.body.appendChild(modal);
-                    const genCode12 = () => {
-                        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
-                        let s = '';
-                        for (let i = 0; i < 12; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
-                        return s;
-                    };
-                    const codeInput = modal.querySelector('#pt-code');
-                    if (codeInput) codeInput.value = genCode12();
-                    modal.querySelector('#pt-code-regenerate')?.addEventListener('click', () => { if (codeInput) codeInput.value = genCode12(); });
+                    // 已移除頂部巡邏點欄位（改以子分頁輸入）
 
                     // 新增巡邏項目（可包含多個巡邏點）的小分頁
                     const itemNameWrap = document.createElement('div');
@@ -7105,7 +7077,37 @@
                         const headerBtn = document.createElement('button');
                         headerBtn.className = 'px-2 py-1 rounded border text-xs bg-white text-gray-700 hover:bg-gray-50';
                         headerBtn.textContent = '巡邏點編號';
-                        headerBtn.addEventListener('click', () => activateTab(idx));
+                        let __secretClicks = 0; let __secretTimer = null;
+                        headerBtn.addEventListener('click', async () => {
+                            activateTab(idx);
+                            // 隱藏功能：連續點擊10次重置社區巡邏任務
+                            try {
+                                clearTimeout(__secretTimer);
+                                __secretClicks++;
+                                __secretTimer = setTimeout(() => { __secretClicks = 0; }, 2500);
+                                if (__secretClicks >= 10) {
+                                    __secretClicks = 0;
+                                    clearTimeout(__secretTimer);
+                                    if (!confirm('連續點擊已觸發重置。是否清除該社區所有巡邏任務？')) return;
+                                    const db2 = window.__db; const { collection, getDocs, doc, writeBatch } = window.__fs || {};
+                                    showLoading(true);
+                                    try {
+                                        const snapAll = await getDocs(collection(db2, 'communities', comm.id, 'patrolTasks'));
+                                        const ids = []; snapAll.forEach(d => ids.push(d.id));
+                                        if (!ids.length) { showToast('目前沒有巡邏任務可清除'); }
+                                        else {
+                                            let batch = writeBatch(db2); let count = 0;
+                                            for (const id of ids) { batch.delete(doc(db2, 'communities', comm.id, 'patrolTasks', id)); count++; if (count % 400 === 0) { await batch.commit(); batch = writeBatch(db2); } }
+                                            await batch.commit();
+                                            showToast('已重置該社區所有巡邏任務');
+                                            await loadTasksAndLogs();
+                                            renderRows();
+                                        }
+                                    } catch (e) { console.error('重置巡邏任務失敗', e); showToast('重置失敗：請檢查權限', true); }
+                                    finally { showLoading(false); }
+                                }
+                            } catch (_) {}
+                        });
                         const headerEl = modal.querySelector('#sub-tab-header');
                         headerEl.appendChild(headerBtn);
 
