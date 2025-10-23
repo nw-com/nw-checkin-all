@@ -6692,8 +6692,139 @@
                             renderPointTabs();
                             renderRows();
                         });
+                        // 連續快按兩下（雙擊）開啟編輯/刪除
+                        btn.addEventListener('dblclick', () => {
+                            const id = btn.getAttribute('data-id') || 'all';
+                            if (id === 'all') return;
+                            openManageItemModal(id);
+                        });
                     });
                 };
+
+                // 管理某個巡邏項目名稱對應的巡邏點：編輯或刪除
+                const openManageItemModal = (itemName) => {
+                    const points = (Array.isArray(local.pointsCache) ? local.pointsCache : [])
+                        .filter(p => (p.name || '').trim() === itemName);
+                    if (!points.length) { showToast('找不到此巡邏項目', true); return; }
+                    if (points.length === 1) { openEditPointModal(points[0]); return; }
+
+                    const modal = document.createElement('div');
+                    modal.className = 'fixed inset-0 bg-black/30 flex items-center justify-center z-50';
+                    modal.innerHTML = `
+                        <div class="bg-white rounded-lg shadow p-4 w-[420px]">
+                            <div class="text-lg font-semibold mb-2">管理巡邏項目：${itemName}</div>
+                            <div class="space-y-2 max-h-[300px] overflow-y-auto" id="manage-list">
+                                ${points.map(p => `
+                                    <div class="flex items-center justify-between border rounded px-2 py-1">
+                                        <div class="text-sm">
+                                            <div>編號：${p.pointId || p.id || ''}</div>
+                                            <div>code：${p.code || ''}</div>
+                                            <div>任務數：${Array.isArray(p.tasks) ? p.tasks.length : 0}</div>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <button class="btn-edit px-2 py-1 rounded border text-xs" data-id="${p.id || p.pointId}">編輯</button>
+                                            <button class="btn-del px-2 py-1 rounded border text-xs text-red-600" data-id="${p.id || p.pointId}">刪除</button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="mt-3 flex justify-between">
+                                <button id="manage-cancel" class="px-3 py-1 rounded border">取消</button>
+                                <div class="flex items-center gap-2">
+                                    <button id="manage-delete-all" class="px-3 py-1 rounded bg-red-600 text-white">刪除此項目全部</button>
+                                </div>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(modal);
+                    const close = () => { try { document.body.removeChild(modal); } catch(_){} };
+                    modal.querySelector('#manage-cancel')?.addEventListener('click', close);
+                    modal.querySelectorAll('.btn-edit').forEach(b => b.addEventListener('click', () => {
+                        const pid = b.getAttribute('data-id');
+                        const p = points.find(x => (x.id || x.pointId) === pid);
+                        close();
+                        if (p) openEditPointModal(p);
+                    }));
+                    modal.querySelectorAll('.btn-del').forEach(b => b.addEventListener('click', async () => {
+                        const pid = b.getAttribute('data-id');
+                        const p = points.find(x => (x.id || x.pointId) === pid);
+                        if (!p) return;
+                        const ok = confirm('確定要刪除此巡邏點及其相關任務？');
+                        if (!ok) return;
+                        close();
+                        await deletePointAndRelatedTasks(p);
+                    }));
+                    modal.querySelector('#manage-delete-all')?.addEventListener('click', async () => {
+                        const ok = confirm('確定要刪除該項目下所有巡邏點及其相關任務？');
+                        if (!ok) return;
+                        close();
+                        await deleteMultiplePointsByName(points);
+                    });
+                };
+
+                // 刪除單一巡邏點及其相關任務
+                const deletePointAndRelatedTasks = async (point) => {
+                    try {
+                        showLoading(true);
+                        const db2 = window.__db; const { collection, getDocs, query, where, doc, writeBatch } = window.__fs || {};
+                        if (!db2 || !collection || !getDocs || !query || !where || !doc || !writeBatch) throw new Error('Firestore 未初始化');
+                        const pid = point.id || point.pointId;
+                        let batch = writeBatch(db2); let count = 0;
+                        // 刪除巡邏點
+                        batch.delete(doc(db2, 'communities', comm.id, 'patrolPoints', pid));
+                        // 刪除相關任務
+                        const tsnap = await getDocs(query(collection(db2, 'communities', comm.id, 'patrolTasks'), where('pointId','==', pid)));
+                        const taskIds = []; tsnap.forEach(d => taskIds.push(d.id));
+                        for (const tid of taskIds) { batch.delete(doc(db2, 'communities', comm.id, 'patrolTasks', tid)); count++; if (count % 400 === 0) { await batch.commit(); batch = writeBatch(db2); } }
+                        await batch.commit();
+                        showToast('已刪除巡邏點及相關任務');
+                    } catch(e) {
+                        console.error('刪除巡邏點失敗', e);
+                        showToast('刪除失敗：請檢查權限', true);
+                    } finally {
+                        showLoading(false);
+                        await loadPoints();
+                        renderPointTabs();
+                        await ensureTasksForMonth();
+                        await loadTasksAndLogs();
+                        renderRows();
+                    }
+                };
+
+                // 批次刪除同一項目名稱的所有巡邏點與任務
+                const deleteMultiplePointsByName = async (points) => {
+                    try {
+                        showLoading(true);
+                        const db2 = window.__db; const { collection, getDocs, query, where, doc, writeBatch } = window.__fs || {};
+                        if (!db2 || !collection || !getDocs || !query || !where || !doc || !writeBatch) throw new Error('Firestore 未初始化');
+                        let batch = writeBatch(db2); let count = 0;
+                        const pids = points.map(p => p.id || p.pointId).filter(Boolean);
+                        // 收集所有相關任務（分批處理 in 條件）
+                        const taskIds = [];
+                        const chunks = [];
+                        for (let i = 0; i < pids.length; i += 10) chunks.push(pids.slice(i, i+10));
+                        for (const chunk of chunks) {
+                            const ts = await getDocs(query(collection(db2, 'communities', comm.id, 'patrolTasks'), where('pointId','in', chunk)));
+                            ts.forEach(d => taskIds.push(d.id));
+                        }
+                        // 刪除巡邏點
+                        for (const pid of pids) { batch.delete(doc(db2, 'communities', comm.id, 'patrolPoints', pid)); count++; if (count % 400 === 0) { await batch.commit(); batch = writeBatch(db2); } }
+                        // 刪除任務
+                        for (const tid of taskIds) { batch.delete(doc(db2, 'communities', comm.id, 'patrolTasks', tid)); count++; if (count % 400 === 0) { await batch.commit(); batch = writeBatch(db2); } }
+                        await batch.commit();
+                        showToast('已刪除此名稱所有巡邏點與任務');
+                    } catch(e) {
+                        console.error('批次刪除巡邏點失敗', e);
+                        showToast('刪除失敗：請檢查權限', true);
+                    } finally {
+                        showLoading(false);
+                        await loadPoints();
+                        renderPointTabs();
+                        await ensureTasksForMonth();
+                        await loadTasksAndLogs();
+                        renderRows();
+                    }
+                };
+
 
                 const ensureUsers = async () => {
                     // 盡量使用 pageState 已載入的社區使用者
@@ -7281,9 +7412,12 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="mt-3 flex justify-end gap-2">
-                                <button id="ep-cancel" class="px-3 py-1 rounded border">取消</button>
-                                <button id="ep-save" class="px-3 py-1 rounded bg-amber-600 text-white">儲存</button>
+                            <div class="mt-3 flex justify-between">
+                                <button id="ep-delete" class="px-3 py-1 rounded border text-red-600">刪除</button>
+                                <div class="flex items-center gap-2">
+                                    <button id="ep-cancel" class="px-3 py-1 rounded border">取消</button>
+                                    <button id="ep-save" class="px-3 py-1 rounded bg-amber-600 text-white">儲存</button>
+                                </div>
                             </div>
                         </div>`;
                     document.body.appendChild(modal);
@@ -7313,6 +7447,12 @@
                     };
                     (Array.isArray(p.tasks) && p.tasks.length ? p.tasks : ['']).forEach(t => addTaskField(t));
                     const close = () => { try { document.body.removeChild(modal); } catch(_){} };
+                    modal.querySelector('#ep-delete')?.addEventListener('click', async () => {
+                        const ok = confirm('確定刪除此巡邏點及其相關任務？');
+                        if (!ok) return;
+                        close();
+                        await deletePointAndRelatedTasks(p);
+                    });
                     modal.querySelector('#ep-cancel')?.addEventListener('click', close);
                     modal.querySelector('#ep-save')?.addEventListener('click', async () => {
                         const name = modal.querySelector('#ep-name')?.value.trim() || '';
