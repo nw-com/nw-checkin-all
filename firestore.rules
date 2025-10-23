@@ -115,7 +115,7 @@ service cloud.firestore {
       // 僅管理員可更新或刪除打卡紀錄，並限制可更新欄位與型別
       allow update: if isAdmin() &&
         request.resource.data.keys().hasOnly([
-          'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic'
+          'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','updatedBy','updatedAt'
         ]) &&
         request.resource.data.type in ['上班','下班','外出','返回','抵達','離開','自動下班'] &&
         request.resource.data.timestamp is timestamp &&
@@ -123,6 +123,8 @@ service cloud.firestore {
         (request.resource.data.photoUrls == null || request.resource.data.photoUrls is list) &&
         (request.resource.data.descriptions == null || request.resource.data.descriptions is list) &&
         (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic is bool) &&
+        (request.resource.data.updatedBy == null || request.resource.data.updatedBy is string) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp) &&
         (request.resource.data.photoUrls == null || request.resource.data.photoUrls.size() <= 3) &&
         (request.resource.data.descriptions == null || request.resource.data.descriptions.size() == (request.resource.data.photoUrls == null ? resource.data.photoUrls.size() : request.resource.data.photoUrls.size()));
 

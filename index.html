@@ -7080,6 +7080,9 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                                 <label for="record-date" class="text-sm font-medium">選擇日期:</label>
                                 <input type="date" id="record-date" value="${new Date().toISOString().split('T')[0]}" class="border border-gray-300 rounded-md px-2 py-1">
                             </div>
+                            <button id="leave-apply-btn-track" class="bg-orange-500 text-white px-3 py-2 rounded-md hover:bg-orange-600 flex items-center">
+                                <i data-lucide="calendar-days" class="w-4 h-4 mr-1"></i><span>請假申請</span>
+                            </button>
                         </div>
                         <div id="attendance-records-list" class="space-y-3">
                             <div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>
@@ -7087,6 +7090,13 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                     </div>
                 `;
                 try { lucide.createIcons(); } catch(e) {}
+                // 請假申請按鈕
+                const leaveApplyBtn = document.getElementById('leave-apply-btn-track');
+                if (leaveApplyBtn) {
+                    leaveApplyBtn.addEventListener('click', () => {
+                        try { openTempLeaveModal(); } catch (err) { showToast('無法開啟請假申請', true); }
+                    });
+                }
                 
                 // 載入所有用戶
                 const { collection, getDocs } = window.__fs || {};
@@ -10050,6 +10060,9 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         if (!allowed.includes(type)) { showToast('狀態不合法', true); return; }
                         const d = timeStr ? new Date(timeStr) : new Date();
                         const updateData = { type, timestamp: Timestamp.fromDate(d) };
+                        // 更新者資訊
+                        updateData.updatedBy = window.__auth?.currentUser?.uid || null;
+                        updateData.updatedAt = Timestamp.fromDate(new Date());
                         const lat = latStr ? parseFloat(latStr) : null;
                         const lng = lngStr ? parseFloat(lngStr) : null;
                         if (typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng)) {
