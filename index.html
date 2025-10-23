@@ -6599,7 +6599,8 @@
                     usersCache: [],
                     pointsCache: [],
                     tasksCache: [],
-                    logsByKey: {}
+                    logsByKey: {},
+                    selectedPointId: 'all'
                 };
 
                 const fmtHM = (date) => {
@@ -6630,13 +6631,18 @@
                 container.innerHTML = `
                     <div class="p-3 space-y-3">
                         <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <button id="patrol-prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
-                                <div id="patrol-current-month" class="text-lg font-semibold">${fmtMonthLabel()}</div>
-                                <button id="patrol-next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
+                            <div class="flex items-center gap-2 text-xs">
+                                <button id="patrol-prev-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
+                                <span class="text-gray-600">日期</span>
+                                <div id="patrol-current-month" class="text-xs font-medium">${fmtMonthLabel()}</div>
+                                <button id="patrol-next-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
                             </div>
-                            <button id="patrol-new-point" class="px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700">新增巡邏點</button>
+                            <div class="flex items-center gap-2">
+                                <button id="patrol-new-point" class="px-2 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 text-xs">新增巡邏點</button>
+                                <button id="patrol-delete-all" class="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs">全部刪除</button>
+                            </div>
                         </div>
+                        <div id="point-tabs" class="flex gap-2 overflow-x-auto px-1"></div>
                         <div class="bg-white rounded-lg shadow overflow-x-auto">
                             <table class="min-w-full divide-y divide-gray-200 text-sm">
                                 <thead class="bg-gray-50">
@@ -6644,6 +6650,7 @@
                                         <th class="px-3 py-2 text-left whitespace-nowrap">日期</th>
                                         <th class="px-3 py-2 text-left whitespace-nowrap">巡邏點編號</th>
                                         <th class="px-3 py-2 text-left whitespace-nowrap">巡邏點名稱</th>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap">任務</th>
                                         <th class="px-3 py-2 text-left whitespace-nowrap">指派人員</th>
                                         <th class="px-3 py-2 text-left whitespace-nowrap">預計開始時間</th>
                                         <th class="px-3 py-2 text-left whitespace-nowrap">實際開始時間</th>
@@ -6654,7 +6661,7 @@
                                     </tr>
                                 </thead>
                                 <tbody id="patrol-rows">
-                                    <tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">正在載入當月巡邏列表...</td></tr>
+                                    <tr><td colspan="11" class="px-3 py-3 text-center text-gray-500">正在載入當月巡邏列表...</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -6666,6 +6673,28 @@
                 const nextBtn = document.getElementById('patrol-next-month');
                 const rowsEl = document.getElementById('patrol-rows');
                 const newPointBtn = document.getElementById('patrol-new-point');
+                const pointTabsEl = document.getElementById('point-tabs');
+
+                const renderPointTabs = () => {
+                    if (!pointTabsEl) return;
+                    const tabsData = [{ id: 'all', label: '全部' }].concat(
+                        (Array.isArray(local.pointsCache) ? local.pointsCache : []).map(p => ({
+                            id: p.pointId || p.id,
+                            label: (p.name || p.pointId || '').trim() || (p.pointId || p.id || '')
+                        }))
+                    );
+                    pointTabsEl.innerHTML = tabsData.map(t => `
+                        <button class="pt-tab-btn px-2 py-1 rounded border text-xs ${local.selectedPointId === t.id ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-gray-700 hover:bg-gray-50'}" data-id="${t.id}">${t.label}</button>
+                    `).join('');
+                    pointTabsEl.querySelectorAll('.pt-tab-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const id = btn.getAttribute('data-id') || 'all';
+                            local.selectedPointId = id;
+                            renderPointTabs();
+                            renderRows();
+                        });
+                    });
+                };
 
                 const ensureUsers = async () => {
                     // 盡量使用 pageState 已載入的社區使用者
@@ -6698,15 +6727,17 @@
 
                 const ensureTasksForMonth = async () => {
                     if (!local.pointsCache.length) return;
-                    const start = monthStart();
-                    const end = monthEnd();
                     const y = local.monthDate.getFullYear();
                     const m = local.monthDate.getMonth();
+                    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
                     for (let day=1; day<=new Date(y, m+1, 0).getDate(); day++) {
                         const d = new Date(y, m, day);
                         const dow = d.getDay();
                         const iso = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                         for (const p of local.pointsCache) {
+                            const createdAtDate = toDate(p.createdAt) || new Date(0);
+                            const baseline = createdAtDate > todayStart ? createdAtDate : todayStart;
+                            if (d < baseline) continue; // 僅從今日或建立日開始產生
                             const scheduled = (p.weekly === true) || (Array.isArray(p.daysOfWeek) && p.daysOfWeek.includes(dow));
                             if (!scheduled) continue;
                             const docId = `${comm.id}__${p.pointId || p.id}__${iso}`;
@@ -6714,6 +6745,7 @@
                                 const dref = doc(db, 'communities', comm.id, 'patrolTasks', docId);
                                 const dsnap = await getDoc(dref);
                                 if (!dsnap.exists()) {
+                                    const checklist = Array.isArray(p.tasks) ? p.tasks.map((item, idx) => ({ index: idx+1, title: item, status: '尚未開始' })) : [];
                                     await setDoc(dref, {
                                         communityId: comm.id,
                                         pointId: p.pointId || p.id,
@@ -6728,6 +6760,7 @@
                                         actualStartTS: null,
                                         actualEndTS: null,
                                         status: '尚未開始',
+                                        checklist: checklist,
                                         createdAt: Timestamp.fromDate(new Date()),
                                         updatedAt: Timestamp.fromDate(new Date())
                                     });
@@ -6757,12 +6790,77 @@
                 };
 
                 const renderRows = () => {
-                    if (!Array.isArray(local.tasksCache) || !local.tasksCache.length) {
-                        rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">本月尚無巡邏任務</td></tr>`;
+                    const filtered = local.selectedPointId === 'all' ? local.tasksCache : local.tasksCache.filter(t => (t.pointId || '') === local.selectedPointId);
+                    if (!Array.isArray(filtered) || !filtered.length) {
+                        rowsEl.innerHTML = `<tr><td colspan="11" class="px-3 py-3 text-center text-gray-500">本月尚無巡邏任務</td></tr>`;
                         return;
                     }
+
+                    const openPhotosModal = (t, photos) => {
+                        const modal = document.createElement('div');
+                        modal.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
+                        modal.innerHTML = `
+                            <div class="bg-white rounded-lg shadow p-4 w-[720px] max-w-[90vw]">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="text-sm font-medium">${t.dateIso} ${t.pointName || ''} 的打卡照片</div>
+                                    <button class="close px-2 py-1 rounded border text-xs">關閉</button>
+                                </div>
+                                <div class="grid grid-cols-3 gap-2" id="photo-grid">
+                                    ${photos.length ? photos.map(u => `<div class=\"aspect-square overflow-hidden rounded border\"><img src=\"${u}\" class=\"w-full h-full object-cover\" /></div>`).join('') : `<div class=\"text-center text-gray-500 col-span-3 py-8\">沒有照片</div>`}
+                                </div>
+                            </div>`;
+                        document.body.appendChild(modal);
+                        modal.querySelector('.close')?.addEventListener('click', () => { try { document.body.removeChild(modal); } catch(_){} });
+                    };
+
+                    const openChecklistModal = (t) => {
+                        const modal = document.createElement('div');
+                        modal.className = 'fixed inset-0 bg-black/30 flex items-center justify-center z-50';
+                        const items = Array.isArray(t.checklist) ? t.checklist : [];
+                        modal.innerHTML = `
+                            <div class="bg-white rounded-lg shadow p-4 w-[360px]">
+                                <div class="text-lg font-semibold mb-2">${t.pointName || t.pointId || ''} 的巡邏任務</div>
+                                <table class="min-w-full text-sm">
+                                    <thead><tr><th class="text-left px-2">編號</th><th class="text-left px-2">項目</th><th class="text-left px-2">狀況</th></tr></thead>
+                                    <tbody>
+                                        ${items.map(it => `<tr><td class=\"px-2\">${it.index}</td><td class=\"px-2\">${it.title}</td><td class=\"px-2\">${it.status || t.status || '尚未開始'}</td></tr>`).join('') || `<tr><td colspan=\"3\" class=\"px-2 py-2 text-center text-gray-500\">未設定任務</td></tr>`}
+                                    </tbody>
+                                </table>
+                                <div class="mt-3 text-right"><button class="clo px-3 py-1 rounded border">關閉</button></div>
+                            </div>`;
+                        document.body.appendChild(modal);
+                        modal.querySelector('.clo')?.addEventListener('click', () => { try { document.body.removeChild(modal); } catch(_){} });
+                    };
+
+                    const fetchClockInPhotosForTask = async (t) => {
+                        try {
+                            if (!t || !t.dateIso) return [];
+                            const dayStart = new Date(`${t.dateIso}T00:00:00`);
+                            const dayEnd = new Date(`${t.dateIso}T23:59:59`);
+                            const startTS = Timestamp.fromDate(dayStart);
+                            const endTS = Timestamp.fromDate(dayEnd);
+                            const conds = [
+                                where('timestamp', '>=', startTS),
+                                where('timestamp', '<=', endTS)
+                            ];
+                            if (t.assignedUserId) conds.push(where('userId', '==', t.assignedUserId));
+                            const snap = await getDocs(query(collection(db, 'clockInRecords'), ...conds));
+                            const urls = [];
+                            snap.forEach(d => {
+                                const data = d.data();
+                                if (Array.isArray(data.photoUrls)) {
+                                    data.photoUrls.forEach(u => { if (typeof u === 'string') urls.push(u); });
+                                }
+                            });
+                            return Array.from(new Set(urls));
+                        } catch (e) {
+                            console.warn('載入打卡照片失敗', e);
+                            return [];
+                        }
+                    };
+
                     const userOptions = local.usersCache.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
-                    const rows = local.tasksCache.map(t => {
+                    const rows = filtered.map(t => {
                         const key = `${t.pointCode || ''}__${t.dateIso}`;
                         const logs = local.logsByKey[key] || [];
                         const startLog = logs.filter(l => l.action === 'start').sort((a,b)=> toDate(a.timestamp) - toDate(b.timestamp))[0] || null;
@@ -6770,11 +6868,13 @@
                         const actualStartStr = startLog ? fmtHM(toDate(startLog.timestamp)) : '';
                         const actualEndStr = endLog ? fmtHM(toDate(endLog.timestamp)) : '';
                         const statusText = computeStatus(t.expectedStartHM, t.expectedEndHM, startLog?.timestamp, endLog?.timestamp);
+                        const hasChecklist = Array.isArray(t.checklist) && t.checklist.length > 0;
                         return `
-                            <tr data-task-id="${t.id}">
+                            <tr data-task-id="${t.id}" data-point-id="${t.pointId || ''}">
                                 <td class="px-3 py-2 whitespace-nowrap">${t.dateIso}</td>
-                                <td class="px-3 py-2 whitespace-nowrap">${t.pointId || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap text-amber-700 underline cursor-pointer point-edit">${t.pointId || ''}</td>
                                 <td class="px-3 py-2 whitespace-nowrap">${t.pointName || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${hasChecklist ? `<button class=\"checklist-btn px-2 py-1 rounded border text-xs\">任務</button>` : ''}</td>
                                 <td class="px-3 py-2 whitespace-nowrap">
                                     <select class="assign-select border rounded px-2 py-1">
                                         <option value="">未指派</option>
@@ -6793,6 +6893,7 @@
                                 <td class="px-3 py-2 whitespace-nowrap">
                                     <div class="flex items-center gap-2">
                                         <button class="save-task bg-amber-500 text-white px-2 py-1 rounded text-xs">編輯</button>
+                                        <button class="photos-task bg-slate-600 text-white px-2 py-1 rounded text-xs">照片</button>
                                         <button class="delete-task bg-red-600 text-white px-2 py-1 rounded text-xs">刪除</button>
                                     </div>
                                 </td>
@@ -6803,25 +6904,29 @@
 
                     rowsEl.querySelectorAll('tr').forEach(tr => {
                         const taskId = tr.getAttribute('data-task-id');
-                        const t = local.tasksCache.find(x => x.id === taskId);
+                        const pointId = tr.getAttribute('data-point-id');
+                        const t = filtered.find(x => x.id === taskId);
                         const assignSel = tr.querySelector('.assign-select');
                         const expStart = tr.querySelector('.expected-start');
                         const expEnd = tr.querySelector('.expected-end');
                         if (assignSel) assignSel.value = t?.assignedUserId || '';
-                        tr.querySelector('.save-task')?.addEventListener('click', async () => {
+                        // 指派人員自動儲存
+                        assignSel?.addEventListener('change', async () => {
                             const newAssignedId = assignSel?.value || '';
                             const newAssignedRole = local.usersCache.find(u => u.id === newAssignedId)?.role || '';
+                            try {
+                                const dref = doc(db, 'communities', comm.id, 'patrolTasks', taskId);
+                                await updateDoc(dref, { assignedUserId: newAssignedId, assignedRole: newAssignedRole || '', updatedAt: Timestamp.fromDate(new Date()) });
+                                showToast('已儲存指派人員');
+                            } catch (e) { console.error('自動儲存失敗', e); showToast('自動儲存失敗', true); }
+                        });
+                        // 時間變更仍用「編輯」按鈕儲存
+                        tr.querySelector('.save-task')?.addEventListener('click', async () => {
                             const newStart = expStart?.value || t.expectedStartHM || '';
                             const newEnd = expEnd?.value || t.expectedEndHM || '';
                             try {
                                 const dref = doc(db, 'communities', comm.id, 'patrolTasks', taskId);
-                                await updateDoc(dref, {
-                                    assignedUserId: newAssignedId,
-                                    assignedRole: newAssignedRole || '',
-                                    expectedStartHM: newStart,
-                                    expectedEndHM: newEnd,
-                                    updatedAt: Timestamp.fromDate(new Date())
-                                });
+                                await updateDoc(dref, { expectedStartHM: newStart, expectedEndHM: newEnd, updatedAt: Timestamp.fromDate(new Date()) });
                                 showToast('已更新巡邏任務');
                                 await loadTasksAndLogs();
                                 renderRows();
@@ -6836,14 +6941,24 @@
                                 renderRows();
                             } catch (e) { console.error('刪除巡邏任務失敗', e); showToast('刪除失敗：請檢查權限', true); }
                         });
+                        tr.querySelector('.point-edit')?.addEventListener('click', () => {
+                            const p = local.pointsCache.find(pp => (pp.pointId||pp.id) === pointId);
+                            if (p) openEditPointModal(p);
+                        });
+                        tr.querySelector('.checklist-btn')?.addEventListener('click', () => openChecklistModal(t));
+                        tr.querySelector('.photos-task')?.addEventListener('click', async () => {
+                            const photos = await fetchClockInPhotosForTask(t);
+                            openPhotosModal(t, photos);
+                        });
                     });
                 };
 
                 const renderAll = async () => {
                     monthLabel.textContent = fmtMonthLabel();
-                    rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">正在載入當月巡邏列表...</td></tr>`;
+                    rowsEl.innerHTML = `<tr><td colspan="11" class="px-3 py-3 text-center text-gray-500">正在載入當月巡邏列表...</td></tr>`;
                     await ensureUsers();
                     await loadPoints();
+                    renderPointTabs();
                     await ensureTasksForMonth();
                     await loadTasksAndLogs();
                     renderRows();
@@ -6851,6 +6966,24 @@
 
                 prevBtn.addEventListener('click', () => { local.monthDate = new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()-1, 1); renderAll(); });
                 nextBtn.addEventListener('click', () => { local.monthDate = new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()+1, 1); renderAll(); });
+
+                const deleteAllBtn = document.getElementById('patrol-delete-all');
+                if (deleteAllBtn) deleteAllBtn.addEventListener('click', async () => {
+                    if (!confirm('確定刪除本月全部巡邏任務？')) return;
+                    try {
+                        const startTS = Timestamp.fromDate(monthStart());
+                        const endTS = Timestamp.fromDate(monthEnd());
+                        const qsnap = await getDocs(query(collection(db, 'communities', comm.id, 'patrolTasks'), where('dateTS','>=', startTS), where('dateTS','<=', endTS)));
+                        const ids = [];
+                        qsnap.forEach(d => ids.push(d.id));
+                        for (const id of ids) {
+                            await deleteDoc(doc(db, 'communities', comm.id, 'patrolTasks', id));
+                        }
+                        showToast('已刪除本月全部巡邏任務');
+                        await loadTasksAndLogs();
+                        renderRows();
+                    } catch (e) { console.error('刪除全部巡邏任務失敗', e); showToast('刪除失敗：請檢查權限', true); }
+                });
 
                 const openNewPointModal = () => {
                     const modal = document.createElement('div');
@@ -6869,7 +7002,15 @@
                                 </div>
                                 <div>
                                     <label class="text-sm">巡邏點 code (12位數)</label>
-                                    <input id="pt-code" class="w-full border rounded px-2 py-1" placeholder="例如 123456789012" />
+                                    <div class="flex items-center gap-2">
+                                        <input id="pt-code" class="flex-1 border rounded px-2 py-1" readonly />
+                                        <button id="pt-code-regenerate" class="px-2 py-1 rounded border text-xs">重新產生</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-sm">任務項目</label>
+                                    <div id="pt-tasks" class="space-y-1"></div>
+                                    <button id="pt-task-add" class="mt-1 px-2 py-1 rounded border text-xs">新增項目</button>
                                 </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
@@ -6903,6 +7044,34 @@
                             </div>
                         </div>`;
                     document.body.appendChild(modal);
+                    const genCode12 = () => {
+                        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
+                        let s = '';
+                        for (let i = 0; i < 12; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+                        return s;
+                    };
+                    const codeInput = modal.querySelector('#pt-code');
+                    if (codeInput) codeInput.value = genCode12();
+                    modal.querySelector('#pt-code-regenerate')?.addEventListener('click', () => { if (codeInput) codeInput.value = genCode12(); });
+
+                    const tasksWrap = modal.querySelector('#pt-tasks');
+                    const addTaskField = (text = '') => {
+                        const idx = (tasksWrap?.children?.length || 0) + 1;
+                        const row = document.createElement('div');
+                        row.className = 'flex items-center gap-2';
+                        row.innerHTML = `<span class="text-xs text-gray-500 w-5 text-right">${idx}</span>
+                            <input class="pt-task-input flex-1 border rounded px-2 py-1" placeholder="例如：檢查滅火器壓力" />
+                            <button class="pt-task-remove px-2 py-1 rounded border text-xs">移除</button>`;
+                        tasksWrap.appendChild(row);
+                        row.querySelector('.pt-task-remove')?.addEventListener('click', () => {
+                            tasksWrap.removeChild(row);
+                            Array.from(tasksWrap.children).forEach((c, i) => { const s = c.querySelector('span'); if (s) s.textContent = String(i + 1); });
+                        });
+                        if (text) row.querySelector('.pt-task-input').value = text;
+                    };
+                    addTaskField();
+                    modal.querySelector('#pt-task-add')?.addEventListener('click', () => addTaskField());
+
                     const close = () => { try { document.body.removeChild(modal); } catch(_){} };
                     modal.querySelector('#pt-cancel')?.addEventListener('click', close);
                     modal.querySelector('#pt-save')?.addEventListener('click', async () => {
@@ -6913,7 +7082,8 @@
                         const endHM = modal.querySelector('#pt-end')?.value || '';
                         const weekly = modal.querySelector('#pt-weekly')?.checked || false;
                         const dows = Array.from(modal.querySelectorAll('.pt-dow')).filter(x => x.checked).map(x => parseInt(x.value,10));
-                        if (!pointId || !name || !/^\d{12}$/.test(code)) { showToast('請完整填寫，code須為12位數字', true); return; }
+                        const tasks = Array.from(modal.querySelectorAll('.pt-task-input')).map(i => i.value.trim()).filter(v => v.length > 0);
+                        if (!pointId || !name || !(typeof code === 'string' && code.length === 12)) { showToast('請完整填寫，code須為12碼英數', true); return; }
                         try {
                             const pDocId = pointId; // 用使用者輸入的編號作為文件ID，方便管理
                             await setDoc(doc(db, 'communities', comm.id, 'patrolPoints', pDocId), {
@@ -6929,6 +7099,7 @@
                                 daysOfWeek: weekly ? [] : dows,
                                 defaultAssigneeRole: '',
                                 defaultAssigneeId: '',
+                                tasks: tasks,
                                 createdAt: Timestamp.fromDate(new Date()),
                                 updatedAt: Timestamp.fromDate(new Date())
                             });
@@ -6939,6 +7110,125 @@
                             await loadTasksAndLogs();
                             renderRows();
                         } catch (e) { console.error('新增巡邏點失敗', e); showToast('新增失敗：請檢查權限', true); }
+                    });
+                };
+
+                const openEditPointModal = (p) => {
+                    const modal = document.createElement('div');
+                    modal.className = 'fixed inset-0 bg-black/30 flex items-center justify-center z-50';
+                    const pointId = p.pointId || p.id || '';
+                    const startHMInit = p.expectedStartHM || (typeof p.expectedStartHour === 'number' ? String(p.expectedStartHour).padStart(2,'0')+':00' : '');
+                    const endHMInit = p.expectedEndHM || (typeof p.expectedEndHour === 'number' ? String(p.expectedEndHour).padStart(2,'0')+':00' : '');
+                    const weeklyInit = !!p.weekly;
+                    const daysInit = Array.isArray(p.daysOfWeek) ? p.daysOfWeek : [];
+                    modal.innerHTML = `
+                        <div class="bg-white rounded-lg shadow p-4 w-[360px]">
+                            <div class="text-lg font-semibold mb-2">編輯巡邏點</div>
+                            <div class="space-y-2">
+                                <div>
+                                    <label class="text-sm">巡邏點編號</label>
+                                    <input id="ep-id" class="w-full border rounded px-2 py-1 bg-gray-50" value="${pointId}" disabled />
+                                </div>
+                                <div>
+                                    <label class="text-sm">巡邏點名稱</label>
+                                    <input id="ep-name" class="w-full border rounded px-2 py-1" value="${p.name || ''}" />
+                                </div>
+                                <div>
+                                    <label class="text-sm">巡邏點 code (12位數)</label>
+                                    <div class="flex items-center gap-2">
+                                        <input id="ep-code" class="flex-1 border rounded px-2 py-1" value="${p.code || ''}" />
+                                        <button id="ep-code-regenerate" class="px-2 py-1 rounded border text-xs">重新產生</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-sm">任務項目</label>
+                                    <div id="ep-tasks" class="space-y-1"></div>
+                                    <button id="ep-task-add" class="mt-1 px-2 py-1 rounded border text-xs">新增項目</button>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-sm">預計開始時間(時)</label>
+                                        <input id="ep-start" type="time" step="3600" class="w-full border rounded px-2 py-1" value="${startHMInit || '08:00'}" />
+                                    </div>
+                                    <div>
+                                        <label class="text-sm">預計結束時間(時)</label>
+                                        <input id="ep-end" type="time" step="3600" class="w-full border rounded px-2 py-1" value="${endHMInit || '09:00'}" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-sm">執行行程</label>
+                                    <div class="space-y-1 text-sm">
+                                        <label class="inline-flex items-center gap-2"><input type="checkbox" id="ep-weekly" ${weeklyInit ? 'checked' : ''} /> 每週 (7天)</label>
+                                        <div class="grid grid-cols-7 gap-1">
+                                            ${[0,1,2,3,4,5,6].map(d => `<label class=\"inline-flex items-center gap-1\"><input type=\"checkbox\" class=\"ep-dow\" value=\"${d}\" ${daysInit.includes(d) ? 'checked' : ''} />${['日','一','二','三','四','五','六'][d]}</label>`).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-3 flex justify-end gap-2">
+                                <button id="ep-cancel" class="px-3 py-1 rounded border">取消</button>
+                                <button id="ep-save" class="px-3 py-1 rounded bg-amber-600 text-white">儲存</button>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(modal);
+                    const genCode12 = () => {
+                        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789';
+                        let s = '';
+                        for (let i = 0; i < 12; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+                        return s;
+                    };
+                    modal.querySelector('#ep-code-regenerate')?.addEventListener('click', () => {
+                        const ci = modal.querySelector('#ep-code'); if (ci) ci.value = genCode12();
+                    });
+                    const tasksWrap = modal.querySelector('#ep-tasks');
+                    const addTaskField = (text = '') => {
+                        const idx = (tasksWrap?.children?.length || 0) + 1;
+                        const row = document.createElement('div');
+                        row.className = 'flex items-center gap-2';
+                        row.innerHTML = `<span class="text-xs text-gray-500 w-5 text-right">${idx}</span>
+                            <input class="ep-task-input flex-1 border rounded px-2 py-1" placeholder="例如：檢查滅火器壓力" />
+                            <button class="ep-task-remove px-2 py-1 rounded border text-xs">移除</button>`;
+                        tasksWrap.appendChild(row);
+                        row.querySelector('.ep-task-remove')?.addEventListener('click', () => {
+                            tasksWrap.removeChild(row);
+                            Array.from(tasksWrap.children).forEach((c, i) => { const s = c.querySelector('span'); if (s) s.textContent = String(i + 1); });
+                        });
+                        if (text) row.querySelector('.ep-task-input').value = text;
+                    };
+                    (Array.isArray(p.tasks) && p.tasks.length ? p.tasks : ['']).forEach(t => addTaskField(t));
+                    const close = () => { try { document.body.removeChild(modal); } catch(_){} };
+                    modal.querySelector('#ep-cancel')?.addEventListener('click', close);
+                    modal.querySelector('#ep-save')?.addEventListener('click', async () => {
+                        const name = modal.querySelector('#ep-name')?.value.trim() || '';
+                        const code = modal.querySelector('#ep-code')?.value.trim() || '';
+                        const startHM = modal.querySelector('#ep-start')?.value || '';
+                        const endHM = modal.querySelector('#ep-end')?.value || '';
+                        const weekly = modal.querySelector('#ep-weekly')?.checked || false;
+                        const dows = Array.from(modal.querySelectorAll('.ep-dow')).filter(x => x.checked).map(x => parseInt(x.value,10));
+                        const tasks = Array.from(modal.querySelectorAll('.ep-task-input')).map(i => i.value.trim()).filter(v => v.length > 0);
+                        if (!name || !(typeof code === 'string' && code.length === 12)) { showToast('請完整填寫，code須為12碼英數', true); return; }
+                        try {
+                            const dref = doc(db, 'communities', comm.id, 'patrolPoints', pointId);
+                            await updateDoc(dref, {
+                                name: name,
+                                code: code,
+                                expectedStartHour: parseInt((startHM||'00:00').split(':')[0],10)||0,
+                                expectedEndHour: parseInt((endHM||'00:00').split(':')[0],10)||0,
+                                expectedStartHM: startHM,
+                                expectedEndHM: endHM,
+                                weekly: weekly,
+                                daysOfWeek: weekly ? [] : dows,
+                                tasks: tasks,
+                                updatedAt: Timestamp.fromDate(new Date())
+                            });
+                            showToast('已更新巡邏點');
+                            close();
+                            await loadPoints();
+                            renderPointTabs();
+                            await ensureTasksForMonth();
+                            await loadTasksAndLogs();
+                            renderRows();
+                        } catch (e) { console.error('更新巡邏點失敗', e); showToast('更新失敗：請檢查權限', true); }
                     });
                 };
 

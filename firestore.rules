@@ -383,7 +383,7 @@ service cloud.firestore {
       // 僅社區維護角色可新增/更新/刪除巡邏點；限制欄位與型別
       allow create, update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
-          'communityId','pointId','name','code','expectedStartHour','expectedEndHour','expectedStartHM','expectedEndHM','weekly','daysOfWeek','defaultAssigneeRole','defaultAssigneeId','createdAt','updatedAt'
+          'communityId','pointId','name','code','expectedStartHour','expectedEndHour','expectedStartHM','expectedEndHM','weekly','daysOfWeek','tasks','defaultAssigneeRole','defaultAssigneeId','createdAt','updatedAt'
         ]) &&
         request.resource.data.communityId is string &&
         request.resource.data.communityId == communityId &&
@@ -391,12 +391,15 @@ service cloud.firestore {
         request.resource.data.name is string &&
         request.resource.data.code is string &&
         (request.resource.data.code.size() == 12) &&
+        request.resource.data.code.matches('^[A-Za-z0-9]{12}$') &&
         (request.resource.data.expectedStartHour == null || request.resource.data.expectedStartHour is int) &&
         (request.resource.data.expectedEndHour == null || request.resource.data.expectedEndHour is int) &&
         (request.resource.data.expectedStartHM == null || request.resource.data.expectedStartHM is string) &&
         (request.resource.data.expectedEndHM == null || request.resource.data.expectedEndHM is string) &&
         (request.resource.data.weekly == null || request.resource.data.weekly is bool) &&
         (request.resource.data.daysOfWeek == null || request.resource.data.daysOfWeek is list) &&
+        (request.resource.data.tasks == null || request.resource.data.tasks is list) &&
+        (request.resource.data.tasks == null || request.resource.data.tasks.size() <= 30) &&
         (request.resource.data.defaultAssigneeRole == null || request.resource.data.defaultAssigneeRole is string) &&
         (request.resource.data.defaultAssigneeId == null || request.resource.data.defaultAssigneeId is string) &&
         (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
@@ -409,7 +412,7 @@ service cloud.firestore {
       // 僅社區維護角色可新增/更新/刪除巡邏任務；限制欄位與型別
       allow create, update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
-          'communityId','pointId','pointName','pointCode','dateIso','dateTS','assignedRole','assignedUserId','expectedStartHM','expectedEndHM','actualStartTS','actualEndTS','status','createdAt','updatedAt'
+          'communityId','pointId','pointName','pointCode','dateIso','dateTS','assignedRole','assignedUserId','expectedStartHM','expectedEndHM','actualStartTS','actualEndTS','status','checklist','createdAt','updatedAt'
         ]) &&
         request.resource.data.communityId is string &&
         request.resource.data.communityId == communityId &&
@@ -425,6 +428,8 @@ service cloud.firestore {
         (request.resource.data.actualStartTS == null || request.resource.data.actualStartTS is timestamp) &&
         (request.resource.data.actualEndTS == null || request.resource.data.actualEndTS is timestamp) &&
         (request.resource.data.status == null || request.resource.data.status in ['尚未開始','進行中','已完成','未執行']) &&
+        (request.resource.data.checklist == null || request.resource.data.checklist is list) &&
+        (request.resource.data.checklist == null || request.resource.data.checklist.size() <= 30) &&
         (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
       allow delete: if isCommunityEditor();
