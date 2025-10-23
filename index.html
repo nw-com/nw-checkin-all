@@ -6678,9 +6678,19 @@
 
                 const renderPointTabs = () => {
                     if (!pointTabsEl) return;
-                    const names = Array.from(new Set((Array.isArray(local.pointsCache) ? local.pointsCache : [])
-                        .map(p => (p.name || '').trim())
-                        .filter(n => n.length)));
+                    // 以「巡邏項目」名稱生成分頁（優先 itemName；沒有則用 name）
+                    const names = (() => {
+                        const all = [];
+                        const pts = Array.isArray(local.pointsCache) ? local.pointsCache : [];
+                        pts.forEach(p => {
+                            const arr = Array.isArray(p.tasks) ? p.tasks : [];
+                            arr.forEach(t => {
+                                const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
+                                if (nm) all.push(nm);
+                            });
+                        });
+                        return Array.from(new Set(all));
+                    })();
                     const tabsData = [{ id: 'all', label: '全部' }].concat(names.map(n => ({ id: n, label: n })));
                     pointTabsEl.innerHTML = tabsData.map(t => `
                         <button class="pt-tab-btn px-2 py-1 rounded border text-xs ${local.selectedPointId === t.id ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-gray-700 hover:bg-gray-50'}" data-id="${t.id}">${t.label}</button>
@@ -6704,7 +6714,13 @@
                 // 管理某個巡邏項目名稱對應的巡邏點：編輯或刪除
                 const openManageItemModal = (itemName) => {
                     const points = (Array.isArray(local.pointsCache) ? local.pointsCache : [])
-                        .filter(p => (p.name || '').trim() === itemName);
+                        .filter(p => {
+                            const arr = Array.isArray(p.tasks) ? p.tasks : [];
+                            return arr.some(t => {
+                                const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
+                                return nm === itemName;
+                            });
+                        });
                     if (!points.length) { showToast('找不到此巡邏項目', true); return; }
                     if (points.length === 1) { openEditPointModal(points[0]); return; }
 
@@ -7143,7 +7159,13 @@
                 const renderPointsListRows = () => {
                     const dayIso = fmtDayLabel();
                     const points = Array.isArray(local.pointsCache) ? local.pointsCache : [];
-                    const filteredPoints = local.selectedPointId === 'all' ? points : points.filter(p => (p.name || '') === local.selectedPointId);
+                    const filteredPoints = local.selectedPointId === 'all' ? points : points.filter(p => {
+                        const arr = Array.isArray(p.tasks) ? p.tasks : [];
+                        return arr.some(t => {
+                            const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
+                            return nm === local.selectedPointId;
+                        });
+                    });
                     if (!Array.isArray(filteredPoints) || !filteredPoints.length) {
                         rowsEl.innerHTML = `<tr><td colspan="10" class="px-3 py-3 text-center text-gray-500">尚無巡邏點</td></tr>`;
                         return;
@@ -7156,7 +7178,7 @@
                         return `
                             <tr data-point-id="${pid}">
                                 <td class="px-3 py-2 whitespace-nowrap text-amber-700 underline cursor-pointer point-edit">${pid}</td>
-                                <td class="px-3 py-2 whitespace-nowrap">${p.name || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${p.pointName || p.name || ''}</td>
                                 <td class="px-3 py-2 whitespace-nowrap">${todayTasksCount ? `${todayTasksCount}件` : ''}</td>
                                 <td class="px-3 py-2 whitespace-nowrap">-</td>
                                 <td class="px-3 py-2 whitespace-nowrap">${startHM}</td>
