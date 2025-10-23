@@ -7364,25 +7364,63 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
   const userSelect = document.getElementById('schedule-user');
   const rowsEl = document.getElementById('schedule-rows');
 
+  // 本地使用者清單，避免依賴 pageState
+  let scheduleUsers = [];
+  const getUserById = (uid) => {
+    const fromLocal = scheduleUsers.find(x => x.id === uid);
+    const fromPageState = (window.pageState?.communityUsers || []).find(x => x.id === uid);
+    return fromLocal || fromPageState || null;
+  };
+  const getUserNameById = (uid) => {
+    const u = getUserById(uid);
+    return u ? (u.name || u.displayName || u.id) : (uid || '未指派');
+  };
+  const getUserTitleById = (uid) => {
+    const u = getUserById(uid);
+    return u ? ((u.jobTitle || u.applicationTitle || u.role || '') + '') : '';
+  };
+
   const roleOrder = { '總幹事': 0, '秘書': 1, '保全': 2, '清潔': 3, '機電': 4 };
   const toDate = (tsOrDate) => tsOrDate?.toDate?.() || (tsOrDate instanceof Date ? tsOrDate : new Date(tsOrDate));
   const fmtHM = (date) => {
     if (!date || isNaN(date.getTime())) return '';
     return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
   };
-  const getUserNameById = (uid) => {
-    const u = (pageState.communityUsers || []).find(x => x.id === uid);
-    return u ? (u.name || u.displayName || u.id) : '未指派';
+  const getStatusBgColor = (typeOrText) => {
+    const s = String(typeOrText || '').toLowerCase();
+    if (s.includes('上班') || s.includes('返回') || s.includes('在辦')) return 'bg-green-100 text-green-800';
+    if (s.includes('下班')) return 'bg-red-100 text-red-800';
+    if (s.includes('外出') || s.includes('抵達') || s.includes('離開')) return 'bg-blue-100 text-blue-800';
+    if (s.includes('請假')) return 'bg-orange-100 text-orange-800';
+    if (s.includes('特殊勤務') || s.includes('現金班')) return 'bg-indigo-100 text-indigo-800';
+    return 'bg-gray-100 text-gray-800';
   };
 
   const ensureUsersOptions = async () => {
-    try { await loadCommunityUsers(); } catch (_) {}
-    (pageState.communityUsers || []).sort((a,b)=> (a.name||'').localeCompare(b.name||'', 'zh-Hant'))
-      .forEach(u => {
-        const opt = document.createElement('option');
-        opt.value = u.id; opt.textContent = u.name || u.displayName || u.id;
-        userSelect.appendChild(opt);
-      });
+    const { collection, getDocs } = window.__fs || {};
+    const db = window.__db;
+    // 優先使用 pageState 已載入的社區使用者
+    if (Array.isArray(window.pageState?.communityUsers) && window.pageState.communityUsers.length) {
+      scheduleUsers = window.pageState.communityUsers.slice();
+    } else if (db && collection && getDocs) {
+      // 後援：從 users 直接載入
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        scheduleUsers = [];
+        snap.forEach(d => {
+          const data = d.data();
+          scheduleUsers.push({ id: d.id, name: data.name || data.displayName || d.id, ...data });
+        });
+      } catch (e) {
+        console.warn('載入使用者失敗', e);
+      }
+    }
+
+    scheduleUsers.sort((a,b)=> (a.name||'').localeCompare(b.name||'', 'zh-Hant')).forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u.id; opt.textContent = u.name || u.displayName || u.id;
+      userSelect.appendChild(opt);
+    });
     if (params && params.selectedUserId) userSelect.value = params.selectedUserId;
   };
 
@@ -7399,7 +7437,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
 
   const renderList = async () => {
     const iso = dateInput.value || todayIso;
-    const communityId = state.currentCommunity?.id || pageState?.selectedCommunityId || null;
+    const communityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
     const { collection, getDocs, query, where, Timestamp } = window.__fs || {};
     const db = window.__db;
     if (!communityId || !collection || !getDocs) {
@@ -7409,6 +7447,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
 
     rowsEl.innerHTML = `<tr><td colspan="8" class="px-3 py-3 text-center text-gray-500">正在載入當日排班...</td></tr>`;
 
+    // 讀取當日所有哨點的排班（postSchedules）
     const schedulesRef = collection(db, 'communities', communityId, 'postSchedules');
     const snap = await getDocs(query(schedulesRef, where('dateIso', '==', iso)));
     const shifts = [];
@@ -7432,9 +7471,11 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
       });
     });
 
+    // 篩選人員（若選擇特定人員，只顯示包含該人員之排班）
     const selectedUserId = userSelect.value;
     const filtered = selectedUserId === 'all' ? shifts : shifts.filter(s => s.assignees.includes(selectedUserId));
 
+    // 讀取當日打卡記錄
     const startOfDay = new Date(`${iso}T00:00:00`);
     const endOfDay = new Date(`${iso}T23:59:59`);
     const startTS = Timestamp?.fromDate ? Timestamp.fromDate(startOfDay) : startOfDay;
@@ -7448,6 +7489,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
       recsByUser[r.userId].push(r);
     });
 
+    // 按角色排序
     filtered.sort((a,b) => {
       const ao = roleOrder[a.role] ?? 999, bo = roleOrder[b.role] ?? 999;
       if (ao !== bo) return ao - bo;
@@ -7458,6 +7500,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
     const now = new Date();
     const rows = filtered.map(s => {
       const assId = s.assignees[0] || '';
+      const assUser = getUserById(assId);
       const assName = assId ? getUserNameById(assId) : '未指派';
       const start = new Date(`${s.dateIso}T${s.startStr}:00`);
       const end = new Date(`${s.endDateIso}T${s.endStr}:00`);
@@ -7585,6 +7628,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
       } catch (e) { console.error('manual clock error', e); showToast('手動打卡失敗', true); }
     };
 
+    // 綁定按鈕
     rowsEl.querySelectorAll('tr').forEach(tr => {
       tr.querySelector('.save-start-time')?.addEventListener('click', async () => {
         const assigneeId = tr.getAttribute('data-assignee-id') || '';
@@ -11318,28 +11362,6 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 }
             }
 
-            function renderLeaveInfo(userData) {
-                if (!userData) return '目前沒有請假記錄';
-                let isLeave = userData.clockInStatus === '臨時請假';
-                if (!isLeave && (userData.leaveStatus === 'approved' || userData.leaveStatus === 'pending')) {
-                    const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
-                    const startTime = toDate(userData.leaveStartTime);
-                    const endTime = toDate(userData.leaveEndTime);
-                    const now = new Date();
-                    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                    isLeave = !!(startTime && endTime && startTime <= todayEnd && endTime >= todayStart);
-                }
-                if (!isLeave) return '目前沒有請假記錄';
-                const statusText = userData.leaveStatus === 'approved' ? '已請假' : '請假申請';
-                const reasonText = userData.leaveReason ? `${userData.leaveReason}` : '';
-                const typeText = userData.reasonType ? `(${userData.reasonType})` : '';
-                const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
-                const startTime = toDate(userData.leaveStartTime);
-                const endTime = toDate(userData.leaveEndTime);
-                const timeInfo = (startTime && endTime) ? `<div class="text-sm mt-1">從 ${formatDateTime(startTime)} 至 ${formatDateTime(endTime)}</div>` : '';
-                return `<div class="font-medium">${statusText}: ${reasonText} ${typeText}</div>${timeInfo}`;
-            }
 
             function openAvatarCameraModal(callback) {
                 const modalId = `avatar-camera-modal-${Date.now()}`;
