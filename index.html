@@ -6688,6 +6688,8 @@
                                 const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
                                 if (nm) set.add(nm);
                             });
+                            const iname = (p.itemName || '').trim();
+                            if (iname) set.add(iname);
                         });
                         const tasks = Array.isArray(local.tasksCache) ? local.tasksCache : [];
                         tasks.forEach(tt => {
@@ -6723,6 +6725,8 @@
                 const openManageItemModal = (itemName) => {
                     let points = (Array.isArray(local.pointsCache) ? local.pointsCache : [])
                         .filter(p => {
+                            const iname = (p.itemName || '').trim();
+                            if (iname === itemName) return true;
                             const arr = Array.isArray(p.tasks) ? p.tasks : [];
                             return arr.some(t => {
                                 const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
@@ -7183,6 +7187,8 @@
                     const dayIso = fmtDayLabel();
                     const points = Array.isArray(local.pointsCache) ? local.pointsCache : [];
                     const filteredPoints = local.selectedPointId === 'all' ? points : points.filter(p => {
+                        const byItemName = ((p.itemName || '').trim() === local.selectedPointId);
+                        if (byItemName) return true;
                         const arr = Array.isArray(p.tasks) ? p.tasks : [];
                         const matchFromPointTasks = arr.some(t => {
                             const nm = typeof t === 'string' ? t.trim() : ((t.name || t.title || t.itemName || '').trim());
@@ -7497,6 +7503,7 @@
                                     communityId: comm.id,
                                     pointId: pid,
                                     name: name,
+                                    itemName: itName,
                                     code: code,
                                     expectedStartHour: parseInt((startHM||'00:00').split(':')[0],10)||0,
                                     expectedEndHour: parseInt((endHM||'00:00').split(':')[0],10)||0,
