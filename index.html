@@ -3677,7 +3677,7 @@
                                         <div class="ml-auto flex items-center gap-1 whitespace-nowrap">
                                             <button class="my-clock-btn px-2 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700" data-type="上班">上班</button>
                                             <button class="my-clock-btn px-2 py-1 text-xs rounded bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" disabled>下班</button>
-                                            <button class="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600" onclick="openTempLeaveModal()">請假</button>
+                                            <button class="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600" data-date="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" onclick="openTempLeaveModal(this)">請假</button>
                                         </div>
                                     </div>
                                 `).join('')}
@@ -3925,15 +3925,21 @@
             }
             
             // 臨時請假表單
-            function openTempLeaveModal() {
+            function openTempLeaveModal(el) {
                 const modal = document.createElement('div');
                 modal.className = 'modal fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50';
                 modal.id = 'temp-leave-modal';
                 
+                // 解析觸發按鈕的班表時間（若無，預設為現在至兩小時後）
                 const now = new Date();
-                const todayStr = now.toISOString().split('T')[0];
-                const currentHour = now.getHours();
-                const defaultEndHour = Math.min(currentHour + 2, 23);
+                const iso = (el && el.dataset && el.dataset.date) ? el.dataset.date : now.toISOString().split('T')[0];
+                const startStr = (el && el.dataset) ? (el.dataset.start || '') : '';
+                const endStr = (el && el.dataset) ? (el.dataset.end || '') : '';
+                const endDateIso = (el && el.dataset) ? (el.dataset.enddateiso || '') : '';
+                const startDt = startStr ? new Date(`${iso}T${startStr}:00`) : now;
+                const endIso = endDateIso || iso;
+                const endDt = endStr ? new Date(`${endIso}T${endStr}:00`) : new Date(startDt.getTime() + 2 * 60 * 60 * 1000);
+                const displayText = `${iso} ${startStr || startDt.toTimeString().slice(0,5)} ~ ${endIso} ${endStr || endDt.toTimeString().slice(0,5)}`;
                 
                 modal.innerHTML = `
                     <div class="modal-content bg-white rounded-lg shadow-xl w-11/12 max-w-md mx-auto overflow-hidden">
@@ -3945,6 +3951,10 @@
                         </div>
                         <div class="modal-body p-4">
                             <form id="leave-form" class="space-y-4">
+                                <div class="form-group">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">請假時間</label>
+                                    <div class="text-sm text-gray-900">${displayText}</div>
+                                </div>
                                 <div class="form-group">
                                     <label for="leave-reason-type" class="block text-sm font-medium text-gray-700 mb-1">請假事由</label>
                                     <select id="leave-reason-type" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500">
@@ -3959,25 +3969,6 @@
                                     <input type="text" id="other-reason" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500" placeholder="請輸入請假事由">
                                 </div>
                                 
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div class="form-group">
-                                        <label for="leave-start-date" class="block text-sm font-medium text-gray-700 mb-1">開始日期</label>
-                                        <input type="date" id="leave-start-date" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500" value="${todayStr}">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="leave-start-hour" class="block text-sm font-medium text-gray-700 mb-1">開始小時</label>
-                                        <input type="number" id="leave-start-hour" min="0" max="23" step="1" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500" value="${currentHour}">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="leave-end-date" class="block text-sm font-medium text-gray-700 mb-1">結束日期</label>
-                                        <input type="date" id="leave-end-date" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500" value="${todayStr}">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="leave-end-hour" class="block text-sm font-medium text-gray-700 mb-1">結束小時</label>
-                                        <input type="number" id="leave-end-hour" min="0" max="23" step="1" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500" value="${defaultEndHour}">
-                                    </div>
-                                </div>
-                                
                                 <div class="flex justify-end space-x-2 pt-2">
                                     <button type="button" id="leave-cancel-btn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">取消</button>
                                     <button type="submit" id="leave-submit-btn" class="px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600">提交申請</button>
@@ -3988,7 +3979,7 @@
                 `;
                 
                 document.body.appendChild(modal);
-                lucide.createIcons();
+                try { lucide.createIcons(); } catch (_) {}
                 
                 // 事由選擇變更事件
                 const reasonTypeSelect = document.getElementById('leave-reason-type');
@@ -4027,25 +4018,10 @@
                         }
                         reason = otherReason;
                     }
-                    // 取得日期與小時，組合為時間
-                    const startDateStr = document.getElementById('leave-start-date').value;
-                    const endDateStr = document.getElementById('leave-end-date').value;
-                    const startHour = parseInt(document.getElementById('leave-start-hour').value, 10);
-                    const endHour = parseInt(document.getElementById('leave-end-hour').value, 10);
-
-                    if (!startDateStr || !endDateStr || isNaN(startHour) || isNaN(endHour)) {
-                        showToast('請選擇有效的日期與小時', true);
-                        return;
-                    }
-                    const startTime = new Date(`${startDateStr}T00:00:00`);
-                    startTime.setHours(startHour, 0, 0, 0);
-                    const endTime = new Date(`${endDateStr}T00:00:00`);
-                    endTime.setHours(endHour, 0, 0, 0);
                     
-                    if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-                        showToast('請選擇有效的時間', true);
-                        return;
-                    }
+                    // 按班表時間提交請假（若非由班表觸發則使用預設）
+                    const startTime = startDt;
+                    const endTime = endDt;
                     
                     if (startTime >= endTime) {
                         showToast('結束時間必須晚於開始時間', true);
@@ -4057,7 +4033,7 @@
                         
                         const db = window.__db; const { addDoc, collection, serverTimestamp, Timestamp, updateDoc, doc } = window.__fs; const user = window.__auth?.currentUser;
                         if (!user) throw new Error('尚未登入');
-                        // 創建請假記錄（以小時為單位）
+                        // 創建請假記錄（以選定班表時間為準）
                         await addDoc(collection(db, 'leaves'), {
                             userId: user.uid,
                             userName: state.currentUserData?.name || '',
@@ -13592,32 +13568,128 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 if (!modalContainer) return;
                 const isStart = type === '上班';
                 modalContainer.innerHTML = `
-                    <div class="modal-overlay" id="clockin-map-overlay"></div>
-                    <div class="modal-content">
-                        <div class="modal-header">${type}定位打卡</div>
-                        <div id="map-container" class="rounded-lg overflow-hidden border border-gray-300 relative">
-                            <div id="map" class="map-canvas"></div>
+                    <div class="modal-backdrop" id="clockin-map-overlay"></div>
+                    <div class="modal-content w-screen h-screen p-0 overflow-hidden" style="top:0;left:0;transform:none;border-radius:0;max-height:none;">
+                        <div class="modal-header flex items-center justify-between bg-white border-b px-4 py-2">
+                            <div class="font-semibold">${type}定位打卡</div>
+                            <button class="modal-close text-gray-600 hover:text-gray-800" id="clockin-close-btn"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b">
+                            <div id="map-range-status" class="text-sm text-gray-600">定位中...</div>
+                            <button id="map-recenter-btn" class="px-3 py-1 text-sm bg-white border border-gray-300 rounded hover:bg-gray-100">重新定位</button>
+                        </div>
+                        <div id="map-container" class="relative" style="height: calc(100vh - 148px);">
+                            <div id="map" class="map-canvas absolute inset-0"></div>
                             <div id="map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
                         </div>
-                        <div class="modal-actions">
+                        <div class="modal-actions flex justify-end gap-2 px-4 py-2 bg-white border-t" style="position:absolute;bottom:0;left:0;right:0;">
                             <button id="clockin-cancel-btn" class="px-3 py-2 rounded bg-gray-100">取消</button>
                             <button id="clockin-confirm-btn" data-type="${type}" class="px-3 py-2 rounded ${isStart ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} text-white">${type}打卡</button>
                         </div>
                     </div>`;
                 modalContainer.classList.add('show');
                 try { lucide.createIcons(); } catch (e) {}
-                try { initClockInMap(); } catch (e) { console.warn('initClockInMap 執行失敗', e); }
+                
                 const closeMap = () => { modalContainer.classList.remove('show'); modalContainer.innerHTML = ''; };
                 const overlay = document.getElementById('clockin-map-overlay');
                 overlay && overlay.addEventListener('click', closeMap);
                 const cancelBtn = document.getElementById('clockin-cancel-btn');
                 cancelBtn && cancelBtn.addEventListener('click', closeMap);
+                const closeBtn = document.getElementById('clockin-close-btn');
+                closeBtn && closeBtn.addEventListener('click', closeMap);
                 const confirmBtn = document.getElementById('clockin-confirm-btn');
                 confirmBtn && confirmBtn.addEventListener('click', () => {
                     if (!state.currentLocation) { alert('無法取得目前位置，請稍後再試'); return; }
                     const t = confirmBtn.getAttribute('data-type');
                     openCameraModal(t, state.currentLocation);
                 });
+                
+                const statusEl = document.getElementById('map-range-status');
+                const recenterBtn = document.getElementById('map-recenter-btn');
+                const mapDiv = document.getElementById('map');
+                const loader = document.getElementById('map-loader');
+                let map, marker, center = null, radius = null;
+                
+                const setStatus = (inside) => {
+                    statusEl.textContent = inside ? '已在社區打卡範圍內' : '超出社區打卡範圍外';
+                    statusEl.className = inside ? 'text-green-600 text-sm' : 'text-red-600 text-sm';
+                };
+                
+                async function computeCenterAndRadius() {
+                    const c = state.currentCommunity || {};
+                    if (typeof c.lat === 'number' && typeof c.lng === 'number') {
+                        center = { lat: c.lat, lng: c.lng };
+                        radius = (typeof c.radius === 'number' && c.radius > 0) ? c.radius : radius;
+                    }
+                    if (!center) {
+                        try {
+                            const { getDoc, doc } = window.__fs; const db = window.__db;
+                            const docSnap = await getDoc(doc(db, 'settings', 'location'));
+                            if (docSnap.exists()) {
+                                const s = docSnap.data() || {};
+                                if (typeof s.communityLat === 'number' && typeof s.communityLng === 'number') center = { lat: s.communityLat, lng: s.communityLng };
+                                else if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') center = { lat: s.companyLat, lng: s.companyLng };
+                                if (typeof s.companyRadius === 'number' && s.companyRadius > 0) radius = s.companyRadius;
+                            }
+                        } catch (_) {}
+                    }
+                }
+                
+                function updateInsideRange() {
+                    if (!center || typeof radius !== 'number') {
+                        statusEl.textContent = center ? '未設定打卡範圍' : '尚未取得社區中心';
+                        statusEl.className = 'text-gray-600 text-sm';
+                        return;
+                    }
+                    if (!state.currentLocation) { statusEl.textContent = '定位中...'; statusEl.className = 'text-gray-600 text-sm'; return; }
+                    const dist = calculateDistanceMeters(state.currentLocation.lat, state.currentLocation.lng, center.lat, center.lng);
+                    setStatus(dist <= radius);
+                }
+                
+                async function initMap() {
+                    await computeCenterAndRadius();
+                    try {
+                        const pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }));
+                        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                        state.currentLocation = coords;
+                        map = new google.maps.Map(mapDiv, { center: coords, zoom: 17, disableDefaultUI: true, zoomControl: true });
+                        marker = new google.maps.Marker({ position: coords, map });
+                        if (center && typeof radius === 'number') {
+                            try { state.clockinRadiusCircle && state.clockinRadiusCircle.setMap(null); } catch (_) {}
+                            state.clockinRadiusCircle = new google.maps.Circle({ map, center, radius, strokeColor:'#FF0000', strokeOpacity:0.8, strokeWeight:2, fillColor:'#FF0000', fillOpacity:0.1 });
+                        }
+                        loader.classList.add('hide');
+                        updateInsideRange();
+                    } catch (err) {
+                        loader.classList.add('hide');
+                        mapDiv.innerHTML = '<div class="p-4 text-center text-red-600">無法取得您的位置。請確認已開啟定位服務。</div>';
+                        showToast('無法取得位置資訊，請確認已開啟定位服務', true);
+                    }
+                }
+                
+                async function refreshLocation() {
+                    loader.classList.remove('hide');
+                    try {
+                        const pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }));
+                        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                        state.currentLocation = coords;
+                        if (map) { map.panTo(coords); marker && marker.setPosition(coords); }
+                        loader.classList.add('hide');
+                        updateInsideRange();
+                    } catch (e) {
+                        loader.classList.add('hide');
+                        showToast('重新定位失敗', true);
+                    }
+                }
+                
+                recenterBtn && recenterBtn.addEventListener('click', refreshLocation);
+                
+                if (!window.google || !window.google.maps || !state.googleMapsLoaded) {
+                    try { loadGoogleMapsScript(); } catch (_) {}
+                    const iv = setInterval(() => { if (window.google && window.google.maps) { clearInterval(iv); initMap(); } }, 200);
+                } else {
+                    initMap();
+                }
             }
 
             function updateMyScheduleButtons() {
