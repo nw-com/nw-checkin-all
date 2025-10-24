@@ -716,276 +716,111 @@ function createLocationInputModal() {
 }
 
 // 臨時請假彈窗
-function openTempLeaveModal() {
-    // 創建彈窗背景
+function openTempLeaveModal(el) {
+    // 背景
     const backdrop = document.createElement('div');
     backdrop.id = 'modal-backdrop';
     backdrop.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
-    
-    // 創建彈窗
+
+    // 彈窗
     const modal = document.createElement('div');
     modal.id = 'temp-leave-modal';
     modal.className = 'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-6 w-[90%] max-w-md z-50';
-    
-    // 彈窗標題
+
+    // 標題
     const title = document.createElement('h3');
     title.className = 'text-lg font-bold mb-4 text-center';
-            title.textContent = '請假申請';
-    
-    // 創建請假事由選擇
+    title.textContent = '請假申請';
+
+    // 顯示班表請假時間（只顯示，不可編輯）
+    const timeLabel = document.createElement('div');
+    timeLabel.className = 'text-sm font-medium text-gray-700 mb-1';
+    timeLabel.textContent = '請假時間';
+
+    const timeValue = document.createElement('div');
+    timeValue.className = 'text-gray-900 mb-4';
+
+    const iso = el?.dataset?.date || new Date().toISOString().slice(0, 10);
+    const startStr = el?.dataset?.start || '';
+    const endStr = el?.dataset?.end || '';
+    const endIso = el?.dataset?.enddateiso || '';
+
+    const startDt = startStr ? new Date(`${iso}T${startStr}:00`) : new Date();
+    const effectiveEndIso = endIso || iso;
+    const endDt = endStr ? new Date(`${effectiveEndIso}T${endStr}:00`) : new Date(startDt.getTime() + 2 * 60 * 60 * 1000);
+
+    const fmt = (dt) => {
+        const yyyy = dt.getFullYear();
+        const mm = String(dt.getMonth() + 1).padStart(2, '0');
+        const dd = String(dt.getDate()).padStart(2, '0');
+        let h = dt.getHours();
+        const m = String(dt.getMinutes()).padStart(2, '0');
+        const ampm = h < 12 ? '上午' : '下午';
+        h = h % 12 || 12;
+        return `${yyyy}/${mm}/${dd} ${ampm} ${String(h).padStart(2, '0')}:${m}`;
+    };
+    const hours = Math.max(0, (endDt - startDt) / (1000 * 60 * 60));
+    timeValue.textContent = `${fmt(startDt)} ~ ${fmt(endDt)}（約 ${hours.toFixed(1)} 小時）`;
+
+    // 請假事由（唯一可輸入）
     const reasonLabel = document.createElement('label');
     reasonLabel.className = 'block text-sm font-medium text-gray-700 mb-1';
     reasonLabel.textContent = '請假事由';
-    
-    const reasonSelect = document.createElement('select');
-    reasonSelect.id = 'leave-reason-select';
-    reasonSelect.className = 'w-full border border-gray-300 rounded-md p-2 mb-4';
-    
-    // 添加選項
-    const options = ['病假', '事假', '其他'];
-    options.forEach(option => {
-        const optionElement = document.createElement('option');
-        optionElement.value = option;
-        optionElement.textContent = option;
-        reasonSelect.appendChild(optionElement);
-    });
-    
-    // 創建其他原因輸入框（當選擇"其他"時顯示）
-    const otherReasonInput = document.createElement('input');
-    otherReasonInput.id = 'other-leave-reason';
-    otherReasonInput.type = 'text';
-    otherReasonInput.className = 'w-full border border-gray-300 rounded-md p-2 mb-4 hidden';
-    otherReasonInput.placeholder = '請輸入請假原因';
-    
-    // 添加選擇變更事件
-    reasonSelect.addEventListener('change', () => {
-        if (reasonSelect.value === '其他') {
-            otherReasonInput.classList.remove('hidden');
-        } else {
-            otherReasonInput.classList.add('hidden');
-        }
-    });
-    
-    // 請假類型（整日/按小時）
-    const typeLabel = document.createElement('label');
-    typeLabel.className = 'block text-sm font-medium text-gray-700 mb-1';
-    typeLabel.textContent = '請假類型';
 
-    const typeContainer = document.createElement('div');
-    typeContainer.className = 'flex items-center space-x-6 mb-2';
-
-    const hourlyLabel = document.createElement('label');
-    hourlyLabel.className = 'flex items-center space-x-2';
-    const hourlyInput = document.createElement('input');
-    hourlyInput.type = 'radio';
-    hourlyInput.name = 'leave-type';
-    hourlyInput.value = 'hourly';
-    hourlyInput.checked = true;
-    const hourlyText = document.createElement('span');
-    hourlyText.textContent = '按小時';
-    hourlyLabel.appendChild(hourlyInput);
-    hourlyLabel.appendChild(hourlyText);
-
-    const fullDayLabel = document.createElement('label');
-    fullDayLabel.className = 'flex items-center space-x-2';
-    const fullDayInput = document.createElement('input');
-    fullDayInput.type = 'radio';
-    fullDayInput.name = 'leave-type';
-    fullDayInput.value = 'full_day';
-    const fullDayText = document.createElement('span');
-    fullDayText.textContent = '整日';
-    fullDayLabel.appendChild(fullDayInput);
-    fullDayLabel.appendChild(fullDayText);
-
-    typeContainer.appendChild(hourlyLabel);
-    typeContainer.appendChild(fullDayLabel);
-
-    // 創建日期時間區間（按小時）
-    const startDateLabel = document.createElement('label');
-    startDateLabel.className = 'block text-sm font-medium text-gray-700 mb-1';
-    startDateLabel.textContent = '開始時間';
-
-    const startDateInput = document.createElement('input');
-    startDateInput.id = 'leave-start-time';
-    startDateInput.type = 'datetime-local';
-    startDateInput.className = 'w-full border border-gray-300 rounded-md p-2 mb-4';
-    startDateInput.step = '3600'; // 設置步進為3600秒，即1小時
-    
-    // 設置預設值為當前時間（分鐘設為0）
-    const now = new Date();
-    now.setMinutes(0); // 將分鐘設為0
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const hours = String(now.getHours()).padStart(2, '0');
-    startDateInput.value = `${year}-${month}-${day}T${hours}:00`;
-    
-    const endDateLabel = document.createElement('label');
-    endDateLabel.className = 'block text-sm font-medium text-gray-700 mb-1';
-    endDateLabel.textContent = '結束時間';
-    
-    const endDateInput = document.createElement('input');
-    endDateInput.id = 'leave-end-time';
-    endDateInput.type = 'datetime-local';
-    endDateInput.className = 'w-full border border-gray-300 rounded-md p-2 mb-4';
-    endDateInput.step = '3600'; // 設置步進為3600秒，即1小時
-    
-    // 設置預設值為當前時間加8小時，分鐘設為0
-    const endTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-    endTime.setMinutes(0); // 將分鐘設為0
-    const endYear = endTime.getFullYear();
-    const endMonth = String(endTime.getMonth() + 1).padStart(2, '0');
-    const endDay = String(endTime.getDate()).padStart(2, '0');
-    const endHours = String(endTime.getHours()).padStart(2, '0');
-    endDateInput.value = `${endYear}-${endMonth}-${endDay}T${endHours}:00`;
-    
-    // 整日日期區間（整日）
-    const startDayLabel = document.createElement('label');
-    startDayLabel.className = 'block text-sm font-medium text-gray-700 mb-1 hidden';
-    startDayLabel.textContent = '開始日期';
-
-    const startDayInput = document.createElement('input');
-    startDayInput.id = 'leave-start-day';
-    startDayInput.type = 'date';
-    startDayInput.className = 'w-full border border-gray-300 rounded-md p-2 mb-4 hidden';
-
-    const endDayLabel = document.createElement('label');
-    endDayLabel.className = 'block text-sm font-medium text-gray-700 mb-1 hidden';
-    endDayLabel.textContent = '結束日期';
-
-    const endDayInput = document.createElement('input');
-    endDayInput.id = 'leave-end-day';
-    endDayInput.type = 'date';
-    endDayInput.className = 'w-full border border-gray-300 rounded-md p-2 mb-4 hidden';
-
-    const nowDayYear = now.getFullYear();
-    const nowDayMonth = String(now.getMonth() + 1).padStart(2, '0');
-    const nowDayDate = String(now.getDate()).padStart(2, '0');
-    const todayStr = `${nowDayYear}-${nowDayMonth}-${nowDayDate}`;
-    startDayInput.value = todayStr;
-    endDayInput.value = todayStr;
-
-    // 切換顯示邏輯
-    function updateLeaveTypeVisibility() {
-      const isFullDay = fullDayInput.checked;
-      startDateLabel.classList.toggle('hidden', isFullDay);
-      startDateInput.classList.toggle('hidden', isFullDay);
-      endDateLabel.classList.toggle('hidden', isFullDay);
-      endDateInput.classList.toggle('hidden', isFullDay);
-
-      startDayLabel.classList.toggle('hidden', !isFullDay);
-      startDayInput.classList.toggle('hidden', !isFullDay);
-      endDayLabel.classList.toggle('hidden', !isFullDay);
-      endDayInput.classList.toggle('hidden', !isFullDay);
-    }
-    hourlyInput.addEventListener('change', updateLeaveTypeVisibility);
-    fullDayInput.addEventListener('change', updateLeaveTypeVisibility);
-    updateLeaveTypeVisibility();
+    const reasonInput = document.createElement('input');
+    reasonInput.type = 'text';
+    reasonInput.placeholder = '例如：身體不適';
+    reasonInput.className = 'w-full border border-gray-300 rounded-md p-2 mb-4';
 
     // 按鈕容器
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'flex justify-end space-x-2';
-    
-    // 取消按鈕
+
+    // 取消
     const cancelButton = document.createElement('button');
     cancelButton.className = 'px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400';
     cancelButton.textContent = '取消';
     cancelButton.addEventListener('click', closeAllModals);
-    
-    // 確認按鈕
+
+    // 確認
     const confirmButton = document.createElement('button');
     confirmButton.className = 'px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600';
     confirmButton.textContent = '確認請假';
     confirmButton.addEventListener('click', async () => {
-        // 獲取請假事由
-        let reason = reasonSelect.value;
-        if (reason === '其他') {
-            reason = otherReasonInput.value.trim();
-            if (!reason) {
-                showToast('請輸入請假原因', true);
-                return;
-            }
-        }
-        
-        // 請假類型
-        const selectedType = document.querySelector('input[name="leave-type"]:checked')?.value || 'hourly';
-
-        // 獲取時間區間
-        let startTime;
-        let endTime;
-        if (selectedType === 'full_day') {
-            const startDayVal = startDayInput.value;
-            const endDayVal = endDayInput.value;
-            if (!startDayVal || !endDayVal) {
-                showToast('請選擇開始與結束日期', true);
-                return;
-            }
-            startTime = new Date(`${startDayVal}T00:00:00`);
-            endTime = new Date(`${endDayVal}T23:59:59`);
-        } else {
-            startTime = new Date(startDateInput.value);
-            endTime = new Date(endDateInput.value);
-        }
-        
-        // 驗證時間
-        if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-            showToast('請輸入有效的時間', true);
+        const reason = reasonInput.value.trim();
+        if (!reason) {
+            showToast('請輸入請假事由', true);
             return;
         }
-        
-        if (startTime >= endTime) {
-            showToast('結束時間必須晚於開始時間', true);
-            return;
-        }
-        
         try {
             showLoading(true);
-            
-            // 獲取當前用戶
             const user = window.__auth?.currentUser;
             if (!user) {
                 showToast('請先登入', true);
                 showLoading(false);
                 return;
             }
-            
-            // 創建請假記錄
-            const { addDoc, collection, updateDoc, doc, Timestamp, serverTimestamp } = window.__fs;
-            const leaveData = {
+
+            const { addDoc, collection, updateDoc, doc, serverTimestamp } = window.__fs;
+            await addDoc(collection(window.__db, 'leaves'), {
                 userId: user.uid,
                 userName: (state.currentUserData?.name || user?.displayName || user?.email || ''),
-                reason: reason,
-                startTime: Timestamp.fromDate(startTime),
-                endTime: Timestamp.fromDate(endTime),
-                leaveType: selectedType,
-                status: 'pending', // 待審核
+                reason,
+                startTime: startDt.toISOString(),
+                endTime: endDt.toISOString(),
+                status: 'pending',
                 createdAt: serverTimestamp()
-            };
-            
-            // 保存到 Firestore
-            const leaveRef = await addDoc(collection(window.__db, 'leaves'), leaveData);
-            console.log('請假記錄已創建:', leaveRef.id);
-            
-            // 更新用戶狀態（僅寫入 Firestore 規則允許的欄位）
+            });
+
             await updateDoc(doc(window.__db, 'users', user.uid), {
-                clockInStatus: '臨時請假',
-                status: '臨時請假',
-                leaveReason: reason,
+                status: '請假中',
                 leaveStatus: 'pending',
                 lastUpdated: serverTimestamp()
             });
-            console.log('用戶狀態已更新為請假申請');
-            
-            // 更新本地狀態
-            state.clockInStatus = '臨時請假';
-            state.leaveReason = reason;
-            state.leaveStatus = 'pending';
-            
-            // 更新狀態顯示
+
             updateStatusDisplay();
             updateButtonStatus();
-            
-            showToast('請假申請已提交');
+            showToast('請假申請已提交，等待審核');
             closeAllModals();
         } catch (error) {
             console.error('提交請假申請失敗:', error);
@@ -994,32 +829,22 @@ function openTempLeaveModal() {
             showLoading(false);
         }
     });
-    
-    // 組裝彈窗
+
+    // 組裝
     buttonContainer.appendChild(cancelButton);
     buttonContainer.appendChild(confirmButton);
     modal.appendChild(title);
+    modal.appendChild(timeLabel);
+    modal.appendChild(timeValue);
     modal.appendChild(reasonLabel);
-    modal.appendChild(reasonSelect);
-    modal.appendChild(otherReasonInput);
-    modal.appendChild(typeLabel);
-    modal.appendChild(typeContainer);
-    modal.appendChild(startDateLabel);
-    modal.appendChild(startDateInput);
-    modal.appendChild(endDateLabel);
-    modal.appendChild(endDateInput);
-    modal.appendChild(startDayLabel);
-    modal.appendChild(startDayInput);
-    modal.appendChild(endDayLabel);
-    modal.appendChild(endDayInput);
+    modal.appendChild(reasonInput);
     modal.appendChild(buttonContainer);
-    
-    // 添加到頁面
+
+    // 加到頁面
     document.body.appendChild(backdrop);
     document.body.appendChild(modal);
 
-    // 讓使用者能立即輸入
-    reasonSelect.focus();
+    reasonInput.focus();
 }
 
 // 特殊勤務彈窗
