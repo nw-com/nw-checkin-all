@@ -1724,12 +1724,30 @@
                     (async () => {
                         try {
                             const fs = window.__fs || {}; const db = window.__db;
-                            const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                            const { doc, getDoc, collection, getDocs, query, where, orderBy, Timestamp } = fs;
                             const start = new Date(); start.setHours(0,0,0,0);
                             const end = new Date(); end.setHours(23,59,59,999);
                             const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
                             const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
                             const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+
+                            // 載入異常標色配置
+                            let markLocation = true, markShiftOverdue = true, markPatrolOverdueStart = true, markPatrolNotExecuted = true, markNoScheduleCommunity = true;
+                            try {
+                                const locSnap = await getDoc(doc(db, 'settings', 'location'));
+                                if (locSnap?.exists()) {
+                                    const locCfg = locSnap.data() || {};
+                                    if (typeof locCfg.markAbnormalLocation === 'boolean') markLocation = locCfg.markAbnormalLocation;
+                                }
+                                const genSnap = await getDoc(doc(db, 'settings', 'general'));
+                                if (genSnap?.exists()) {
+                                    const gen = genSnap.data() || {};
+                                    if (typeof gen.markShiftOverdueNotStarted === 'boolean') markShiftOverdue = gen.markShiftOverdueNotStarted;
+                                    if (typeof gen.markPatrolOverdueStart === 'boolean') markPatrolOverdueStart = gen.markPatrolOverdueStart;
+                                    if (typeof gen.markPatrolNotExecuted === 'boolean') markPatrolNotExecuted = gen.markPatrolNotExecuted;
+                                    if (typeof gen.markNoScheduleCommunity === 'boolean') markNoScheduleCommunity = gen.markNoScheduleCommunity;
+                                }
+                            } catch (_) {}
 
                             // 取今日打卡紀錄（依使用者分組）
                             const recordsByUser = {};
@@ -1765,6 +1783,7 @@
                                 let hasShiftOverdueNotStarted = false;
                                 let hasPatrolOverdueStart = false;
                                 let hasPatrolNotExecuted = false;
+                                let hasNoSchedule = false;
 
                                 // 篩選屬於此社區的使用者
                                 const communityUsers = users.filter(u => {
@@ -1774,21 +1793,35 @@
                                     return code && code === (c.code || '').trim();
                                 });
 
-                                // 位置異常：任一成員的任一打卡在社區半徑外
-                                for (const u of communityUsers) {
-                                    const recs = recordsByUser[u.id] || [];
-                                    for (const r of recs) {
-                                        const abnormal = computeRecordAbnormal(r, [c.id]);
-                                        if (abnormal && abnormal.isAbnormal) { hasAbnormalLocation = true; break; }
+                                // 位置異常：任一成員的任一打卡在社區半徑外（受設定控制）
+                                if (markLocation) {
+                                    for (const u of communityUsers) {
+                                        const recs = recordsByUser[u.id] || [];
+                                        for (const r of recs) {
+                                            const abnormal = computeRecordAbnormal(r, [c.id]);
+                                            if (abnormal && abnormal.isAbnormal) { hasAbnormalLocation = true; break; }
+                                        }
+                                        if (hasAbnormalLocation) break;
                                     }
-                                    if (hasAbnormalLocation) break;
                                 }
 
-                                // 班表逾時未上班：有排班、過了開始時間仍無「上班」紀錄
+                                // 今日班表（頂層集合 postSchedules，依 communityId + dateIso）
+                                let shifts = [];
                                 try {
-                                    const ssnap = await getDocs(query(collection(db, 'communities', c.id, 'postSchedules'), where('dateIso','==', ymdToday)));
-                                    const shifts = [];
-                                    ssnap.forEach(d => { const data = d.data() || {}; if (Array.isArray(data.shifts)) shifts.push(...data.shifts); });
+                                    const ssnap = await getDocs(query(collection(db, 'postSchedules'), where('communityId','==', c.id), where('dateIso','==', ymdToday)));
+                                    let anyScheduled = false;
+                                    ssnap.forEach(d => {
+                                        const data = d.data() || {};
+                                        // 判斷是否為排班日
+                                        if (data.isScheduledDay === true) anyScheduled = true;
+                                        if (Array.isArray(data.shifts) && data.shifts.length > 0) { anyScheduled = true; shifts.push(...data.shifts); }
+                                    });
+                                    // 若完全沒有班表，視為「尚未排班」
+                                    if (!anyScheduled) hasNoSchedule = true;
+                                } catch (_) { hasNoSchedule = true; }
+
+                                // 班表逾時未上班：有排班、過了開始時間仍無「上班」紀錄（受設定控制）
+                                if (markShiftOverdue) {
                                     for (const s of shifts) {
                                         const assignee = Array.isArray(s.assignees) && s.assignees.length ? s.assignees[0] : null;
                                         if (!assignee) continue;
@@ -1800,34 +1833,36 @@
                                             if (!hasStart) { hasShiftOverdueNotStarted = true; break; }
                                         }
                                     }
-                                } catch (_) {}
+                                }
 
-                                // 巡邏逾時未開始／未執行
-                                try {
-                                    const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
-                                    const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
-                                    const tSnap = await getDocs(query(collection(db, 'communities', c.id, 'patrolTasks'), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2), orderBy('dateTS')));
-                                    const tasks = []; tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() }));
-                                    const now = new Date();
-                                    for (const t of tasks) {
-                                        const sHM = (t.expectedStartHM || '').trim();
-                                        const eHM = (t.expectedEndHM || '').trim();
-                                        const sDt = sHM ? parseHM(ymdToday, sHM) : null;
-                                        const eDt = eHM ? parseHM(ymdToday, eHM) : null;
-                                        const started = !!t.actualStartTS;
-                                        if (!started && sDt && now > sDt) hasPatrolOverdueStart = true;
-                                        if (!started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
-                                    }
-                                } catch (_) {}
+                                // 巡邏逾時未開始／未執行（受設定控制）
+                                if (markPatrolOverdueStart || markPatrolNotExecuted) {
+                                    try {
+                                        const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
+                                        const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
+                                        const tSnap = await getDocs(query(collection(db, 'communities', c.id, 'patrolTasks'), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2), orderBy('dateTS')));
+                                        const tasks = []; tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() }));
+                                        const now = new Date();
+                                        for (const t of tasks) {
+                                            const sHM = (t.expectedStartHM || '').trim();
+                                            const eHM = (t.expectedEndHM || '').trim();
+                                            const sDt = sHM ? parseHM(ymdToday, sHM) : null;
+                                            const eDt = eHM ? parseHM(ymdToday, eHM) : null;
+                                            const started = !!t.actualStartTS;
+                                            if (markPatrolOverdueStart && !started && sDt && now > sDt) hasPatrolOverdueStart = true;
+                                            if (markPatrolNotExecuted && !started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
+                                        }
+                                    } catch (_) {}
+                                }
 
-                                // 套用樣式（紅>橙>黃）
+                                // 套用樣式（紅>橙>黃）：紅=未執行/逾時未上班；橙=逾時未開始或未排班；黃=定位異常
                                 const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
                                 const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
-                                if (hasPatrolNotExecuted || hasShiftOverdueNotStarted) {
+                                if ((markPatrolNotExecuted && hasPatrolNotExecuted) || (markShiftOverdue && hasShiftOverdueNotStarted)) {
                                     remove(['bg-white','hover:bg-red-50']); add(['bg-red-50','border-red-300','text-red-800']);
-                                } else if (hasPatrolOverdueStart) {
+                                } else if ((markPatrolOverdueStart && hasPatrolOverdueStart) || (markNoScheduleCommunity && hasNoSchedule)) {
                                     remove(['bg-white','hover:bg-red-50']); add(['bg-orange-50','border-orange-300','text-orange-800']);
-                                } else if (hasAbnormalLocation) {
+                                } else if (markLocation && hasAbnormalLocation) {
                                     remove(['bg-white','hover:bg-red-50']); add(['bg-yellow-50','border-yellow-300','text-yellow-800']);
                                 }
                             }
@@ -1948,12 +1983,29 @@
                         (async () => {
                             try {
                                 const fs = window.__fs || {}; const db = window.__db;
-                                const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                                const { doc, getDoc, collection, getDocs, query, where, orderBy, Timestamp } = fs;
                                 const start = new Date(); start.setHours(0,0,0,0);
                                 const end = new Date(); end.setHours(23,59,59,999);
                                 const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
                                 const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
                                 const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+
+                                // 異常開關（settings/location + settings/general）
+                                let markLocation = true, markShiftOverdue = true, markPatrolOverdueStart = true, markPatrolNotExecuted = true;
+                                try {
+                                    const locSnap = await getDoc(doc(db, 'settings', 'location'));
+                                    if (locSnap?.exists()) {
+                                        const locCfg = locSnap.data() || {};
+                                        if (typeof locCfg.markAbnormalLocation === 'boolean') markLocation = locCfg.markAbnormalLocation;
+                                    }
+                                    const genSnap = await getDoc(doc(db, 'settings', 'general'));
+                                    if (genSnap?.exists()) {
+                                        const gen = genSnap.data() || {};
+                                        if (typeof gen.markShiftOverdueNotStarted === 'boolean') markShiftOverdue = gen.markShiftOverdueNotStarted;
+                                        if (typeof gen.markPatrolOverdueStart === 'boolean') markPatrolOverdueStart = gen.markPatrolOverdueStart;
+                                        if (typeof gen.markPatrolNotExecuted === 'boolean') markPatrolNotExecuted = gen.markPatrolNotExecuted;
+                                    }
+                                } catch (_) {}
 
                                 // 確保社區快取可用（供 code -> id 對應）
                                 try { await ensureCommunitiesCache(); } catch (_) {}
@@ -1999,62 +2051,66 @@
                                     }
 
                                     const recs = recordsByUser[u.id] || [];
-                                    // 位置異常：打卡不在服務社區半徑
-                                    if (svcIds && svcIds.length > 0) {
+                                    // 位置異常：打卡不在服務社區半徑（受設定控制）
+                                    if (markLocation && svcIds && svcIds.length > 0) {
                                         for (const r of recs) {
                                             const abnormal = computeRecordAbnormal(r, svcIds);
                                             if (abnormal && abnormal.isAbnormal) { hasAbnormalLocation = true; break; }
                                         }
                                     }
 
-                                    // 班表逾時未上班
-                                    try {
-                                        for (const commId of svcIds) {
-                                            const ssnap = await getDocs(query(collection(db, 'communities', commId, 'postSchedules'), where('dateIso','==', ymdToday)));
-                                            const shifts = []; ssnap.forEach(d => { const data = d.data() || {}; if (Array.isArray(data.shifts)) shifts.push(...data.shifts); });
-                                            for (const s of shifts) {
-                                                const assigned = Array.isArray(s.assignees) ? s.assignees : [];
-                                                if (!assigned.includes(u.id)) continue;
-                                                const startDt = parseHM(ymdToday, s.start || '');
-                                                if (!startDt) continue;
-                                                if (new Date() > startDt) {
-                                                    const hasStart = recs.some(r => r.type === '上班');
-                                                    if (!hasStart) { hasShiftOverdueNotStarted = true; break; }
+                                    // 班表逾時未上班（受設定控制）
+                                    if (markShiftOverdue) {
+                                        try {
+                                            for (const commId of svcIds) {
+                                                const ssnap = await getDocs(query(collection(db, 'postSchedules'), where('communityId','==', commId), where('dateIso','==', ymdToday)));
+                                                const shifts = []; ssnap.forEach(d => { const data = d.data() || {}; if (Array.isArray(data.shifts)) shifts.push(...data.shifts); });
+                                                for (const s of shifts) {
+                                                    const assigned = Array.isArray(s.assignees) ? s.assignees : [];
+                                                    if (!assigned.includes(u.id)) continue;
+                                                    const startDt = parseHM(ymdToday, s.start || '');
+                                                    if (!startDt) continue;
+                                                    if (new Date() > startDt) {
+                                                        const hasStart = recs.some(r => r.type === '上班');
+                                                        if (!hasStart) { hasShiftOverdueNotStarted = true; break; }
+                                                    }
                                                 }
+                                                if (hasShiftOverdueNotStarted) break;
                                             }
-                                            if (hasShiftOverdueNotStarted) break;
-                                        }
-                                    } catch (_) {}
+                                        } catch (_) {}
+                                    }
 
-                                    // 巡邏逾時未開始／未執行
-                                    try {
-                                        const now = new Date();
-                                        const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
-                                        const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
-                                        for (const commId of svcIds) {
-                                            const tSnap = await getDocs(query(collection(db, 'communities', commId, 'patrolTasks'), where('assignedUserId','==', u.id), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2), orderBy('dateTS')));
-                                            const tasks = []; tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() }));
-                                            for (const t of tasks) {
-                                                const sHM = (t.expectedStartHM || '').trim();
-                                                const eHM = (t.expectedEndHM || '').trim();
-                                                const sDt = sHM ? parseHM(ymdToday, sHM) : null;
-                                                const eDt = eHM ? parseHM(ymdToday, eHM) : null;
-                                                const started = !!t.actualStartTS;
-                                                if (!started && sDt && now > sDt) hasPatrolOverdueStart = true;
-                                                if (!started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
+                                    // 巡邏逾時未開始／未執行（受設定控制）
+                                    if (markPatrolOverdueStart || markPatrolNotExecuted) {
+                                        try {
+                                            const now = new Date();
+                                            const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
+                                            const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
+                                            for (const commId of svcIds) {
+                                                const tSnap = await getDocs(query(collection(db, 'communities', commId, 'patrolTasks'), where('assignedUserId','==', u.id), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2), orderBy('dateTS')));
+                                                const tasks = []; tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() }));
+                                                for (const t of tasks) {
+                                                    const sHM = (t.expectedStartHM || '').trim();
+                                                    const eHM = (t.expectedEndHM || '').trim();
+                                                    const sDt = sHM ? parseHM(ymdToday, sHM) : null;
+                                                    const eDt = eHM ? parseHM(ymdToday, eHM) : null;
+                                                    const started = !!t.actualStartTS;
+                                                    if (markPatrolOverdueStart && !started && sDt && now > sDt) hasPatrolOverdueStart = true;
+                                                    if (markPatrolNotExecuted && !started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
+                                                }
+                                                if (hasPatrolNotExecuted) break;
                                             }
-                                            if (hasPatrolNotExecuted) break;
-                                        }
-                                    } catch (_) {}
+                                        } catch (_) {}
+                                    }
 
                                     // 套用樣式（紅>橙>黃）
                                     const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
                                     const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
-                                    if (hasPatrolNotExecuted || hasShiftOverdueNotStarted) {
+                                    if ((markPatrolNotExecuted && hasPatrolNotExecuted) || (markShiftOverdue && hasShiftOverdueNotStarted)) {
                                         remove(['bg-white','hover:bg-blue-50']); add(['bg-red-50','border-red-300','text-red-800']);
-                                    } else if (hasPatrolOverdueStart) {
+                                    } else if (markPatrolOverdueStart && hasPatrolOverdueStart) {
                                         remove(['bg-white','hover:bg-blue-50']); add(['bg-orange-50','border-orange-300','text-orange-800']);
-                                    } else if (hasAbnormalLocation) {
+                                    } else if (markLocation && hasAbnormalLocation) {
                                         remove(['bg-white','hover:bg-blue-50']); add(['bg-yellow-50','border-yellow-300','text-yellow-800']);
                                     }
                                 }
@@ -10120,7 +10176,39 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             </div>
                         </div>
                         
-                        
+                        <div class="bg-white p-4 rounded-md shadow-sm border mb-4">
+                            <h3 class="font-bold text-lg mb-4">異常標示規則</h3>
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <label for="mark-shift-overdue" class="text-gray-700">逾時未上班（紅）</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="mark-shift-overdue" checked>
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label for="mark-patrol-overdue-start" class="text-gray-700">巡邏逾時未開始（橙）</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="mark-patrol-overdue-start" checked>
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label for="mark-patrol-not-executed" class="text-gray-700">巡邏未執行（紅）</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="mark-patrol-not-executed" checked>
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label for="mark-no-schedule-community" class="text-gray-700">社區尚未排班（橙）</label>
+                                    <label class="switch">
+                                        <input type="checkbox" id="mark-no-schedule-community" checked>
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
                         
                         <div class="bg-white p-4 rounded-md shadow-sm border mb-4" id="admin-overtime-section" style="display: none;">
                             <h3 class="font-bold text-lg mb-4">管理員功能</h3>
@@ -10356,8 +10444,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     if (docSnap.exists()) {
                         const settings = docSnap.data();
                         document.getElementById('show-employee-status').checked = settings.showEmployeeStatus !== false;
-                        
-                        
+                        const el1 = document.getElementById('mark-shift-overdue'); if (el1) el1.checked = settings.markShiftOverdueNotStarted !== false;
+                        const el2 = document.getElementById('mark-patrol-overdue-start'); if (el2) el2.checked = settings.markPatrolOverdueStart !== false;
+                        const el3 = document.getElementById('mark-patrol-not-executed'); if (el3) el3.checked = settings.markPatrolNotExecuted !== false;
+                        const el4 = document.getElementById('mark-no-schedule-community'); if (el4) el4.checked = settings.markNoScheduleCommunity !== false;
                         
                         // 載入使用者顯示設定
                         loadUserDisplaySettings(settings.visibleUsers || {});
@@ -10474,7 +10564,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         // 儲存到 Firebase
                         await setDoc(doc(db, "settings", "general"), {
                             showEmployeeStatus,
-                            
+                            markShiftOverdueNotStarted: document.getElementById('mark-shift-overdue')?.checked ?? true,
+                            markPatrolOverdueStart: document.getElementById('mark-patrol-overdue-start')?.checked ?? true,
+                            markPatrolNotExecuted: document.getElementById('mark-patrol-not-executed')?.checked ?? true,
+                            markNoScheduleCommunity: document.getElementById('mark-no-schedule-community')?.checked ?? true,
                             visibleUsers,
                             updatedAt: serverTimestamp()
                         }, { merge: true });
