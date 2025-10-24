@@ -3557,6 +3557,16 @@
                 const renderShell = () => {
                     container.innerHTML = `
                         <div class="p-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <button id="my-prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
+                                <div id="my-current-month-year" class="text-lg font-semibold"></div>
+                                <button id="my-next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
+                            </div>
+                            <div class="grid grid-cols-7 text-center text-xs text-gray-500 mb-1">
+                                <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                            </div>
+                            <div id="myshift-calendar-grid" class="grid grid-cols-7 gap-1"></div>
+                            <hr class="border-t border-gray-200 my-3" />
                             <div id="myshift-day-panel" class="mt-2"></div>
                         </div>`;
                     try { lucide.createIcons(); } catch (_) {}
@@ -3606,7 +3616,7 @@
                             const shifts = Array.isArray(data.shifts) ? data.shifts : [];
                             const my = shifts.filter(s => Array.isArray(s.assignees) && s.assignees.includes(userId));
                             if (my.length) {
-                                pageState.daysMap[iso] = my.map(s => ({ start: s.start || '', end: s.end || '', postName: pageState.postNameMap[data.postId] || '未命名哨點' }));
+                                pageState.daysMap[iso] = my.map(s => ({ start: s.start || '', end: s.end || '', endDateIso: s.endDateIso || null, postName: pageState.postNameMap[data.postId] || '未命名哨點' }));
                             }
                         });
                     } catch (e) { console.warn('讀取個人排班失敗', e); }
@@ -3667,6 +3677,7 @@
                                     <div class="flex items-center gap-2 p-2 rounded border bg-white">
                                         <span class="text-sm font-medium">${it.start || '—'} ~ ${it.end || '—'}</span>
                                         <span class="text-xs text-gray-500">${it.postName || '未命名哨點'}</span>
+                                        ${(it.endDateIso && it.endDateIso !== iso) ? `<span class="text-[11px] px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">跨日至 ${it.endDateIso}</span>` : ''}
                                     </div>
                                 `).join('')}
                             </div>
@@ -3676,8 +3687,9 @@
                 const init = async () => {
                     renderShell();
                     await loadPosts();
+                    renderMonthHeader();
                     await loadMonth();
-                    pageState.selectedDayIso = fmtYMD(new Date());
+                    renderCalendar();
                     renderDayPanel();
                 };
                 init();
