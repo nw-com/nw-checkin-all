@@ -3656,7 +3656,7 @@
                         })();
                         const isSelected = iso === selectedIso;
                         const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[30px] flex flex-col ${cell.inMonth?'bg-white':''}`;
-                        return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div><div class="mt-auto text-[10px] text-gray-500">${myList.length? '個人班次 '+myList.length:'無'}</div></div>`;
+                        return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div></div>`;
                     }).join('');
                     grid.querySelectorAll('[data-iso]').forEach(el=>{ el.addEventListener('click', ()=>{ pageState.selectedDayIso = el.getAttribute('data-iso'); renderDayPanel(); }); });
                 };
@@ -3674,10 +3674,17 @@
                             ${list.length===0 ? `<div class="text-gray-500 text-sm">本日無個人排班</div>` : ''}
                             <div class="space-y-2">
                                 ${list.map(it=>`
-                                    <div class="flex items-center gap-2 p-2 rounded border bg-white">
-                                        <span class="text-sm font-medium">${it.start || '—'} ~ ${it.end || '—'}</span>
-                                        <span class="text-xs text-gray-500">${it.postName || '未命名哨點'}</span>
-                                        ${(it.endDateIso && it.endDateIso !== iso) ? `<span class="text-[11px] px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">跨日至 ${it.endDateIso}</span>` : ''}
+                                    <div class="flex items-center justify-between gap-2 p-2 rounded border bg-white">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm font-medium">${it.start || '—'} ~ ${it.end || '—'}</span>
+                                            ${(it.postName && it.postName !== '無') ? `<span class="text-xs text-gray-500">${it.postName}</span>` : ''}
+                                            ${(it.endDateIso && it.endDateIso !== iso) ? `<span class="text-[11px] px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">跨日至 ${it.endDateIso}</span>` : ''}
+                                        </div>
+                                        <div class="ml-auto flex items-center gap-1 whitespace-nowrap">
+                                            <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">上班</button>
+                                            <button class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">下班</button>
+                                            <button class="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600" onclick="openTempLeaveModal()">請假</button>
+                                        </div>
                                     </div>
                                 `).join('')}
                             </div>
