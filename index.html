@@ -3215,9 +3215,9 @@
                         { key: 'leaves', label: '請假申請' }
                       ]
                     : [
+                        { key: 'workdays', label: '我的班表' },
                         { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
-                        { key: 'retro', label: '補打卡' },
                         { key: 'leaves', label: '請假申請' }
                       ];
 
@@ -3557,16 +3557,6 @@
                 const renderShell = () => {
                     container.innerHTML = `
                         <div class="p-3">
-                            <div class="flex items-center justify-between mb-2">
-                                <button id="my-prev-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上個月</button>
-                                <div id="my-current-month-year" class="text-lg font-semibold"></div>
-                                <button id="my-next-month" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下個月</button>
-                            </div>
-                            <div class="grid grid-cols-7 text-center text-xs text-gray-500 mb-1">
-                                <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
-                            </div>
-                            <div id="myshift-calendar-grid" class="grid grid-cols-7 gap-1"></div>
-                            <hr class="border-t border-gray-200 my-3" />
                             <div id="myshift-day-panel" class="mt-2"></div>
                         </div>`;
                     try { lucide.createIcons(); } catch (_) {}
@@ -3686,9 +3676,8 @@
                 const init = async () => {
                     renderShell();
                     await loadPosts();
-                    renderMonthHeader();
                     await loadMonth();
-                    renderCalendar();
+                    pageState.selectedDayIso = fmtYMD(new Date());
                     renderDayPanel();
                 };
                 init();
