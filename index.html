@@ -3210,13 +3210,11 @@
                 const tabs = isStaff
                     ? [
                         { key: 'workdays', label: '我的班表' },
-                        { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
                         { key: 'leaves', label: '請假申請' }
                       ]
                     : [
                         { key: 'workdays', label: '我的班表' },
-                        { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
                         { key: 'leaves', label: '請假申請' }
                       ];
@@ -3232,20 +3230,16 @@
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
 
                 const subPageContent = document.getElementById('sub-page-content');
-                if (subPage === 'location') {
-                    renderClockInLocation(subPageContent);
-                } else if (subPage === 'records') {
+                if (subPage === 'records') {
                     renderClockInRecords(subPageContent);
                 } else if (subPage === 'retro') {
                     renderRetroClockRequestForm(subPageContent);
                 } else if (subPage === 'leaves') {
                     renderMyLeaveRecords(subPageContent);
-                } else if (subPage === 'workdays') {
+                } else {
                     // 只讀的我的班表（月視圖）
                     renderWorkDatesMonthView(subPageContent);
-                } else {
-                    // 預設落到定位打卡
-                    renderClockInLocation(subPageContent);
+                    try { updateMyScheduleButtons(); } catch (e) { console.warn('updateMyScheduleButtons 初始化失敗', e); }
                 }
 
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('clock-in', btn.dataset.subtab)));
@@ -3681,8 +3675,8 @@
                                             ${(it.endDateIso && it.endDateIso !== iso) ? `<span class="text-[11px] px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">跨日至 ${it.endDateIso}</span>` : ''}
                                         </div>
                                         <div class="ml-auto flex items-center gap-1 whitespace-nowrap">
-                                            <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">上班</button>
-                                            <button class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">下班</button>
+                                            <button class="my-clock-btn px-2 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700" data-type="上班">上班</button>
+                                            <button class="my-clock-btn px-2 py-1 text-xs rounded bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" disabled>下班</button>
                                             <button class="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600" onclick="openTempLeaveModal()">請假</button>
                                         </div>
                                     </div>
@@ -13578,7 +13572,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         
                         showToast(`${type}打卡成功！`);
                         close();
-                        showPage('clock-in', 'location');  // 改為顯示定位打卡頁面
+                        try { if (typeof updateMyScheduleButtons === 'function') { updateMyScheduleButtons(); } } catch(_) {}
+                        // 保留當前頁，不再跳轉定位打卡
 
                     } catch (error) {
                         console.error("Clock in error:", error);
@@ -13590,6 +13585,74 @@ const roleBorderClass = roleColorMap[titleKey] || null;
 
                 document.getElementById('cancel-camera-btn').addEventListener('click', close);
             }
+
+            // 新增：我的班表地圖打卡模態與全域事件委派
+            function openClockInMapModal(type) {
+                const modalContainer = document.getElementById('modal-container');
+                if (!modalContainer) return;
+                const isStart = type === '上班';
+                modalContainer.innerHTML = `
+                    <div class="modal-overlay" id="clockin-map-overlay"></div>
+                    <div class="modal-content">
+                        <div class="modal-header">${type}定位打卡</div>
+                        <div id="map-container" class="rounded-lg overflow-hidden border border-gray-300 relative">
+                            <div id="map" class="map-canvas"></div>
+                            <div id="map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center"><div class="loader"></div></div>
+                        </div>
+                        <div class="modal-actions">
+                            <button id="clockin-cancel-btn" class="px-3 py-2 rounded bg-gray-100">取消</button>
+                            <button id="clockin-confirm-btn" data-type="${type}" class="px-3 py-2 rounded ${isStart ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} text-white">${type}打卡</button>
+                        </div>
+                    </div>`;
+                modalContainer.classList.add('show');
+                try { lucide.createIcons(); } catch (e) {}
+                try { initClockInMap(); } catch (e) { console.warn('initClockInMap 執行失敗', e); }
+                const closeMap = () => { modalContainer.classList.remove('show'); modalContainer.innerHTML = ''; };
+                const overlay = document.getElementById('clockin-map-overlay');
+                overlay && overlay.addEventListener('click', closeMap);
+                const cancelBtn = document.getElementById('clockin-cancel-btn');
+                cancelBtn && cancelBtn.addEventListener('click', closeMap);
+                const confirmBtn = document.getElementById('clockin-confirm-btn');
+                confirmBtn && confirmBtn.addEventListener('click', () => {
+                    if (!state.currentLocation) { alert('無法取得目前位置，請稍後再試'); return; }
+                    const t = confirmBtn.getAttribute('data-type');
+                    openCameraModal(t, state.currentLocation);
+                });
+            }
+
+            function updateMyScheduleButtons() {
+                const panel = document.getElementById('myshift-day-panel');
+                if (!panel) return;
+                const status = state.clockInStatus || '';
+                const setBtn = (btn, enabled, isStart) => {
+                    const base = 'my-clock-btn px-2 py-1 text-xs rounded';
+                    if (enabled) {
+                        btn.className = base + (isStart ? ' bg-green-600 text-white hover:bg-green-700' : ' bg-red-600 text-white hover:bg-red-700');
+                        btn.disabled = false;
+                        btn.classList.remove('cursor-not-allowed');
+                    } else {
+                        btn.className = base + ' bg-gray-300 text-gray-500 cursor-not-allowed';
+                        btn.disabled = true;
+                    }
+                };
+                panel.querySelectorAll('.my-clock-btn').forEach(btn => {
+                    const type = btn.getAttribute('data-type');
+                    if (type === '上班') {
+                        setBtn(btn, status !== '上班', true);
+                    } else if (type === '下班') {
+                        setBtn(btn, status === '上班', false);
+                    }
+                });
+            }
+
+            // 全域事件委派：處理我的班表打卡按鈕
+            document.addEventListener('click', (e) => {
+                const btn = e.target.closest('.my-clock-btn');
+                if (!btn) return;
+                if (btn.disabled || btn.classList.contains('cursor-not-allowed')) return;
+                const t = btn.getAttribute('data-type');
+                openClockInMapModal(t);
+            });
 
             // --- Google Maps ---
             function loadGoogleMapsScript() {
