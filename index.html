@@ -1818,16 +1818,28 @@
                                 }));
                             } catch (_) {}
 
+                            // 今日待審假單（依使用者分組）
+                            const pendingLeavesByUserId = {};
+                            try {
+                                const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
+                                const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
+                                const lSnap = await getDocs(query(collection(db, 'leaves'), where('status','==','pending'), where('targetTime','>=', tsStart2), where('targetTime','<=', tsEnd2)));
+                                lSnap.forEach(d => {
+                                    const data = d.data() || {};
+                                    const uid = data.userId;
+                                    if (uid) (pendingLeavesByUserId[uid] ||= []).push({ id: d.id, ...data });
+                                });
+                            } catch (_) {}
+
                             // 計算所有社區異常結果
                             const results = {};
                             const now = new Date();
 
                             for (const c of currentList) {
                                 let hasAbnormalLocation = false;
-                                let hasShiftOverdueNotStarted = false;
                                 let hasPatrolOverdueStart = false;
-                                let hasPatrolNotExecuted = false;
-                                let hasNoSchedule = false;
+                                let hasPendingLeave = false;
+                                let hasDoublePunch = false;
 
                                 const communityUsers = usersByCommunityId[c.id] || [];
                                 // 位置異常：任一成員的任一打卡在社區半徑外（受設定控制）
@@ -1841,40 +1853,39 @@
                                     }
                                 }
 
-                                // 今日班表狀態
-                                const sched = schedulesByCommunityId[c.id] || { anyScheduled: false, shifts: [] };
-                                if (!sched.anyScheduled) hasNoSchedule = true;
-
-                                // 班表逾時未上班
-                                if (markShiftOverdue) {
-                                    for (const s of (sched.shifts || [])) {
-                                        const assignee = Array.isArray(s.assignees) && s.assignees.length ? s.assignees[0] : null;
-                                        if (!assignee) continue;
-                                        const startDt = parseHM(ymdToday, s.start || '');
-                                        if (!startDt) continue;
-                                        if (now > startDt) {
-                                            const recs = recordsByUser[assignee] || [];
-                                            const hasStart = recs.some(r => r.type === '上班');
-                                            if (!hasStart) { hasShiftOverdueNotStarted = true; break; }
-                                        }
-                                    }
+                                // 待審假單
+                                for (const u of communityUsers) {
+                                    if ((pendingLeavesByUserId[u.id] || []).length > 0) { hasPendingLeave = true; break; }
                                 }
 
-                                // 巡邏逾時未開始／未執行
-                                if (markPatrolOverdueStart || markPatrolNotExecuted) {
+                                // 巡邏逾時未開始
+                                if (markPatrolOverdueStart) {
                                     const tasks = tasksByCommunityId[c.id] || [];
                                     for (const t of tasks) {
                                         const sHM = (t.expectedStartHM || '').trim();
-                                        const eHM = (t.expectedEndHM || '').trim();
                                         const sDt = sHM ? parseHM(ymdToday, sHM) : null;
-                                        const eDt = eHM ? parseHM(ymdToday, eHM) : null;
                                         const started = !!t.actualStartTS;
-                                        if (markPatrolOverdueStart && !started && sDt && now > sDt) hasPatrolOverdueStart = true;
-                                        if (markPatrolNotExecuted && !started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
+                                        if (!started && sDt && now > sDt) { hasPatrolOverdueStart = true; break; }
                                     }
                                 }
 
-                                results[c.id] = { hasAbnormalLocation, hasShiftOverdueNotStarted, hasPatrolOverdueStart, hasPatrolNotExecuted, hasNoSchedule };
+                                // 異常：今日存在重複上班或重複下班打卡
+                                outerDouble: for (const u of communityUsers) {
+                                    const recs = recordsByUser[u.id] || [];
+                                    let startCount = 0, endCount = 0;
+                                    for (const r of recs) {
+                                        const dt = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : null);
+                                        if (!dt) continue;
+                                        const y = dt.getFullYear(), m = dt.getMonth()+1, d = dt.getDate();
+                                        const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                                        if (ymd !== ymdToday) continue;
+                                        if (r.type === '上班') startCount++;
+                                        if (r.type === '下班') endCount++;
+                                        if (startCount >= 2 || endCount >= 2) { hasDoublePunch = true; break outerDouble; }
+                                    }
+                                }
+
+                                results[c.id] = { hasAbnormalLocation, hasPatrolOverdueStart, hasPendingLeave, hasDoublePunch };
                             }
 
                             // 一次性套用樣式（紅>橙>黃）
@@ -1884,12 +1895,8 @@
                                 const r = results[c.id] || {};
                                 const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
                                 const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
-                                if ((markPatrolNotExecuted && r.hasPatrolNotExecuted) || (markShiftOverdue && r.hasShiftOverdueNotStarted)) {
+                                if (r.hasPendingLeave || r.hasDoublePunch || r.hasPatrolOverdueStart || r.hasAbnormalLocation) {
                                     remove(['bg-white','hover:bg-red-50']); add(['bg-red-50','border-red-300','text-red-800']);
-                                } else if ((markPatrolOverdueStart && r.hasPatrolOverdueStart) || (markNoScheduleCommunity && r.hasNoSchedule)) {
-                                    remove(['bg-white','hover:bg-red-50']); add(['bg-orange-50','border-orange-300','text-orange-800']);
-                                } else if (markLocation && r.hasAbnormalLocation) {
-                                    remove(['bg-white','hover:bg-red-50']); add(['bg-yellow-50','border-yellow-300','text-yellow-800']);
                                 }
                             }
                         } catch (e) {
@@ -2062,12 +2069,24 @@
                                     return isNaN(dt.getTime()) ? null : dt;
                                 };
 
+                                // 今日待審假單（依使用者分組）
+                                const pendingLeavesByUserId = {};
+                                try {
+                                    const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
+                                    const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
+                                    const lSnap = await getDocs(query(collection(db, 'leaves'), where('status','==','pending'), where('targetTime','>=', tsStart2), where('targetTime','<=', tsEnd2)));
+                                    lSnap.forEach(d => {
+                                        const data = d.data() || {};
+                                        const uid = data.userId;
+                                        if (uid) (pendingLeavesByUserId[uid] ||= []).push({ id: d.id, ...data });
+                                    });
+                                } catch (_) {}
+
                                 const results = await Promise.all(filtered.map(async (u) => {
                                     let hasAbnormalLocation = false;
-                                    let hasShiftOverdueNotStarted = false;
                                     let hasPatrolOverdueStart = false;
-                                    let hasPatrolNotExecuted = false;
-                                    let hasNoScheduleUser = false;
+                                    let hasPendingLeave = false;
+                                    let hasDoublePunch = false;
 
                                     let svcIds = Array.isArray(u.serviceCommunities) ? u.serviceCommunities.slice() : [];
                                     if ((!svcIds || svcIds.length === 0) && u.serviceCommunityCode) {
@@ -2084,36 +2103,27 @@
                                         }
                                     }
 
-                                    // 班表：並行抓取每服務社區的今日班表
-                                    if (svcIds && svcIds.length > 0) {
-                                        try {
-                                            const ssnaps = await Promise.all(svcIds.map(commId => getDocs(query(collection(db, 'postSchedules'), where('communityId','==', commId), where('dateIso','==', ymdToday)))));
-                                            const allShifts = [];
-                                            ssnaps.forEach(ssnap => ssnap.forEach(d => { const data = d.data() || {}; if (Array.isArray(data.shifts)) allShifts.push(...data.shifts); }));
-                                            const assignedAny = allShifts.some(s => Array.isArray(s.assignees) && s.assignees.includes(u.id));
-                                            if (!assignedAny) hasNoScheduleUser = true;
+                                    // 待審假單
+                                    if ((pendingLeavesByUserId[u.id] || []).length > 0) hasPendingLeave = true;
 
-                                            if (markShiftOverdue) {
-                                                const now = new Date();
-                                                for (const s of allShifts) {
-                                                    const assigned = Array.isArray(s.assignees) ? s.assignees : [];
-                                                    if (!assigned.includes(u.id)) continue;
-                                                    const startDt = parseHM(ymdToday, s.start || '');
-                                                    if (!startDt) continue;
-                                                    if (now > startDt) {
-                                                        const hasStart = recs.some(r => r.type === '上班');
-                                                        if (!hasStart) { hasShiftOverdueNotStarted = true; break; }
-                                                    }
-                                                }
-                                            }
-                                        } catch (_) {}
-                                    } else {
-                                        // 沒有服務社區，視為今日無排班
-                                        hasNoScheduleUser = true;
+                                    // 異常：今日存在重複上班或重複下班打卡
+                                    {
+                                        let startCount = 0, endCount = 0;
+                                        for (const r of recs) {
+                                            const dt = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : null);
+                                            if (!dt) continue;
+                                            const y = dt.getFullYear(), m = dt.getMonth()+1, d = dt.getDate();
+                                            const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                                            if (ymd !== ymdToday) continue;
+                                            if (r.type === '上班') startCount++;
+                                            if (r.type === '下班') endCount++;
+                                            if (startCount >= 2 || endCount >= 2) break;
+                                        }
+                                        if (startCount >= 2 || endCount >= 2) hasDoublePunch = true;
                                     }
 
-                                    // 巡邏：並行抓取每服務社區的今日任務
-                                    if (markPatrolOverdueStart || markPatrolNotExecuted) {
+                                    // 巡邏：並行抓取每服務社區的今日任務（逾時未開始）
+                                    if (markPatrolOverdueStart) {
                                         try {
                                             const now = new Date();
                                             const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
@@ -2123,17 +2133,14 @@
                                             tSnaps.forEach(tSnap => tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() })));
                                             for (const t of tasks) {
                                                 const sHM = (t.expectedStartHM || '').trim();
-                                                const eHM = (t.expectedEndHM || '').trim();
                                                 const sDt = sHM ? parseHM(ymdToday, sHM) : null;
-                                                const eDt = eHM ? parseHM(ymdToday, eHM) : null;
                                                 const started = !!t.actualStartTS;
-                                                if (markPatrolOverdueStart && !started && sDt && now > sDt) hasPatrolOverdueStart = true;
-                                                if (markPatrolNotExecuted && !started && eDt && now > eDt) { hasPatrolNotExecuted = true; break; }
+                                                if (!started && sDt && now > sDt) { hasPatrolOverdueStart = true; break; }
                                             }
                                         } catch (_) {}
                                     }
 
-                                    return { userId: u.id, hasAbnormalLocation, hasShiftOverdueNotStarted, hasPatrolOverdueStart, hasPatrolNotExecuted, hasNoScheduleUser };
+                                    return { userId: u.id, hasAbnormalLocation, hasPatrolOverdueStart, hasPendingLeave, hasDoublePunch };
                                 }));
 
                                 // 一次性套用樣式（紅>橙>黃）
@@ -2142,12 +2149,8 @@
                                     if (!btn) continue;
                                     const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
                                     const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
-                                    if ((markPatrolNotExecuted && r.hasPatrolNotExecuted) || (markShiftOverdue && r.hasShiftOverdueNotStarted)) {
+                                    if (r.hasPendingLeave || r.hasDoublePunch || r.hasPatrolOverdueStart || r.hasAbnormalLocation) {
                                         remove(['bg-white','hover:bg-blue-50']); add(['bg-red-50','border-red-300','text-red-800']);
-                                    } else if ((markPatrolOverdueStart && r.hasPatrolOverdueStart) || (markNoScheduleCommunity && r.hasNoScheduleUser)) {
-                                        remove(['bg-white','hover:bg-blue-50']); add(['bg-orange-50','border-orange-300','text-orange-800']);
-                                    } else if (markLocation && r.hasAbnormalLocation) {
-                                        remove(['bg-white','hover:bg-blue-50']); add(['bg-yellow-50','border-yellow-300','text-yellow-800']);
                                     }
                                 }
                             } catch (e) {
@@ -2197,7 +2200,7 @@
             
             function renderDashboard() {
                 const role = state.currentUserData?.role || '';
-                const isManagerial = role === 'admin' || role === 'manager' || role === 'junior_manager';
+                const isManagerial = role === 'admin' || role === 'manager' || role === 'junior_manager' || role === 'hr';
 
                 // 依角色切換儀表板內容：
                 // 管理員 / 高階主管 / 初階主管：顯示社區列表
@@ -2225,11 +2228,7 @@
                         </div>
                         <div id="dashboard-notifications" class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
                            <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="bell" class="w-4 h-4 mr-2"></i>通知</h3>
-                           <div id="dashboard-duty-list" class="space-y-2 text-gray-700">
-                             <div class="text-gray-500">讀取中...</div>
-                           </div>
-                           <div class="mt-2 border-t border-gray-100"></div>
-                           <div id="dashboard-anomalies-list" class="space-y-2 text-gray-700 mt-2">
+                           <div id="dashboard-anomalies-list" class="space-y-2 text-gray-700">
                              <div class="text-gray-500">讀取中...</div>
                            </div>
                         </div>`;
@@ -2465,66 +2464,84 @@
                         } catch (_) {}
                     }));
 
-                    const holidays = window.__holidaySettingsCache || { weekendIsHoliday: false, holidays: [] };
-                    const holidaysSet = new Set(holidays.holidays || []);
-                    const isHoliday = (date) => {
-                        const ymd = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-                        const weekend = date.getDay() === 0 || date.getDay() === 6;
-                        return holidaysSet.has(ymd) || (holidays.weekendIsHoliday && weekend);
-                    };
-
+                    // 今日日期字串
                     const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
-                    const expectedEndTimeOf = (u) => {
-                        const d = daysMap[ymdToday] || {};
-                        return d.end || (!isHoliday(start) && (start.getDay()>=1 && start.getDay()<=5) ? '17:30' : '');
-                    };
-                    const expectedStartTimeOf = (u) => {
-                        const d = daysMap[ymdToday] || {};
-                        return d.start || (!isHoliday(start) && (start.getDay()>=1 && start.getDay()<=5) ? '09:00' : '');
-                    };
+
+                    // 今日待審假單（依使用者分組）
+                    const pendingLeavesByUserId = {};
+                    try {
+                        const lSnap = await getDocs(query(collection(db, 'leaves'), where('status','==','pending'), where('targetTime','>=', tsStart), where('targetTime','<=', tsEnd)));
+                        lSnap.forEach(d => {
+                            const data = d.data() || {};
+                            const uid = data.userId;
+                            if (uid) (pendingLeavesByUserId[uid] ||= []).push({ id: d.id, ...data });
+                        });
+                    } catch (_) {}
 
                     const anomalies = [];
-                    users.forEach(u => {
+                    for (const u of users) {
                         const recs = byUser[u.id] || [];
-                        // 未打卡（有預期上班時間且當日無任何紀錄）
-                        const expStart = expectedStartTimeOf(u);
-                        if (expStart && recs.length === 0) {
-                            anomalies.push({ type: '未打卡', user: u, detail: '今日尚未有任何打卡紀錄' });
+                        const svcIds = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : (u.serviceCommunityCode ? [u.serviceCommunityCode] : []);
+
+                        // 雙重打卡（今日存在重複上班或重複下班）
+                        let startCount = 0, endCount = 0;
+                        for (const r of recs) {
+                            const dt = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : null);
+                            if (!dt) continue;
+                            const y = dt.getFullYear(), m = dt.getMonth()+1, d = dt.getDate();
+                            const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                            if (ymd !== ymdToday) continue;
+                            if (r.type === '上班') startCount++;
+                            if (r.type === '下班') endCount++;
+                            if (startCount >= 2 || endCount >= 2) break;
                         }
+                        if (startCount >= 2 || endCount >= 2) {
+                            anomalies.push({ type: '雙重打卡', user: u, detail: '今日存在重複上班或重複下班打卡' });
+                        }
+
+                        // 待審假單
+                        if ((pendingLeavesByUserId[u.id] || []).length > 0) {
+                            anomalies.push({ type: '待審假單', user: u, detail: '今日有未審核的請假申請' });
+                        }
+
                         // 位置異常（任何紀錄標記異常）
                         for (const r of recs) {
-                            const abnormal = computeRecordAbnormal(r, Array.isArray(u.serviceCommunities) ? u.serviceCommunities : (u.serviceCommunityCode ? [u.serviceCommunityCode] : []));
+                            const abnormal = computeRecordAbnormal(r, svcIds);
                             if (abnormal && abnormal.isAbnormal) {
                                 anomalies.push({ type: '打卡定位異常', user: u, detail: abnormal.detail || '' });
                                 break;
                             }
                         }
-                        // 提早下班（最後一筆為下班且早於預期）
-                        const last = recs[recs.length-1] || null;
-                        const expEnd = expectedEndTimeOf(u);
-                        if (last && (last.type === '下班' || last.type === '自動下班') && expEnd) {
-                            const ts = last.timestamp?.toDate?.() ? last.timestamp.toDate() : (last.timestamp ? new Date(last.timestamp) : null);
-                            if (ts) {
-                                const [eh, em] = expEnd.split(':').map(x=>parseInt(x,10));
-                                const endDt = new Date(start.getFullYear(), start.getMonth(), start.getDate(), eh||17, em||30, 0, 0);
-                                if (ts < endDt) {
-                                    anomalies.push({ type: '提早下班打卡', user: u, detail: `下班時間 ${ts.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})}，早於預期 ${expEnd}` });
+
+                        // 巡邏逾時未開始
+                        try {
+                            const tSnaps = await Promise.all((svcIds || []).map(commId => getDocs(query(collection(db, 'communities', commId, 'patrolTasks'), where('assignedUserId','==', u.id), where('dateTS','>=', tsStart), where('dateTS','<=', tsEnd)))));
+                            const tasks = [];
+                            tSnaps.forEach(tSnap => tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() })));
+                            for (const t of tasks) {
+                                const sHM = (t.expectedStartHM || '').trim();
+                                const sDt = sHM ? new Date(`${ymdToday}T00:00:00`) : null;
+                                if (sDt && sHM) {
+                                    const [hh, mm] = sHM.split(':'); sDt.setHours(parseInt(hh,10)||0, parseInt(mm,10)||0, 0, 0);
+                                }
+                                const started = !!t.actualStartTS;
+                                if (!started && sDt && now > sDt) {
+                                    anomalies.push({ type: '巡邏逾時未開始', user: u, detail: `任務 ${t.title || t.id} 已逾時未開始` });
+                                    break;
                                 }
                             }
-                        }
-                    });
+                        } catch (_) {}
+                    }
 
                     // 顯示通知
                     let html = '';
                     anomalies.forEach(a => {
                         const name = a.user.name || a.user.displayName || '未命名';
-                        const icon = a.type === '未打卡' ? 'alert-triangle' : (a.type === '打卡定位異常' ? 'map-pin' : 'log-out');
-                        const color = a.type === '未打卡' ? 'text-red-700' : (a.type === '打卡定位異常' ? 'text-yellow-700' : 'text-orange-700');
-                        const bg = a.type === '未打卡' ? 'bg-red-50 border-red-200' : (a.type === '打卡定位異常' ? 'bg-yellow-50 border-yellow-200' : 'bg-orange-50 border-orange-200');
+                        const icon = (a.type === '打卡定位異常') ? 'map-pin' : 'alert-triangle';
                         html += `
-                            <div class="p-3 ${bg} border rounded-md">
+                            <div class="p-3 bg-red-50 border border-red-200 rounded-md">
                                 <div class="flex items-center">
-                                    <i data-lucide="${icon}" class="w-4 h-4 mr-2 ${color}"></i>
+                                    <i data-lucide="${icon}" class="w-4 h-4 mr-2 text-red-700"></i>
                                     <span class="font-medium text-gray-800">${a.type}</span>
                                 </div>
                                 <div class="mt-1 text-sm text-gray-700">${name}</div>
