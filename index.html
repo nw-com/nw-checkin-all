@@ -7985,6 +7985,259 @@
                 renderAll();
             }
 
+            function renderGroupPatrolRecords(container) {
+                const db = window.__db;
+                const fs = window.__fs || {};
+                const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                const comm = state.currentCommunity;
+                if (!comm || !comm.id) {
+                    container.innerHTML = `<div class="p-6 text-center text-gray-500">請先選擇社區</div>`;
+                    return;
+                }
+
+                const local = {
+                    monthDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+                    selectedItemId: 'all',
+                    points: [],
+                    pointsById: {},
+                    pointsByCode: {},
+                    items: [],
+                    logs: [],
+                    usersMap: {}
+                };
+                const toDate = (tsOrDate) => tsOrDate?.toDate?.() || (tsOrDate instanceof Date ? tsOrDate : (tsOrDate ? new Date(tsOrDate) : null));
+                const monthStart = () => new Date(local.monthDate.getFullYear(), local.monthDate.getMonth(), 1, 0, 0, 0, 0);
+                const monthEnd = () => new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()+1, 0, 23, 59, 59, 999);
+                const fmtMonthLabel = () => `${local.monthDate.getFullYear()}年 ${local.monthDate.getMonth()+1}月`;
+                const fmtYMD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                const fmtHM = (date) => { if (!date || isNaN(date.getTime())) return ''; return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`; };
+
+                const renderShell = () => {
+                    container.innerHTML = `
+                        <div class="p-3 space-y-3">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2 text-xs">
+                                    <button id="pr-prev-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">上一月</button>
+                                    <span class="text-gray-600">月份</span>
+                                    <div id="pr-month-label" class="text-xs font-medium">${fmtMonthLabel()}</div>
+                                    <button id="pr-next-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">下一月</button>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button id="pr-print-current" class="px-2 py-1 rounded bg-slate-700 text-white hover:bg-slate-800 text-xs">列印目前</button>
+                                    <button id="pr-print-all" class="px-2 py-1 rounded bg-slate-500 text-white hover:bg-slate-600 text-xs">列印全部</button>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 px-1"><div id="pr-item-tabs" class="flex gap-2 overflow-x-auto"></div></div>
+                            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-3 py-2 text-left whitespace-nowrap">日期</th>
+                                            <th class="px-3 py-2 text-left whitespace-nowrap">巡邏項目</th>
+                                            <th class="px-3 py-2 text-left whitespace-nowrap">巡邏點編號</th>
+                                            <th class="px-3 py-2 text-left whitespace-nowrap">巡邏點名稱</th>
+                                            <th class="px-3 py-2 text-left whitespace-nowrap">開始</th>
+                                            <th class="px-3 py-2 text-left whitespace-nowrap">結束</th>
+                                            <th class="px-3 py-2 text-left whitespace-nowrap">執行人員</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pr-rows">
+                                        <tr><td colspan="7" class="px-3 py-3 text-center text-gray-500">正在載入巡邏紀錄...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>`;
+                };
+
+                const loadPoints = async () => {
+                    try {
+                        const snap = await getDocs(collection(db, 'communities', comm.id, 'patrolPoints'));
+                        local.points = []; local.pointsById = {}; local.pointsByCode = {}; const names = new Set();
+                        snap.forEach(d => {
+                            const p = { id: d.id, ...d.data() };
+                            local.points.push(p);
+                            const pid = p.pointId || p.id; const code = p.code || '';
+                            if (pid) local.pointsById[pid] = p;
+                            if (code) local.pointsByCode[code] = p;
+                            const iname = (p.itemName || '').trim(); if (iname) names.add(iname);
+                            const arr = Array.isArray(p.tasks) ? p.tasks : [];
+                            arr.forEach(t => { const nm = typeof t === 'string' ? t.trim() : ((t.name||t.title||t.itemName||'').trim()); if (nm) names.add(nm); });
+                        });
+                        local.items = Array.from(names);
+                    } catch (e) {
+                        console.warn('載入巡邏點失敗', e);
+                        local.points = Array.isArray(local.points) ? local.points : [];
+                        local.items = Array.isArray(local.items) ? local.items : [];
+                    }
+                };
+
+                const loadUsersMap = async () => {
+                    try {
+                        const usnap = await getDocs(collection(db, 'users'));
+                        local.usersMap = {};
+                        usnap.forEach(d => { const data = d.data(); local.usersMap[d.id] = data.name || data.displayName || d.id; });
+                    } catch(e) { local.usersMap = {}; }
+                };
+
+                const loadLogs = async () => {
+                    const startTS = Timestamp.fromDate(monthStart());
+                    const endTS = Timestamp.fromDate(monthEnd());
+                    const lsnap = await getDocs(query(collection(db, 'communities', comm.id, 'patrolLogs'), where('timestamp','>=', startTS), where('timestamp','<=', endTS)));
+                    local.logs = []; lsnap.forEach(ld => local.logs.push({ id: ld.id, ...ld.data() }));
+                };
+
+                const renderItemTabs = () => {
+                    const tabsEl = document.getElementById('pr-item-tabs'); if (!tabsEl) return;
+                    const tabs = [{ id: 'all', label: '全部' }].concat(local.items.map(n => ({ id: n, label: n })));
+                    tabsEl.innerHTML = tabs.map(t => `<button class="px-2 py-1 rounded border text-xs ${local.selectedItemId === t.id ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-gray-700 hover:bg-gray-50'}" data-id="${t.id}">${t.label}</button>`).join('');
+                    tabsEl.querySelectorAll('button').forEach(btn => {
+                        btn.addEventListener('click', () => { local.selectedItemId = btn.getAttribute('data-id') || 'all'; renderItemTabs(); renderRows(); });
+                    });
+                };
+
+                const getItemNameForPoint = (p) => {
+                    if (!p) return '未分類';
+                    const iname = (p.itemName || '').trim(); if (iname) return iname;
+                    const arr = Array.isArray(p.tasks) ? p.tasks : [];
+                    for (const t of arr) { const nm = typeof t === 'string' ? t.trim() : ((t.name||t.title||t.itemName||'').trim()); if (nm) return nm; }
+                    return '未分類';
+                };
+
+                const computeGroupedRows = (filterItemId = null) => {
+                    const map = {};
+                    for (const log of local.logs) {
+                        const p = (log.pointId && local.pointsById[log.pointId]) || (log.pointCode && local.pointsByCode[log.pointCode]) || null;
+                        const itemName = getItemNameForPoint(p);
+                        if (filterItemId && filterItemId !== 'all' && itemName !== filterItemId) continue;
+                        const ts = toDate(log.timestamp) || new Date(0);
+                        const dateIso = fmtYMD(ts);
+                        const pointId = p?.pointId || p?.id || (log.pointId || '') || '';
+                        const pointName = p?.name || p?.pointName || '';
+                        const key = `${itemName}__${dateIso}__${pointId}`;
+                        if (!map[key]) map[key] = { itemName, dateIso, pointId, pointName, startTS: null, endTS: null, startUserId: null, endUserId: null, startCount: 0, endCount: 0 };
+                        if (log.action === 'start') {
+                            const cur = map[key]; cur.startCount++; const t = toDate(log.timestamp);
+                            if (!cur.startTS || (t && t < cur.startTS)) cur.startTS = t; if (log.userId) cur.startUserId = log.userId;
+                        } else if (log.action === 'end') {
+                            const cur = map[key]; cur.endCount++; const t = toDate(log.timestamp);
+                            if (!cur.endTS || (t && t > cur.endTS)) cur.endTS = t; if (log.userId) cur.endUserId = log.userId;
+                        }
+                    }
+                    const rows = Object.values(map);
+                    rows.sort((a,b) => a.dateIso.localeCompare(b.dateIso) || (a.itemName||'').localeCompare(b.itemName||'', 'zh-Hant') || (a.pointId||'').localeCompare(b.pointId||'', 'zh-Hant'));
+                    return rows;
+                };
+
+                const renderRows = () => {
+                    const rowsEl = document.getElementById('pr-rows'); if (!rowsEl) return;
+                    const rows = computeGroupedRows(local.selectedItemId);
+                    if (!rows.length) {
+                        rowsEl.innerHTML = `<tr><td colspan="7" class="px-3 py-3 text-center text-gray-500">本月尚無巡邏紀錄</td></tr>`;
+                        return;
+                    }
+                    rowsEl.innerHTML = rows.map(r => {
+                        const startStr = r.startTS ? fmtHM(r.startTS) + (r.startCount>1 ? ` (+${r.startCount-1})` : '') : '';
+                        const endStr = r.endTS ? fmtHM(r.endTS) + (r.endCount>1 ? ` (+${r.endCount-1})` : '') : '';
+                        const userText = (() => {
+                            const s = r.startUserId ? (local.usersMap[r.startUserId] || r.startUserId) : '';
+                            const e = r.endUserId ? (local.usersMap[r.endUserId] || r.endUserId) : '';
+                            if (s && e && s !== e) return `${s} / ${e}`;
+                            return s || e || '';
+                        })();
+                        return `
+                            <tr>
+                                <td class="px-3 py-2 whitespace-nowrap">${r.dateIso}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${r.itemName}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${r.pointId || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${r.pointName || ''}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${startStr}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${endStr}</td>
+                                <td class="px-3 py-2 whitespace-nowrap">${userText}</td>
+                            </tr>`;
+                    }).join('');
+                };
+
+                const generatePrintHtml = (filterItemId = 'all') => {
+                    const rows = computeGroupedRows(filterItemId);
+                    const sectionTitle = filterItemId === 'all' ? '全部巡邏項目' : `巡邏項目：${filterItemId}`;
+                    const header = `<h2 style="margin:0 0 8px 0;font-size:16px;">${fmtMonthLabel()} ${sectionTitle}</h2>`;
+                    const table = `
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <thead>
+                                <tr>
+                                    <th style="border:1px solid #ddd;padding:6px;text-align:left;">日期</th>
+                                    <th style="border:1px solid #ddd;padding:6px;text-align:left;">巡邏項目</th>
+                                    <th style="border:1px solid #ddd;padding:6px;text-align:left;">巡邏點編號</th>
+                                    <th style="border:1px solid #ddd;padding:6px;text-align:left;">巡邏點名稱</th>
+                                    <th style="border:1px solid #ddd;padding:6px;text-align:left;">開始</th>
+                                    <th style="border:1px solid #ddd;padding:6px;text-align:left;">結束</th>
+                                    <th style="border:1px solid #ddd;padding:6px;text-align:left;">執行人員</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rows.map(r => {
+                                    const startStr = r.startTS ? fmtHM(r.startTS) + (r.startCount>1 ? ` (+${r.startCount-1})` : '') : '';
+                                    const endStr = r.endTS ? fmtHM(r.endTS) + (r.endCount>1 ? ` (+${r.endCount-1})` : '') : '';
+                                    const userText = (() => {
+                                        const s = r.startUserId ? (local.usersMap[r.startUserId] || r.startUserId) : '';
+                                        const e = r.endUserId ? (local.usersMap[r.endUserId] || r.endUserId) : '';
+                                        if (s && e && s !== e) return `${s} / ${e}`;
+                                        return s || e || '';
+                                    })();
+                                    return `<tr>
+                                        <td style="border:1px solid #ddd;padding:6px;">${r.dateIso}</td>
+                                        <td style="border:1px solid #ddd;padding:6px;">${r.itemName}</td>
+                                        <td style="border:1px solid #ddd;padding:6px;">${r.pointId || ''}</td>
+                                        <td style="border:1px solid #ddd;padding:6px;">${r.pointName || ''}</td>
+                                        <td style="border:1px solid #ddd;padding:6px;">${startStr}</td>
+                                        <td style="border:1px solid #ddd;padding:6px;">${endStr}</td>
+                                        <td style="border:1px solid #ddd;padding:6px;">${userText}</td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>`;
+                    return `<section style="margin-bottom:16px;">${header}${table}</section>`;
+                };
+
+                const openPrintWindow = (filterItemId = 'all') => {
+                    const html = generatePrintHtml(filterItemId);
+                    const allHtml = (filterItemId === 'all')
+                        ? (['all'].concat(local.items)).map(id => generatePrintHtml(id === 'all' ? 'all' : id)).join('')
+                        : html;
+                    const win = window.open('', '_blank');
+                    if (!win) { try { showToast('瀏覽器阻擋了開窗，請允許彈出視窗', true); } catch(_) {} return; }
+                    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8" /><title>${fmtMonthLabel()} 巡邏紀錄列印</title><style>
+                        body{font-family:Arial,'Noto Sans TC',sans-serif;color:#111;padding:16px;}
+                        @media print { .no-print{display:none;} }
+                    </style></head><body>${allHtml}</body></html>`);
+                    win.document.close(); win.focus();
+                    try { win.print(); } catch(_) {}
+                };
+
+                const bindEvents = () => {
+                    const monthLabelEl = document.getElementById('pr-month-label');
+                    const prevBtn = document.getElementById('pr-prev-month');
+                    const nextBtn = document.getElementById('pr-next-month');
+                    const printCurrentBtn = document.getElementById('pr-print-current');
+                    const printAllBtn = document.getElementById('pr-print-all');
+                    prevBtn?.addEventListener('click', async () => { local.monthDate = new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()-1, 1); if (monthLabelEl) monthLabelEl.textContent = fmtMonthLabel(); await loadLogs(); renderRows(); });
+                    nextBtn?.addEventListener('click', async () => { local.monthDate = new Date(local.monthDate.getFullYear(), local.monthDate.getMonth()+1, 1); if (monthLabelEl) monthLabelEl.textContent = fmtMonthLabel(); await loadLogs(); renderRows(); });
+                    printCurrentBtn?.addEventListener('click', () => openPrintWindow(local.selectedItemId));
+                    printAllBtn?.addEventListener('click', () => openPrintWindow('all'));
+                };
+
+                const init = async () => {
+                    renderShell();
+                    await loadPoints();
+                    await loadUsersMap();
+                    await loadLogs();
+                    renderItemTabs();
+                    renderRows();
+                    bindEvents();
+                };
+                init();
+            }
+
             function renderGroupMap(container) {
                 container.innerHTML = `
                     <div class="h-full w-full relative">
