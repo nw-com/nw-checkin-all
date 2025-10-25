@@ -3674,20 +3674,216 @@
                                             ${(it.postName && it.postName !== '無') ? `<span class="text-sm text-gray-700 font-medium">${it.postName}</span>` : ''}
                                             ${(it.endDateIso && it.endDateIso !== iso) ? `<span class="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">跨日至 ${it.endDateIso}</span>` : ''}
                                         </div>
-                                        <div class="mt-3 flex items-center gap-2">
-                                            <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-red-600 text-white hover:bg-red-700" data-type="上班">上班</button>
-                                            <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" disabled>下班</button>
-                                            <button class="px-4 py-2 text-base bg-red-600 text-white rounded-md hover:bg-red-700" data-date="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" onclick="openTempLeaveModal(this)">請假</button>
+                                        <div class="mt-3 flex flex-col gap-2">
+                                            <div class="flex items-center gap-2">
+                                                <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-green-600 text-white hover:bg-green-700" data-type="上班" data-iso="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}">上班</button>
+                                                <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" data-iso="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" disabled>下班</button>
+                                                <button class="px-4 py-2 text-base bg-orange-500 text-white rounded-md hover:bg-orange-600" data-date="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" onclick="openLeaveModalWithDefaults(this)">請假</button>
+                                            </div>
+                                            <div class="text-sm text-red-600" data-alert="shift"></div>
                                         </div>
                                     </div>
                                 `).join('')}
                             </div>
                         </div>`;
-                    // 綁定我的班表按鈕事件
+                    // 綁定我的班表按鈕事件（依班表時間判斷）
                     panel.querySelectorAll('.my-clock-btn').forEach(btn=>{
-                        btn.addEventListener('click', ()=> openClockInModal(btn.dataset.type));
+                        btn.addEventListener('click', ()=> handleMyShiftButtonClick(btn));
                     });
+                    applyShiftButtonEnable(panel, iso, list);
                     try { updateMyScheduleButtons(); } catch (_) {}
+
+                    // —— 我的班表：打卡與請假規則 ——
+                    function toDateFromIsoHM(isoStr, hmStr) {
+                        if (!isoStr || !hmStr) return null;
+                        const d = new Date(`${isoStr}T00:00:00`);
+                        const [hh, mm] = (hmStr || '00:00').split(':').map(x=>parseInt(x, 10) || 0);
+                        d.setHours(hh, mm, 0, 0);
+                        return isNaN(d.getTime()) ? null : d;
+                    }
+                    function handleMyShiftButtonClick(btn) {
+                        const type = btn.dataset.type;
+                        const isoStr = btn.dataset.iso;
+                        const startHM = btn.dataset.start || '';
+                        const endHM = btn.dataset.end || '';
+                        const endDateIso = btn.dataset.enddateiso || isoStr;
+                        const startAt = toDateFromIsoHM(isoStr, startHM);
+                        const endAt = toDateFromIsoHM(endDateIso, endHM);
+                        const now = new Date();
+                        if (type === '上班') {
+                            if (startAt) {
+                                const earliest = new Date(startAt.getTime() - 30*60*1000);
+                                if (now < earliest) {
+                                    const tip = `您的班表時間為 ${isoStr} ${startHM}，請於表定上班時間前30分鐘後方可開始打上班打卡`;
+                                    try { showToast(tip, true); } catch(_) { alert(tip); }
+                                    return;
+                                }
+                            }
+                            openClockInModal('上班');
+                        } else if (type === '下班') {
+                            if (endAt && now < endAt) {
+                                const tip = `您的班表時間為 ${endDateIso} ${endHM}，請於表定下班時間後方可開始打下班打卡`;
+                                try { showToast(tip, true); } catch(_) { alert(tip); }
+                                return;
+                            }
+                            openClockInModal('下班');
+                        }
+                    }
+                    function applyShiftButtonEnable(panelEl, isoStr, shifts) {
+                        try {
+                            const now = new Date();
+                            panelEl.querySelectorAll('.my-clock-btn').forEach(btn => {
+                                const type = btn.dataset.type;
+                                const startHM = btn.dataset.start || '';
+                                const endHM = btn.dataset.end || '';
+                                const endDateIso = btn.dataset.enddateiso || isoStr;
+                                const startAt = toDateFromIsoHM(isoStr, startHM);
+                                const endAt = toDateFromIsoHM(endDateIso, endHM);
+                                if (type === '下班') {
+                                    const canEnd = endAt && now >= endAt;
+                                    btn.disabled = !canEnd;
+                                    btn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-red-600','hover:bg-red-700','text-white');
+                                    if (canEnd) {
+                                        btn.classList.add('bg-red-600','hover:bg-red-700','text-white');
+                                    } else {
+                                        btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
+                                    }
+                                }
+                                if (type === '上班') {
+                                    // 保持綠色並顯示遲到異常提示（超過上班時間1分鐘未打卡）
+                                    const alertEl = btn.closest('.flex.flex-col')?.querySelector('[data-alert="shift"]');
+                                    if (alertEl && startAt) {
+                                        const lateThreshold = new Date(startAt.getTime() + 1*60*1000);
+                                        if (now >= lateThreshold && (state.clockInStatus !== '上班')) {
+                                            alertEl.textContent = `超過 ${startHM} 未打上班卡，已顯示異常`;
+                                        } else {
+                                            alertEl.textContent = '';
+                                        }
+                                    }
+                                }
+                                // 自動下班：超過下班30分鐘仍未下班
+                                if (endAt) ensureAutoClockOutForShift(endAt);
+                            });
+                        } catch (e) { console.warn('applyShiftButtonEnable 失敗', e); }
+                    }
+                    let __autoClockTimerId = null;
+                    async function ensureAutoClockOutForShift(endAt) {
+                        try {
+                            const threshold = new Date(endAt.getTime() + 30*60*1000);
+                            const now = new Date();
+                            if (state.clockInStatus === '下班') return;
+                            if (now >= threshold) { await createAutoClockOutRecord(now); return; }
+                            if (__autoClockTimerId) return;
+                            const delay = threshold.getTime() - now.getTime();
+                            __autoClockTimerId = setTimeout(async ()=>{
+                                __autoClockTimerId = null;
+                                if (state.clockInStatus !== '下班') { await createAutoClockOutRecord(new Date()); }
+                            }, Math.max(0, delay));
+                        } catch (e) { console.warn('ensureAutoClockOutForShift 失敗', e); }
+                    }
+                    async function createAutoClockOutRecord(ts) {
+                        try {
+                            const user = window.__auth?.currentUser; if (!user) return;
+                            const db = window.__db; const { addDoc, collection, Timestamp, doc, updateDoc, serverTimestamp } = window.__fs;
+                            const loc = state.currentLocation || { lat: 0, lng: 0 };
+                            await addDoc(collection(db, 'clockInRecords'), {
+                                userId: user.uid,
+                                type: '自動下班',
+                                timestamp: Timestamp.fromDate(ts),
+                                location: loc,
+                                photoUrls: [],
+                                descriptions: [],
+                                isAutomatic: true
+                            });
+                            await updateDoc(doc(db, 'users', user.uid), {
+                                clockInStatus: '下班',
+                                status: '下班',
+                                lastUpdated: serverTimestamp()
+                            });
+                            try { showToast('已超過下班30分鐘，系統自動下班'); } catch(_){}
+                        } catch (e) {
+                            console.error('自動下班紀錄失敗', e);
+                            try { showToast('自動下班失敗：' + (e.message || ''), true); } catch(_){}
+                        }
+                    }
+                    function openLeaveModalWithDefaults(triggerBtn) {
+                        try {
+                            const isoStr = triggerBtn.dataset.date;
+                            const startHM = triggerBtn.dataset.start || '';
+                            const endHM = triggerBtn.dataset.end || '';
+                            const endDateIso = triggerBtn.dataset.enddateiso || isoStr;
+                            const startAt = toDateFromIsoHM(isoStr, startHM);
+                            const endAt = toDateFromIsoHM(endDateIso, endHM);
+                            const formatYMDH = (d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}-${String(d.getHours()).padStart(2,'0')}`;
+                            const defaultStart = startAt ? formatYMDH(startAt) : '';
+                            const defaultEnd = endAt ? formatYMDH(endAt) : '';
+                            const backdrop = document.createElement('div'); backdrop.className = 'modal-backdrop';
+                            const modal = document.createElement('div'); modal.className = 'modal-content'; modal.style.width = '360px';
+                            modal.innerHTML = `
+                              <div class="space-y-3">
+                                <div class="text-lg font-semibold">請假申請</div>
+                                <div class="space-y-2">
+                                  <label class="block text-sm font-medium">請假事由</label>
+                                  <select id="leave-type" class="w-full border border-gray-300 rounded-md p-2">
+                                    <option value="病假">病假</option>
+                                    <option value="事假">事假</option>
+                                    <option value="其他">其他(自定義)</option>
+                                  </select>
+                                  <input id="leave-other" class="w-full border border-gray-300 rounded-md p-2 hidden" placeholder="請輸入自定義事由">
+                                </div>
+                                <div class="space-y-2">
+                                  <label class="block text-sm font-medium">開始時間 (YYYY-MM-DD-HH)</label>
+                                  <input id="leave-start" class="w-full border border-gray-300 rounded-md p-2" value="${defaultStart}">
+                                </div>
+                                <div class="space-y-2">
+                                  <label class="block text-sm font-medium">結束時間 (YYYY-MM-DD-HH)</label>
+                                  <input id="leave-end" class="w-full border border-gray-300 rounded-md p-2" value="${defaultEnd}">
+                                </div>
+                                <div class="flex justify-end gap-2 pt-2">
+                                  <button id="leave-cancel" class="px-3 py-2 rounded bg-gray-200 text-gray-800">取消</button>
+                                  <button id="leave-submit" class="px-3 py-2 rounded bg-orange-500 text-white">送出</button>
+                                </div>
+                              </div>
+                            `;
+                            document.body.appendChild(backdrop); document.body.appendChild(modal);
+                            const typeEl = modal.querySelector('#leave-type'); const otherEl = modal.querySelector('#leave-other');
+                            typeEl.addEventListener('change', ()=> { otherEl.classList.toggle('hidden', typeEl.value !== '其他'); });
+                            const close = ()=> { try { document.body.removeChild(backdrop); document.body.removeChild(modal); } catch(_){} };
+                            modal.querySelector('#leave-cancel').addEventListener('click', close);
+                            backdrop.addEventListener('click', close);
+                            modal.querySelector('#leave-submit').addEventListener('click', async ()=>{
+                                try {
+                                    const user = window.__auth?.currentUser; if (!user) { showToast('請先登入', true); return; }
+                                    const startStr = modal.querySelector('#leave-start').value.trim();
+                                    const endStr = modal.querySelector('#leave-end').value.trim();
+                                    const [sy, sm, sd, sh] = startStr.split('-');
+                                    const [ey, em, ed, eh] = endStr.split('-');
+                                    const startD = new Date(parseInt(sy,10), parseInt(sm,10)-1, parseInt(sd,10), parseInt(sh,10)||0, 0, 0, 0);
+                                    const endD = new Date(parseInt(ey,10), parseInt(em,10)-1, parseInt(ed,10), parseInt(eh,10)||0, 0, 0, 0);
+                                    const reasonType = typeEl.value;
+                                    const reason = reasonType === '其他' ? (otherEl.value.trim() || '其他') : reasonType;
+                                    const db = window.__db; const { addDoc, collection, Timestamp } = window.__fs;
+                                    await addDoc(collection(db, 'leaves'), {
+                                        userId: user.uid,
+                                        reason,
+                                        reasonType,
+                                        startTime: Timestamp.fromDate(startD),
+                                        endTime: Timestamp.fromDate(endD),
+                                        status: 'pending',
+                                        createdAt: Timestamp.fromDate(new Date())
+                                    });
+                                    try { showToast('已送出請假申請'); } catch(_){}
+                                    close();
+                                } catch (e) {
+                                    console.error('請假申請失敗', e);
+                                    try { showToast('請假申請失敗：' + (e.message || ''), true); } catch(_){}
+                                }
+                            });
+                        } catch (e) {
+                            console.warn('openLeaveModalWithDefaults 失敗，改用既有函式', e);
+                            try { openTempLeaveModal(triggerBtn); } catch(_){}
+                        }
+                    }
                 };
 
                 const init = async () => {
