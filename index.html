@@ -13612,7 +13612,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 if (!panel) return;
                 const status = state.clockInStatus || '';
                 const setBtn = (btn, enabled, isStart) => {
-                    const base = 'my-clock-btn px-2 py-1 text-xs rounded';
+                    const base = 'my-clock-btn px-4 py-2 text-base rounded-md';
+                    // 保持與「請假」按鈕一致的尺寸
                     if (enabled) {
                         btn.className = base + (isStart ? ' bg-green-600 text-white hover:bg-green-700' : ' bg-red-600 text-white hover:bg-red-700');
                         btn.disabled = false;
@@ -13644,6 +13645,20 @@ const roleBorderClass = roleColorMap[titleKey] || null;
             // --- Google Maps ---
             function loadGoogleMapsScript() {
                 if (window.google && state.googleMapsLoaded) return;
+
+                // 全域攔截 Google Maps 依賴載入失敗的未處理拒絕，避免 console 噴錯
+                if (!window.__mapsUnhandledRejectionBound) {
+                    window.__mapsUnhandledRejectionBound = true;
+                    window.addEventListener('unhandledrejection', (event) => {
+                        const reason = event && event.reason;
+                        const msg = (reason && (reason.message || String(reason))) || '';
+                        if (typeof msg === 'string' && msg.includes('Could not load "util"')) {
+                            event.preventDefault();
+                            console.warn('Google Maps 依賴 util.js 未載入，已忽略。');
+                            try { showToast('地圖部分模組載入失敗，基本功能仍可使用'); } catch (_) {}
+                        }
+                    });
+                }
                 
                 window.initMap = () => { 
                     state.googleMapsLoaded = true; 
