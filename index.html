@@ -3666,18 +3666,18 @@
                         </div>
                         <div>
                             ${list.length===0 ? `<div class="text-gray-500 text-sm">本日無個人排班</div>` : ''}
-                            <div class="space-y-2">
+                            <div class="space-y-3">
                                 ${list.map(it=>`
-                                    <div class="flex items-center justify-between gap-2 p-2 rounded border bg-white">
-                                        <div class="flex items-center gap-2">
-                                            <span class="text-sm font-medium">${it.start || '—'} ~ ${it.end || '—'}</span>
-                                            ${(it.postName && it.postName !== '無') ? `<span class="text-xs text-gray-500">${it.postName}</span>` : ''}
-                                            ${(it.endDateIso && it.endDateIso !== iso) ? `<span class="text-[11px] px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">跨日至 ${it.endDateIso}</span>` : ''}
+                                    <div class="p-3 rounded border bg-white">
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-base font-semibold">${it.start || '—'} ~ ${it.end || '—'}</span>
+                                            ${(it.postName && it.postName !== '無') ? `<span class="text-sm text-gray-700 font-medium">${it.postName}</span>` : ''}
+                                            ${(it.endDateIso && it.endDateIso !== iso) ? `<span class="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">跨日至 ${it.endDateIso}</span>` : ''}
                                         </div>
-                                        <div class="ml-auto flex items-center gap-1 whitespace-nowrap">
-                                            <button class="my-clock-btn px-2 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-700" data-type="上班">上班</button>
-                                            <button class="my-clock-btn px-2 py-1 text-xs rounded bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" disabled>下班</button>
-                                            <button class="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600" data-date="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" onclick="openTempLeaveModal(this)">請假</button>
+                                        <div class="mt-3 flex items-center gap-2">
+                                            <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-green-600 text-white hover:bg-green-700" data-type="上班">上班</button>
+                                            <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" disabled>下班</button>
+                                            <button class="px-4 py-2 text-base bg-orange-500 text-white rounded-md hover:bg-orange-600" data-date="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" onclick="openTempLeaveModal(this)">請假</button>
                                         </div>
                                     </div>
                                 `).join('')}
