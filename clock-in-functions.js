@@ -522,6 +522,7 @@ function updateButtonStatus() {
     
     // 更新狀態顯示
     updateStatusDisplay();
+    try { updateMyScheduleButtons(); } catch (_) {}
 }
 
 // 啟用指定按鈕
@@ -801,13 +802,13 @@ function openTempLeaveModal(el) {
                 return;
             }
 
-            const { addDoc, collection, updateDoc, doc, serverTimestamp } = window.__fs;
+            const { addDoc, collection, updateDoc, doc, serverTimestamp, Timestamp } = window.__fs;
             await addDoc(collection(window.__db, 'leaves'), {
                 userId: user.uid,
                 userName: (state.currentUserData?.name || user?.displayName || user?.email || ''),
                 reason,
-                startTime: startDt.toISOString(),
-                endTime: endDt.toISOString(),
+                startTime: Timestamp.fromDate(startDt),
+                endTime: Timestamp.fromDate(endDt),
                 status: 'pending',
                 createdAt: serverTimestamp()
             });
