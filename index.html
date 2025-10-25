@@ -13117,7 +13117,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     video.muted = true;
                     video.srcObject = stream;
                     try { await Promise.resolve(video.play()); } catch (e) { console.warn("camera video.play() failed:", e); }
-                    document.getElementById('camera-loader').classList.add('hide');
+                    const camLoaderEl = document.getElementById('camera-loader');
+                    if (camLoaderEl && camLoaderEl.classList) { camLoaderEl.classList.add('hide'); }
                     lucide.createIcons();
                 };
 
@@ -13147,7 +13148,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
 
                 document.getElementById('switch-camera-btn').addEventListener('click', async () => {
                     stopCamera();
-                    document.getElementById('camera-loader').classList.remove('hide');
+                    const camLoaderEl2 = document.getElementById('camera-loader');
+                    if (camLoaderEl2 && camLoaderEl2.classList) { camLoaderEl2.classList.remove('hide'); }
                     currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
                     try {
                         const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode }, audio: false });
@@ -13155,7 +13157,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     } catch (error) {
                         console.error("切換相機失敗:", error);
                         showToast("切換相機失敗，請重試", true);
-                        document.getElementById('camera-loader').classList.add('hide');
+                        const camLoaderEl3 = document.getElementById('camera-loader');
+                        if (camLoaderEl3 && camLoaderEl3.classList) { camLoaderEl3.classList.add('hide'); }
                     }
                 });
 
