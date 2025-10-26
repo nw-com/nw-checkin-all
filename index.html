@@ -3719,6 +3719,7 @@
                         const startAt = toDateFromIsoHM(isoStr, startHM);
                         const endAt = toDateFromIsoHM(endDateIso, endHM);
                         const now = new Date();
+                        const status = state.clockInStatus;
                         const alertEl = btn.closest('.flex.flex-col')?.querySelector('[data-alert="shift"]');
                         const setAlert = (msg, colorClass='text-red-600') => {
                             if (!alertEl) return;
@@ -3728,21 +3729,48 @@
                         };
                         const clearAlert = () => { if (alertEl) { alertEl.textContent=''; alertEl.classList.remove('text-red-600','text-orange-600','text-green-600','text-gray-600'); } };
                         if (type === '上班') {
+                            // 已完成上班或當日已下班：不再允許上班打卡
+                            if (status === '上班' || status === '下班') {
+                                setAlert('已完成上班打卡', 'text-gray-600');
+                                return;
+                            }
                             if (startAt) {
                                 const earliest = new Date(startAt.getTime() - 30*60*1000);
                                 if (now < earliest) {
-                                    const tip = `表定上班 ${isoStr} ${startHM}；請於上班前30分鐘後開始打卡`;
-                                    setAlert(tip, 'text-orange-600');
+                                    setAlert('尚未到上班時間', 'text-gray-600');
                                     return;
+                                }
+                                const graceEnd = new Date(startAt.getTime() + 30*60*1000);
+                                if (now <= graceEnd) {
+                                    setAlert('已到可以上班打卡時間', 'text-green-600');
+                                } else {
+                                    setAlert('超過上班打卡時間', 'text-red-600');
                                 }
                             }
                             clearAlert();
                             openClockInModal('上班');
                         } else if (type === '下班') {
-                            if (endAt && now < endAt) {
-                                const tip = `目前未到下班時間（${endDateIso} ${endHM}）`;
-                                setAlert(tip, 'text-gray-600');
+                            // 已完成下班：不再允許下班打卡
+                            if (status === '下班') {
+                                setAlert('已完成下班打卡', 'text-gray-600');
                                 return;
+                            }
+                            if (endAt && now < endAt) {
+                                const earliestEnd = new Date(endAt.getTime() - 30*60*1000);
+                                if (now < earliestEnd) {
+                                    setAlert('未到下班打卡時間', 'text-gray-600');
+                                } else {
+                                    setAlert('已到可以下班打卡時間', 'text-green-600');
+                                }
+                                return;
+                            }
+                            if (endAt) {
+                                const endGraceEnd = new Date(endAt.getTime() + 30*60*1000);
+                                if (now <= endGraceEnd) {
+                                    setAlert('已到可以下班打卡時間', 'text-green-600');
+                                } else {
+                                    setAlert('超過下班打卡時間', 'text-red-600');
+                                }
                             }
                             clearAlert();
                             openClockInModal('下班');
@@ -3758,35 +3786,91 @@
                                 const endDateIso = btn.dataset.enddateiso || isoStr;
                                 const startAt = toDateFromIsoHM(isoStr, startHM);
                                 const endAt = toDateFromIsoHM(endDateIso, endHM);
-                                if (type === '下班') {
-                                    const canEnd = endAt && now >= endAt;
-                                    btn.disabled = false; // 允許點擊以顯示提示
-                                    btn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-red-600','hover:bg-red-700','text-white');
-                                    const alertEl = btn.closest('.flex.flex-col')?.querySelector('[data-alert="shift"]');
-                                    if (canEnd) {
-                                        btn.classList.add('bg-red-600','hover:bg-red-700','text-white');
-                                        if (alertEl) { alertEl.textContent = ''; alertEl.classList.remove('text-gray-600','text-red-600','text-orange-600','text-green-600'); }
+                                const status = state.clockInStatus;
+                                const container = btn.closest('.flex.flex-col');
+                                const alertEl = container?.querySelector('[data-alert="shift"]');
+                                const setAlert = (msg, colorClass='text-gray-600') => {
+                                    if (!alertEl) return;
+                                    alertEl.textContent = msg;
+                                    alertEl.classList.remove('text-gray-600','text-red-600','text-orange-600','text-green-600');
+                                    alertEl.classList.add(colorClass);
+                                };
+                                const clearAlert = () => { if (alertEl) { alertEl.textContent=''; alertEl.classList.remove('text-gray-600','text-red-600','text-orange-600','text-green-600'); } };
+
+                                // 請假按鈕：完成下班後停用改灰色，其餘維持橘色可用
+                                const leaveBtn = container?.querySelector('button[onclick*="openLeaveModalWithDefaults"]');
+                                if (leaveBtn) {
+                                    leaveBtn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-orange-500','hover:bg-orange-600','text-white');
+                                    if (status === '下班') {
+                                        leaveBtn.disabled = true;
+                                        leaveBtn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
                                     } else {
-                                        btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
-                                        if (alertEl) {
-                                            alertEl.textContent = `目前未到下班時間（${endDateIso} ${endHM}）`;
-                                            alertEl.classList.remove('text-red-600','text-orange-600','text-green-600');
-                                            alertEl.classList.add('text-gray-600');
-                                        }
+                                        leaveBtn.disabled = false;
+                                        leaveBtn.classList.add('bg-orange-500','hover:bg-orange-600','text-white');
                                     }
                                 }
+
                                 if (type === '上班') {
-                                    // 保持綠色並顯示遲到異常提示（超過上班時間1分鐘未打卡）
-                                    const alertEl = btn.closest('.flex.flex-col')?.querySelector('[data-alert="shift"]');
-                                    if (alertEl && startAt) {
-                                        const lateThreshold = new Date(startAt.getTime() + 1*60*1000);
-                                        if (now >= lateThreshold && (state.clockInStatus !== '上班')) {
-                                            alertEl.textContent = `超過 ${startHM} 未打上班卡，已顯示異常`;
+                                    const isDoneStart = (status === '上班' || status === '下班');
+                                    const earliest = startAt ? new Date(startAt.getTime() - 30*60*1000) : null;
+                                    const graceEnd = startAt ? new Date(startAt.getTime() + 30*60*1000) : null;
+                                    btn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-green-600','hover:bg-green-700','text-white');
+                                    if (isDoneStart) {
+                                        btn.disabled = true;
+                                        btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
+                                        // 已上班時改顯示下班提示
+                                        if (status === '上班' && endAt) {
+                                            const earliestEnd = new Date(endAt.getTime() - 30*60*1000);
+                                            const endGraceEnd = new Date(endAt.getTime() + 30*60*1000);
+                                            if (now < earliestEnd) setAlert('未到下班打卡時間', 'text-gray-600');
+                                            else if (now <= endGraceEnd) setAlert('已到可以下班打卡時間', 'text-green-600');
+                                            else setAlert('超過下班打卡時間', 'text-red-600');
+                                        } else if (status === '下班') {
+                                            clearAlert();
+                                        }
+                                    } else {
+                                        if (startAt && earliest && now < earliest) {
+                                            btn.disabled = true;
+                                            btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
+                                            setAlert('尚未到上班時間','text-gray-600');
                                         } else {
-                                            alertEl.textContent = '';
+                                            btn.disabled = false;
+                                            btn.classList.add('bg-green-600','hover:bg-green-700','text-white');
+                                            if (startAt && graceEnd) {
+                                                if (now <= graceEnd) setAlert('已到可以上班打卡時間','text-green-600');
+                                                else setAlert('超過上班打卡時間','text-red-600');
+                                            }
                                         }
                                     }
                                 }
+
+                                if (type === '下班') {
+                                    btn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-red-600','hover:bg-red-700','text-white');
+                                    if (status === '下班') {
+                                        btn.disabled = true;
+                                        btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
+                                        clearAlert();
+                                    } else {
+                                        const canEnd = endAt && now >= endAt;
+                                        if (canEnd) {
+                                            btn.disabled = false;
+                                            btn.classList.add('bg-red-600','hover:bg-red-700','text-white');
+                                            const endGraceEnd = new Date(endAt.getTime() + 30*60*1000);
+                                            if (now <= endGraceEnd) setAlert('已到可以下班打卡時間','text-green-600');
+                                            else setAlert('超過下班打卡時間','text-red-600');
+                                        } else {
+                                            btn.disabled = true;
+                                            btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
+                                            const earliestEnd = endAt ? new Date(endAt.getTime() - 30*60*1000) : null;
+                                            if (endAt && earliestEnd && now < earliestEnd) {
+                                                setAlert('未到下班打卡時間','text-gray-600');
+                                            } else {
+                                                setAlert('未到下班打卡時間','text-gray-600');
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // 自動下班：超過下班30分鐘仍未下班
                                 if (endAt) ensureAutoClockOutForShift(endAt);
                             });
