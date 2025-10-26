@@ -3661,6 +3661,10 @@
                     if (!panel) return;
                     const iso = pageState.selectedDayIso || fmtYMD(new Date()); const { Timestamp } = window.__fs || {};
                     const list = pageState.daysMap[iso] || [];
+                    function deriveShiftId(it, isoStr) {
+                        const idBase = [isoStr || '', it.endDateIso || isoStr || '', it.postName || '無', it.start || '', it.end || ''].join('|');
+                        return (it.id || it._id || idBase).replace(/\s+/g, '');
+                    }
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
                             <div class="font-semibold">${iso} 的個人班表</div>
@@ -3669,7 +3673,7 @@
                             ${list.length===0 ? `<div class="text-gray-500 text-sm">本日無個人排班</div>` : ''}
                             <div class="space-y-3">
                                 ${list.map(it=>`
-                                    <div class="p-3 rounded border bg-white">
+                                    <div class="p-3 rounded border bg-white" data-shiftid="${deriveShiftId(it, iso)}">
                                         <div class="flex items-center gap-3">
                                             <span class="text-base font-semibold">${it.start || '—'} ~ ${it.end || '—'}</span>
                                             ${(it.postName && it.postName !== '無') ? `<span class="text-sm text-gray-700 font-medium">${it.postName}</span>` : ''}
@@ -3677,9 +3681,9 @@
                                         </div>
                                         <div class="mt-3 flex flex-col gap-2">
                                             <div class="flex items-center gap-2">
-                                                <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-green-600 text-white hover:bg-green-700" data-type="上班" data-iso="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}">上班</button>
-                                                <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" data-iso="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}">下班</button>
-                                                <button class="px-4 py-2 text-base bg-orange-500 text-white rounded-md hover:bg-orange-600" data-date="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" onclick="openLeaveModalWithDefaults(this)">請假</button>
+                                                <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-green-600 text-white hover:bg-green-700" data-type="上班" data-iso="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" data-shiftid="${deriveShiftId(it, iso)}">上班</button>
+                                                <button class="my-clock-btn px-4 py-2 text-base rounded-md bg-gray-300 text-gray-500 cursor-not-allowed" data-type="下班" data-iso="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" data-shiftid="${deriveShiftId(it, iso)}">下班</button>
+                                                <button class="px-4 py-2 text-base bg-orange-500 text-white rounded-md hover:bg-orange-600" data-date="${iso}" data-start="${it.start || ''}" data-end="${it.end || ''}" data-enddateiso="${it.endDateIso || ''}" data-shiftid="${deriveShiftId(it, iso)}" onclick="openLeaveModalWithDefaults(this)">請假</button>
                                             </div>
                                             <div class="text-sm" data-alert="shift"></div>
                                         </div>
@@ -3692,12 +3696,61 @@
                         btn.addEventListener('click', ()=> handleMyShiftButtonClick(btn));
                     });
                     let __autoClockTimerId = null;
-                    applyShiftButtonEnable(panel, iso, list);
-                    // 每分鐘動態刷新提示與按鈕狀態
+                    // 從後端紀錄推斷各班表狀態並套用 UI
+                    const __syncUiShiftStatusFromBackend = async () => {
+                        try {
+                            const user = window.__auth?.currentUser; const db = window.__db; const fs = window.__fs || {};
+                            const { collection, query, where, orderBy, getDocs, Timestamp } = fs || {};
+                            if (!user || !db || !collection || !query || !where || !getDocs || !Timestamp) return;
+                            let minStart = null, maxEnd = null;
+                            (list || []).forEach(it => {
+                                const s = toDateFromIsoHM(iso, it.start || '');
+                                const e = toDateFromIsoHM(it.endDateIso || iso, it.end || '');
+                                if (s && (!minStart || s < minStart)) minStart = s;
+                                if (e && (!maxEnd || e > maxEnd)) maxEnd = e;
+                            });
+                            const windowStart = new Date((minStart || new Date(`${iso}T00:00:00`)).getTime() - 12*60*60*1000);
+                            const windowEnd = new Date(((maxEnd || new Date(`${iso}T23:59:59.999`)).getTime()) + 12*60*60*1000);
+                            const q = query(
+                                collection(db, 'clockInRecords'),
+                                where('userId','==', user.uid),
+                                where('timestamp','>=', Timestamp.fromDate(windowStart)),
+                                where('timestamp','<=', Timestamp.fromDate(windowEnd)),
+                                orderBy('timestamp','asc')
+                            );
+                            const snap = await getDocs(q);
+                            const records = snap.docs.map(d => d.data());
+                            const statusMap = {};
+                            (list || []).forEach(it => {
+                                const shiftId = deriveShiftId(it, iso);
+                                const startAt = toDateFromIsoHM(iso, it.start || '');
+                                const endAt = toDateFromIsoHM(it.endDateIso || iso, it.end || '');
+                                const startEarliest = startAt ? new Date(startAt.getTime() - 30*60*1000) : null;
+                                const startLatest = endAt ? new Date(endAt.getTime() + 30*60*1000) : (startAt ? new Date(startAt.getTime() + 12*60*60*1000) : null);
+                                const endEarliest = endAt ? endAt : null;
+                                const endLatest = endAt ? new Date(endAt.getTime() + 30*60*1000) : null;
+                                let started = false, ended = false;
+                                for (const r of records) {
+                                    const rt = r?.timestamp?.toDate ? r.timestamp.toDate() : null;
+                                    if (!rt) continue;
+                                    if (!started && startEarliest && startLatest && rt >= startEarliest && rt <= startLatest && r.type === '上班') { started = true; }
+                                    if (!ended && endEarliest && rt >= endEarliest && (!endLatest || rt <= endLatest) && (r.type === '下班' || r.type === '自動下班')) { ended = true; }
+                                    if (started && ended) break;
+                                }
+                                statusMap[shiftId] = { started, ended };
+                            });
+                            state.uiShiftStatus = statusMap;
+                        } catch (e) { console.warn('同步班表狀態失敗', e); }
+                    };
+                    __syncUiShiftStatusFromBackend().then(()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} })
+                        .catch(()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} });
+                    // 每分鐘動態刷新提示與按鈕狀態（含後端紀錄同步）
                     try {
                         if (window.__shiftRefreshIntervalId) { clearInterval(window.__shiftRefreshIntervalId); }
                         window.__shiftRefreshIntervalId = setInterval(() => {
-                            try { applyShiftButtonEnable(panel, iso, list); } catch (_) {}
+                            try {
+                                __syncUiShiftStatusFromBackend().then(()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} });
+                            } catch (_) {}
                         }, 60 * 1000);
                     } catch (_) {}
                     try { updateMyScheduleButtons(); } catch (_) {}
@@ -3716,10 +3769,12 @@
                         const startHM = btn.dataset.start || '';
                         const endHM = btn.dataset.end || '';
                         const endDateIso = btn.dataset.enddateiso || isoStr;
+                        const shiftId = btn.dataset.shiftid || `${isoStr}|${endDateIso}|${startHM}|${endHM}`;
+                        state.uiShiftStatus = state.uiShiftStatus || {};
+                        const uiStatus = state.uiShiftStatus[shiftId] || { started: false, ended: false };
                         const startAt = toDateFromIsoHM(isoStr, startHM);
                         const endAt = toDateFromIsoHM(endDateIso, endHM);
                         const now = new Date();
-                        const status = state.clockInStatus;
                         const alertEl = btn.closest('.flex.flex-col')?.querySelector('[data-alert="shift"]');
                         const setAlert = (msg, colorClass='text-red-600') => {
                             if (!alertEl) return;
@@ -3729,8 +3784,7 @@
                         };
                         const clearAlert = () => { if (alertEl) { alertEl.textContent=''; alertEl.classList.remove('text-red-600','text-orange-600','text-green-600','text-gray-600'); } };
                         if (type === '上班') {
-                            // 已完成上班或當日已下班：不再允許上班打卡
-                            if (status === '上班' || status === '下班') {
+                            if (uiStatus.started || uiStatus.ended) {
                                 setAlert('已完成上班打卡', 'text-gray-600');
                                 return;
                             }
@@ -3749,23 +3803,24 @@
                             }
                             clearAlert();
                             openClockInModal('上班');
+                            // 設定該班表已上班（依需求不顧是否取消）
+                            state.uiShiftStatus[shiftId] = { started: true, ended: false };
                         } else if (type === '下班') {
-                            // 已完成下班：不再允許下班打卡
-                            if (status === '下班') {
-                                setAlert('已完成下班打卡', 'text-gray-600');
+                            if (!uiStatus.started) {
+                                // 尚未上班，不顯示下班提示
+                                clearAlert();
                                 return;
                             }
-                            if (endAt && now < endAt) {
-                                const earliestEnd = new Date(endAt.getTime() - 30*60*1000);
-                                if (now < earliestEnd) {
-                                    setAlert('未到下班打卡時間', 'text-gray-600');
-                                } else {
-                                    setAlert('已到可以下班打卡時間', 'text-green-600');
-                                }
+                            if (uiStatus.ended) {
+                                setAlert('已完成下班打卡', 'text-gray-600');
                                 return;
                             }
                             if (endAt) {
                                 const endGraceEnd = new Date(endAt.getTime() + 30*60*1000);
+                                if (now < endAt) {
+                                    setAlert('未到下班打卡時間', 'text-gray-600');
+                                    return;
+                                }
                                 if (now <= endGraceEnd) {
                                     setAlert('已到可以下班打卡時間', 'text-green-600');
                                 } else {
@@ -3774,19 +3829,22 @@
                             }
                             clearAlert();
                             openClockInModal('下班');
+                            state.uiShiftStatus[shiftId] = { started: true, ended: true };
                         }
                     }
                     function applyShiftButtonEnable(panelEl, isoStr, shifts) {
                         try {
                             const now = new Date();
+                            state.uiShiftStatus = state.uiShiftStatus || {};
                             panelEl.querySelectorAll('.my-clock-btn').forEach(btn => {
                                 const type = btn.dataset.type;
                                 const startHM = btn.dataset.start || '';
                                 const endHM = btn.dataset.end || '';
                                 const endDateIso = btn.dataset.enddateiso || isoStr;
+                                const shiftId = btn.dataset.shiftid || `${isoStr}|${endDateIso}|${startHM}|${endHM}`;
                                 const startAt = toDateFromIsoHM(isoStr, startHM);
                                 const endAt = toDateFromIsoHM(endDateIso, endHM);
-                                const status = state.clockInStatus;
+                                const uiStatus = state.uiShiftStatus[shiftId] || { started: false, ended: false };
                                 const container = btn.closest('.flex.flex-col');
                                 const alertEl = container?.querySelector('[data-alert="shift"]');
                                 const setAlert = (msg, colorClass='text-gray-600') => {
@@ -3797,11 +3855,11 @@
                                 };
                                 const clearAlert = () => { if (alertEl) { alertEl.textContent=''; alertEl.classList.remove('text-gray-600','text-red-600','text-orange-600','text-green-600'); } };
 
-                                // 請假按鈕：完成下班後停用改灰色，其餘維持橘色可用
+                                // 請假按鈕：完成該班表下班後停用改灰色，其餘維持橘色可用
                                 const leaveBtn = container?.querySelector('button[onclick*="openLeaveModalWithDefaults"]');
                                 if (leaveBtn) {
                                     leaveBtn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-orange-500','hover:bg-orange-600','text-white');
-                                    if (status === '下班') {
+                                    if (uiStatus.ended) {
                                         leaveBtn.disabled = true;
                                         leaveBtn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
                                     } else {
@@ -3811,21 +3869,19 @@
                                 }
 
                                 if (type === '上班') {
-                                    const isDoneStart = (status === '上班' || status === '下班');
                                     const earliest = startAt ? new Date(startAt.getTime() - 30*60*1000) : null;
                                     const graceEnd = startAt ? new Date(startAt.getTime() + 30*60*1000) : null;
                                     btn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-green-600','hover:bg-green-700','text-white');
-                                    if (isDoneStart) {
+                                    if (uiStatus.started || uiStatus.ended) {
                                         btn.disabled = true;
                                         btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
-                                        // 已上班時改顯示下班提示
-                                        if (status === '上班' && endAt) {
-                                            const earliestEnd = new Date(endAt.getTime() - 30*60*1000);
+                                        // 上班完成後的提示改看下班時間窗
+                                        if (uiStatus.started && endAt) {
                                             const endGraceEnd = new Date(endAt.getTime() + 30*60*1000);
-                                            if (now < earliestEnd) setAlert('未到下班打卡時間', 'text-gray-600');
-                                            else if (now <= endGraceEnd) setAlert('已到可以下班打卡時間', 'text-green-600');
-                                            else setAlert('超過下班打卡時間', 'text-red-600');
-                                        } else if (status === '下班') {
+                                            if (now < endAt) clearAlert();
+                                            else if (now <= endGraceEnd) setAlert('已到可以下班打卡時間','text-green-600');
+                                            else setAlert('超過下班打卡時間','text-red-600');
+                                        } else {
                                             clearAlert();
                                         }
                                     } else {
@@ -3846,13 +3902,17 @@
 
                                 if (type === '下班') {
                                     btn.classList.remove('bg-gray-300','text-gray-500','cursor-not-allowed','bg-red-600','hover:bg-red-700','text-white');
-                                    if (status === '下班') {
+                                    if (!uiStatus.started) {
+                                        // 尚未上班：保持灰色，不顯示下班提示
+                                        btn.disabled = true;
+                                        btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
+                                        clearAlert();
+                                    } else if (uiStatus.ended) {
                                         btn.disabled = true;
                                         btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
                                         clearAlert();
                                     } else {
-                                        const canEnd = endAt && now >= endAt;
-                                        if (canEnd) {
+                                        if (endAt && now >= endAt) {
                                             btn.disabled = false;
                                             btn.classList.add('bg-red-600','hover:bg-red-700','text-white');
                                             const endGraceEnd = new Date(endAt.getTime() + 30*60*1000);
@@ -3861,17 +3921,12 @@
                                         } else {
                                             btn.disabled = true;
                                             btn.classList.add('bg-gray-300','text-gray-500','cursor-not-allowed');
-                                            const earliestEnd = endAt ? new Date(endAt.getTime() - 30*60*1000) : null;
-                                            if (endAt && earliestEnd && now < earliestEnd) {
-                                                setAlert('未到下班打卡時間','text-gray-600');
-                                            } else {
-                                                setAlert('未到下班打卡時間','text-gray-600');
-                                            }
+                                            if (endAt) setAlert('未到下班打卡時間','text-gray-600');
                                         }
                                     }
                                 }
 
-                                // 自動下班：超過下班30分鐘仍未下班
+                                // 自動下班：超過下班30分鐘仍未下班（沿用原邏輯）
                                 if (endAt) ensureAutoClockOutForShift(endAt);
                             });
                         } catch (e) { console.warn('applyShiftButtonEnable 失敗', e); }
