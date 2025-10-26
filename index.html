@@ -1553,6 +1553,7 @@
                             }
                         }
                     }
+                    window.openLeaveModalWithDefaults = openLeaveModalWithDefaults;
                 } catch (_) {}
                 mainContent.innerHTML = `<div class="flex justify-center items-center h-full"><div class="loader"></div></div>`;
                 const role = state.currentUserData?.role || '';
@@ -3690,6 +3691,7 @@
                     panel.querySelectorAll('.my-clock-btn').forEach(btn=>{
                         btn.addEventListener('click', ()=> handleMyShiftButtonClick(btn));
                     });
+                    let __autoClockTimerId = null;
                     applyShiftButtonEnable(panel, iso, list);
                     try { updateMyScheduleButtons(); } catch (_) {}
 
@@ -3766,7 +3768,6 @@
                             });
                         } catch (e) { console.warn('applyShiftButtonEnable 失敗', e); }
                     }
-                    let __autoClockTimerId = null;
                     async function ensureAutoClockOutForShift(endAt) {
                         try {
                             const threshold = new Date(endAt.getTime() + 30*60*1000);
@@ -3884,6 +3885,7 @@
                             try { openTempLeaveModal(triggerBtn); } catch(_){}
                         }
                     }
+                    window.openLeaveModalWithDefaults = openLeaveModalWithDefaults;
                 };
 
                 const init = async () => {
