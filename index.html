@@ -2684,7 +2684,40 @@
                                 const ymKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
                                 try {
                                     const uSnap = await getDoc(doc(db, 'users', user.uid, 'workdays', ymKey));
-                                    if (uSnap.exists()) { const ud = uSnap.data(); return ud?.days || {}; }
+                                    if (uSnap.exists()) {
+                                        const ud = uSnap.data() || {};
+                                        // 支援多種結構：object 或 array
+                                        // 1) { days: { 'YYYY-MM-DD': {start:'HH:mm', end:'HH:mm', ...}, ... } }
+                                        if (ud.days && typeof ud.days === 'object' && !Array.isArray(ud.days)) {
+                                            return ud.days;
+                                        }
+                                        // 2) { workdays: { 'YYYY-MM-DD': {...} } }
+                                        if (ud.workdays && typeof ud.workdays === 'object' && !Array.isArray(ud.workdays)) {
+                                            return ud.workdays;
+                                        }
+                                        // 3) { days: [ {dateIso:'YYYY-MM-DD', ...}, ... ] }
+                                        if (Array.isArray(ud.days)) {
+                                            const map = {};
+                                            for (const it of ud.days) {
+                                                const ymd = it?.dateIso || it?.date || it?.ymd;
+                                                if (ymd) map[ymd] = it;
+                                            }
+                                            if (Object.keys(map).length) return map;
+                                        }
+                                        // 4) { workdays: [ {dateIso:'YYYY-MM-DD', ...}, ... ] }
+                                        if (Array.isArray(ud.workdays)) {
+                                            const map = {};
+                                            for (const it of ud.workdays) {
+                                                const ymd = it?.dateIso || it?.date || it?.ymd;
+                                                if (ymd) map[ymd] = it;
+                                            }
+                                            if (Object.keys(map).length) return map;
+                                        }
+                                        // 5) { map: { 'YYYY-MM-DD': {...} } }
+                                        if (ud.map && typeof ud.map === 'object' && !Array.isArray(ud.map)) {
+                                            return ud.map;
+                                        }
+                                    }
                                 } catch (_) {}
                                 return {};
                             };
