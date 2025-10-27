@@ -3516,7 +3516,9 @@
                     monthDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
                     selectedDayIso: null,
                     daysMap: {}, // { iso: [{ start, end, postName }] }
-                    postNameMap: {}
+                    postNameMap: {},
+                    // 本月各日打卡紀錄（供月曆底色判斷）
+                    recordsByDay: {}
                 };
 
                 const fmtYMD = (d) => {
@@ -3612,6 +3614,27 @@
                             }
                         });
                     } catch (e) { console.warn('讀取個人排班失敗', e); }
+                    // 讀取本月打卡紀錄（僅本人），供月曆底色判斷
+                    try {
+                        pageState.recordsByDay = {};
+                        const fs = window.__fs || {};
+                        const { collection: c2, getDocs: g2, query: q2, where: w2 } = fs;
+                        if (c2 && g2 && q2 && w2) {
+                            const snap = await g2(q2(c2(window.__db, 'clockInRecords'), w2('userId','==', userId)));
+                            const y2 = pageState.monthDate.getFullYear();
+                            const m0 = pageState.monthDate.getMonth();
+                            const start = new Date(y2, m0, 1, 0,0,0,0);
+                            const end = new Date(y2, m0+1, 0, 23,59,59,999);
+                            snap.docs.forEach(docSnap => {
+                                const r = { id: docSnap.id, ...docSnap.data() };
+                                const ts = r.timestamp?.toDate?.() || (r.timestamp ? new Date(r.timestamp) : null);
+                                if (!ts || ts < start || ts > end) return;
+                                const iso = fmtYMD(ts);
+                                if (!pageState.recordsByDay[iso]) pageState.recordsByDay[iso] = [];
+                                pageState.recordsByDay[iso].push(r);
+                            });
+                        }
+                    } catch (e) { console.warn('讀取本月打卡紀錄失敗（我的班表月曆）', e); }
                     const todayIso = fmtYMD(new Date());
                     const dToday = new Date(todayIso);
                     const sameMonth = dToday.getMonth() === pageState.monthDate.getMonth() && dToday.getFullYear() === pageState.monthDate.getFullYear();
@@ -3629,6 +3652,7 @@
                     const prevMonthDays = new Date(year, month, 0).getDate();
                     const cells = [];
                     const selectedIso = pageState.selectedDayIso || fmtYMD(new Date());
+                    const todayIsoAll = fmtYMD(new Date());
                     for (let i=startWeekday-1; i>=0; i--) { const date = new Date(year, month-1, prevMonthDays - i); cells.push({ date, inMonth:false }); }
                     for (let d=1; d<=daysInMonth; d++) { cells.push({ date: new Date(year, month, d), inMonth:true }); }
                     const totalCells = Math.ceil(cells.length/7)*7;
@@ -3637,20 +3661,33 @@
                     grid.innerHTML = cells.map(cell => {
                         const iso = fmtYMD(cell.date);
                         const myList = pageState.daysMap[iso] || [];
-                        const cov = coverageMinutes(myList);
-                        const bgStyle = (()=>{
+                        const hasSchedule = cell.inMonth && myList.length > 0;
+                        const records = pageState.recordsByDay[iso] || [];
+                        const isAbnormalDay = cell.inMonth && records.some(r => {
+                            try {
+                                const info = computeRecordAbnormal(r, state.currentUserData?.serviceCommunities || []);
+                                return info && info.isAbnormal;
+                            } catch (_) { return false; }
+                        });
+                        const isTodayCell = iso === todayIsoAll;
+                        const isEndType = (r) => {
+                            const t = r?.type || '';
+                            return t === '下班' || (typeof t === 'string' && t.includes('下班')) || r?.auto === true || r?.autoClockOut === true || r?.isAutomatic === true || t === '自動下班';
+                        };
+                        const todayCompleted = isTodayCell && records.some(r => (r.type === '上班')) && records.some(isEndType);
+                        const bgStyle = (() => {
                             if (!cell.inMonth) return '';
-                            if (!cov) return '';
-                            if (cov >= 18*60) return 'background-color:#A7F3D0;';
-                            if (cov >= 12*60) return 'background-color:#D1FAE5;';
-                            if (cov >= 6*60) return 'background-color:#FEF3C7;';
-                            return 'background-color:#FFF7ED;';
+                            if (isAbnormalDay) return 'background-color:#FEE2E2;'; // 淺紅
+                            if (todayCompleted) return 'background-color:#D1FAE5;'; // 淺綠
+                            if (hasSchedule) return 'background-color:#FEF3C7;'; // 淺黃
+                            return '';
                         })();
                         const isSelected = iso === selectedIso;
-                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${isSelected? 'border-2 border-red-500':''} hover:bg-red-50 rounded p-2 text-xs h-[30px] flex flex-col ${cell.inMonth?'bg-white':''}`;
+                        const borderCls = isSelected ? 'border-2 border-green-500' : (isTodayCell ? 'border-2 border-red-500' : '');
+                        const cls = `${cell.inMonth? '':'bg-gray-50 text-gray-400'} ${borderCls} rounded p-2 text-xs h-[30px] flex flex-col ${cell.inMonth?'bg-white':''}`;
                         return `<div class="${cls}" style="${bgStyle}" data-iso="${iso}"><div class="font-semibold">${cell.date.getDate()}</div></div>`;
                     }).join('');
-                    grid.querySelectorAll('[data-iso]').forEach(el=>{ el.addEventListener('click', ()=>{ pageState.selectedDayIso = el.getAttribute('data-iso'); renderDayPanel(); }); });
+                    grid.querySelectorAll('[data-iso]').forEach(el=>{ el.addEventListener('click', ()=>{ pageState.selectedDayIso = el.getAttribute('data-iso'); renderDayPanel(); renderCalendar(); }); });
                 };
 
                 const renderDayPanel = () => {
@@ -5297,34 +5334,40 @@
 
                         // 指示標註：依班表與請假來判斷「排休」，不再以週末或使用者工作日設定判斷。
                         // 規則：當日未排班、未請假、亦非值班（特殊勤務/週五值班名單），標示「排休」。
+                        // 額外規則：備註僅在「當日之前（含當日）」顯示，明天以後不顯示。
                         let indicators = [];
+                        const nowForReport = new Date();
+                        const todayEndForReport = new Date(nowForReport.getFullYear(), nowForReport.getMonth(), nowForReport.getDate(), 23, 59, 59, 999);
+                        const isFutureDayForNotes = dayStart > todayEndForReport;
                         const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
-                        // 值班判定（特殊勤務或在週五值班名單內）
-                        const isDutyBySpecial = duties.some(di => {
-                            const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
-                            const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
-                            if (!s || !e) return false;
-                            return s < nextDay && e > dayStart;
-                        });
-                        const myName = state.currentUserData?.name || state.currentUser.displayName || state.currentUser.email || '';
-                        const rosterNamesForDay = fridayDutyRoster[dateLabel] || [];
-                        const normalizeName = (s) => (s || '').trim();
-                        const isRosterDuty = Array.isArray(rosterNamesForDay) && rosterNamesForDay.some(n => normalizeName(n) === normalizeName(myName));
-                        const isDuty = isDutyBySpecial || isRosterDuty;
-                        const scheduled = hasScheduleForUser(dateLabel);
-                        const hasAnyRecord = records.length > 0;
-                        // 請假日（時間範圍相交）
-                        const isLeave = leaves.some(l => {
-                            const s = l.startTime?.toDate?.() || (l.startTime ? new Date(l.startTime) : null);
-                            const e = l.endTime?.toDate?.() || (l.endTime ? new Date(l.endTime) : null);
-                            if (!s || !e) return false;
-                            return s < nextDay && e > dayStart; // overlap
-                        });
-                        if (!scheduled && !isLeave && !isDuty && !hasAnyRecord) {
-                            indicators.push('排休');
-                        }
-                        if (isLeave) {
-                            indicators.push('請假');
+                        if (!isFutureDayForNotes) {
+                            // 值班判定（特殊勤務或在週五值班名單內）
+                            const isDutyBySpecial = duties.some(di => {
+                                const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
+                                const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
+                                if (!s || !e) return false;
+                                return s < nextDay && e > dayStart;
+                            });
+                            const myName = state.currentUserData?.name || state.currentUser.displayName || state.currentUser.email || '';
+                            const rosterNamesForDay = fridayDutyRoster[dateLabel] || [];
+                            const normalizeName = (s) => (s || '').trim();
+                            const isRosterDuty = Array.isArray(rosterNamesForDay) && rosterNamesForDay.some(n => normalizeName(n) === normalizeName(myName));
+                            const isDuty = isDutyBySpecial || isRosterDuty;
+                            const scheduled = hasScheduleForUser(dateLabel);
+                            const hasAnyRecord = records.length > 0;
+                            // 請假日（時間範圍相交）
+                            const isLeave = leaves.some(l => {
+                                const s = l.startTime?.toDate?.() || (l.startTime ? new Date(l.startTime) : null);
+                                const e = l.endTime?.toDate?.() || (l.endTime ? new Date(l.endTime) : null);
+                                if (!s || !e) return false;
+                                return s < nextDay && e > dayStart; // overlap
+                            });
+                            if (!scheduled && !isLeave && !isDuty && !hasAnyRecord) {
+                                indicators.push('排休');
+                            }
+                            if (isLeave) {
+                                indicators.push('請假');
+                            }
                         }
                         
 
