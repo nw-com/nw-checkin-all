@@ -5179,6 +5179,43 @@
                         }
                     } catch (e) { console.warn('讀取值班名單失敗', e); }
 
+                    // 讀取本月排班資料（用於判斷是否為排班日，避免誤標「排休」）
+                    let schedulesByDate = {};
+                    try {
+                        const sq = query(
+                            collection(db, 'postSchedules'),
+                            where('dateTS', '>=', startTS),
+                            where('dateTS', '<=', endTS)
+                        );
+                        const ss = await getDocs(sq);
+                        ss.forEach(doc => {
+                            const data = doc.data();
+                            const di = data.dateIso;
+                            if (!di) return;
+                            if (!schedulesByDate[di]) schedulesByDate[di] = [];
+                            schedulesByDate[di].push(data);
+                        });
+                    } catch(e) { console.warn('讀取排班資料失敗', e); }
+
+                    // 工具：判斷某日是否為本人排班或全體排班日
+                    const hasScheduleForUser = (dateIso) => {
+                        const docs = schedulesByDate[dateIso];
+                        if (!Array.isArray(docs) || docs.length === 0) return false;
+                        const uid = state.currentUser?.uid || '';
+                        const myName = (state.currentUserData?.name || state.currentUser?.displayName || state.currentUser?.email || '').trim();
+                        const norm = (s) => (s || '').trim();
+                        return docs.some(sd => {
+                            if (sd?.isScheduledDay === true) return true; // 該日整體排班
+                            const shifts = Array.isArray(sd?.shifts) ? sd.shifts : [];
+                            return shifts.some(s => {
+                                if (!s) return false;
+                                if (typeof s === 'string') return norm(s) === myName;
+                                if (typeof s === 'object') return (norm(s.name) === myName) || (norm(s.assigneeName) === myName) || (s.userId === uid) || (s.assigneeId === uid);
+                                return false;
+                            });
+                        });
+                    };
+
                     // 準備列印容器
                     const old = document.getElementById('monthly-report-container');
                     if (old) old.remove();
@@ -5242,7 +5279,11 @@
 
                         // 上班狀態/時間：優先「上班」，若無則取第一個「外出」
                         let startRecord = records.find(r => (r.type === '上班')) || records.find(r => (r.type === '外出')) || null;
-                        let endRecord = records.slice().reverse().find(r => (r.type === '下班')) || null;
+                        const isEndType = (r) => {
+                            const t = r?.type || '';
+                            return t === '下班' || (typeof t === 'string' && t.includes('下班')) || r?.auto === true || r?.autoClockOut === true || r?.isAuto === true;
+                        };
+                        let endRecord = records.slice().reverse().find(isEndType) || null;
                         const fmt = (dt) => dt ? `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}` : '';
                         const startTime = startRecord ? (startRecord.timestamp?.toDate?.() || new Date(startRecord.timestamp)) : null;
                         const endTime = endRecord ? (endRecord.timestamp?.toDate?.() || new Date(endRecord.timestamp)) : null;
@@ -5281,8 +5322,10 @@
                                 const normalize = (s) => (s || '').trim();
                                 const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
                                 const isDuty = isDutyBySpecial || isRosterDuty;
-                                // 非值班且不在使用者自訂工作日，才標示假日
-                                if (!isDuty && !set.has(d)) indicators.push('排休');
+                                const hasAnyRecord = records.length > 0;
+                                const scheduled = hasScheduleForUser(dateLabel);
+                                // 非值班、非排班、當日無打卡，且不在自訂工作日，才標示假日
+                                if (!isDuty && !scheduled && !hasAnyRecord && !set.has(d)) indicators.push('排休');
                             } else {
                                 // 後備判斷：週末為假日
                                 // 若為值班則不標示假日
@@ -5298,7 +5341,9 @@
                                 const normalize = (s) => (s || '').trim();
                                 const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
                                 const isDuty = isDutyBySpecial || isRosterDuty;
-                                if (!isDuty && (w === 6 || w === 0)) indicators.push('排休');
+                                const hasAnyRecord = records.length > 0;
+                                const scheduled = hasScheduleForUser(dateLabel);
+                                if (!isDuty && !scheduled && !hasAnyRecord && (w === 6 || w === 0)) indicators.push('排休');
                             }
                         } catch(e) {
                             // 讀取失敗，維持週末為假日
@@ -5314,7 +5359,9 @@
                             const normalize = (s) => (s || '').trim();
                             const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
                             const isDuty = isDutyBySpecial || isRosterDuty;
-                            if (!isDuty && (w === 6 || w === 0)) indicators.push('排休');
+                            const hasAnyRecord = records.length > 0;
+                            const scheduled = hasScheduleForUser(dateLabel);
+                            if (!isDuty && !scheduled && !hasAnyRecord && (w === 6 || w === 0)) indicators.push('排休');
                         }
                         // 請假日（時間範圍相交）
                         const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
