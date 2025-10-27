@@ -858,13 +858,10 @@
                 const u = user || state.currentUserData || {};
                 const role = u.role || '';
                 const managerial = new Set(['admin','hr','manager','junior_manager']);
-                const workerRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
+                const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities.filter(Boolean) : [];
+                // 管理角色一律允許；其餘角色只要服務社區數 ≥ 2 亦允許
                 if (managerial.has(role)) return true;
-                if (workerRoles.has(role)) {
-                    const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities.filter(Boolean) : [];
-                    return ids.length >= 2;
-                }
-                return false;
+                return ids.length >= 2;
             }
 
             function shouldShowNavigationPage() {
