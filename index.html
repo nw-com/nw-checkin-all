@@ -2722,7 +2722,6 @@
                                 return {};
                             };
                             const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
-                            // 解析一天的班表 HM（僅使用「我的班表」資料），若標示為非工作日則回傳空
                             const resolveDayHM = (obj) => {
                                 const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
                                 let s = '', e = '';
@@ -2745,13 +2744,61 @@
                                 if (isOff) return { start: '', end: '' };
                                 return { start: s, end: e };
                             };
-                            // 僅依「我的班表」決定當日班表；無資料則視為未設定
-                            const getUserCfgForDate = (date, userDaysMap) => {
-                                const ymd = formatYMD(date);
-                                const userCfg = userDaysMap[ymd];
-                                if (!userCfg) return { start: '', end: '', _state: 'unset' };
-                                const hm = resolveDayHM(userCfg);
-                                const isOff = userCfg.isOff === true || userCfg.workday === false || userCfg.isWorkday === false || userCfg.off === true;
+                            const fetchUserDayObj = async (date) => {
+                                const uid = state.currentUser?.uid;
+                                if (!uid) return null;
+                                const y = date.getFullYear();
+                                const m = String(date.getMonth() + 1).padStart(2, '0');
+                                const d = String(date.getDate()).padStart(2, '0');
+                                const ym = `${y}-${m}`;
+                                const ymd = `${y}-${m}-${d}`;
+                                try {
+                                    const uSnap = await getDoc(doc(db, 'users', uid, 'workdays', ym));
+                                    if (uSnap.exists()) {
+                                        const ud = uSnap.data() || {};
+                                        const obj = (ud.days && typeof ud.days === 'object' && ud.days[ymd])
+                                            || (ud.workdays && typeof ud.workdays === 'object' && ud.workdays[ymd])
+                                            || (Array.isArray(ud.days) ? ud.days.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                            || (Array.isArray(ud.workdays) ? ud.workdays.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                            || (ud.map && typeof ud.map === 'object' ? ud.map[ymd] : null);
+                                        if (obj) return obj;
+                                    }
+                                } catch (_) {}
+                                try {
+                                    const s1 = await getDoc(doc(db, 'users', uid, 'workdays', ym, 'days', ymd));
+                                    if (s1.exists()) return s1.data();
+                                } catch (_) {}
+                                try {
+                                    const s2 = await getDoc(doc(db, 'users', uid, 'workdays', ym, ymd));
+                                    if (s2.exists()) return s2.data();
+                                } catch (_) {}
+                                try {
+                                    const c1 = await getDoc(doc(db, 'users', uid, 'calendar', ym));
+                                    if (c1.exists()) {
+                                        const cd = c1.data() || {};
+                                        const obj = (cd.days && typeof cd.days === 'object' && cd.days[ymd])
+                                            || (cd.workdays && typeof cd.workdays === 'object' && cd.workdays[ymd])
+                                            || (Array.isArray(cd.days) ? cd.days.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                            || (Array.isArray(cd.workdays) ? cd.workdays.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                            || (cd.map && typeof cd.map === 'object' ? cd.map[ymd] : null);
+                                        if (obj) return obj;
+                                    }
+                                } catch (_) {}
+                                try {
+                                    const c2 = await getDoc(doc(db, 'users', uid, 'calendar', ym, 'days', ymd));
+                                    if (c2.exists()) return c2.data();
+                                } catch (_) {}
+                                try {
+                                    const c3 = await getDoc(doc(db, 'users', uid, 'calendar', ym, ymd));
+                                    if (c3.exists()) return c3.data();
+                                } catch (_) {}
+                                return null;
+                            };
+                            const getUserCfgForDate = async (date) => {
+                                const obj = await fetchUserDayObj(date);
+                                if (!obj) return { start: '', end: '', _state: 'unset' };
+                                const hm = resolveDayHM(obj);
+                                const isOff = obj.isOff === true || obj.workday === false || obj.isWorkday === false || obj.off === true;
                                 if (isOff) return { start: '', end: '', _state: 'off' };
                                 if (hm.start || hm.end) return { ...hm, _state: 'set' };
                                 return { start: '', end: '', _state: 'unset' };
@@ -2759,8 +2806,7 @@
 
                             // 取得今日班表（表定）與實際打卡（上/下班），並計算下一個班表（表定上/下班）
                             const now = new Date();
-                            const userDaysNow = await getUserDaysMap(now.getFullYear(), now.getMonth());
-                            const todayEff = getUserCfgForDate(now, userDaysNow);
+                            const todayEff = await getUserCfgForDate(now);
                             const todayStartExp = todayEff.start;
                             const todayEndExp = todayEff.end;
 
@@ -2775,7 +2821,7 @@
                             try {
                                 qToday = query(
                                     collection(db, 'clockInRecords'),
-                                    where('userId', '==', user.uid),
+                                    where('userId', '==', state.currentUser.uid),
                                     where('timestamp', '>=', tsStart),
                                     where('timestamp', '<=', tsEnd),
                                     orderBy('timestamp', 'asc')
@@ -2783,7 +2829,7 @@
                             } catch (_) {
                                 qToday = query(
                                     collection(db, 'clockInRecords'),
-                                    where('userId', '==', user.uid),
+                                    where('userId', '==', state.currentUser.uid),
                                     where('timestamp', '>=', tsStart),
                                     where('timestamp', '<=', tsEnd)
                                 );
@@ -2810,8 +2856,7 @@
                             let nextStartExp = '';
                             let nextEndExp = '';
                             for (let i = 0; i < 60; i++) {
-                                const uMap = await getUserDaysMap(nextDate.getFullYear(), nextDate.getMonth());
-                                const eff = getUserCfgForDate(nextDate, uMap);
+                                const eff = await getUserCfgForDate(nextDate);
                                 if (eff._state === 'set' && eff.start) {
                                     nextStartExp = eff.start;
                                     nextEndExp = eff.end || '';
