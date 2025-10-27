@@ -5324,7 +5324,11 @@
                             if (!s || !e) return false;
                             return s < nextDay && e > dayStart; // overlap
                         });
-                        if (isLeave) indicators.push('請假');
+                        if (isLeave) {
+                            // 有休假就不是排休：移除既有「排休」標註
+                            indicators = indicators.filter(x => x !== '排休');
+                            indicators.push('請假');
+                        }
                         // 值班（有當日特殊勤務）
                         const isDutyBySpecial = duties.some(di => {
                             const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
@@ -13466,13 +13470,22 @@ const roleBorderClass = roleColorMap[titleKey] || null;
             function openCameraModal(type, location) {
                  const modalId = `camera-modal-${Date.now()}`;
                 let videoStream;
-                const capturedPhotos = []; // { blob, description }
+    const capturedPhotos = []; // { blob, description }
 
-                const stopCamera = () => {
-                    if (videoStream) {
-                        videoStream.getTracks().forEach(track => track.stop());
-                    }
-                };
+    const stopCamera = () => {
+        try {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+            }
+        } catch (_) {}
+        try {
+            if (video) {
+                video.pause();
+                video.srcObject = null;
+            }
+        } catch (_) {}
+        videoStream = null;
+    };
 
                 const close = () => {
                     stopCamera();
@@ -13857,6 +13870,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         showToast("打卡失敗，請稍後再試", true);
                     } finally {
                         showLoading(false);
+                        stopCamera();
                     }
                 };
 
