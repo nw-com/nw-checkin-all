@@ -1122,19 +1122,33 @@
                     if (isEmailFormat(account)) {
                         await signInWithEmailAndPassword(auth, account, password);
                     } else {
-                        // 以手機查詢綁定 Email 後登入
-                        const { collection, query, where, getDocs } = window.__fs || {};
+                        // 以手機查公開映射（loginMapping/{phone}）取得 Email 後登入，避免未授權讀 users
+                        const { doc, getDoc, collection, query, where, getDocs } = window.__fs || {};
                         const db = window.__db;
-                        if (!db || !collection || !query || !where || !getDocs) throw new Error('資料庫尚未就緒，請稍後再試');
+                        if (!db) throw new Error('資料庫尚未就緒，請稍後再試');
                         const phone = normalizePhone(account);
-                        const q = query(collection(db, 'users'), where('phone', '==', phone));
-                        const qs = await getDocs(q);
                         let emailForAuth = null;
-                        qs.forEach(d => {
-                            const u = d.data() || {};
-                            emailForAuth = emailForAuth || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
-                        });
-                        if (!emailForAuth) throw new Error('此手機未綁定電子郵件帳號，請改用電子郵件登入或聯繫管理員。');
+                        try {
+                            const mSnap = await getDoc(doc(db, 'loginMapping', phone));
+                            if (mSnap?.exists()) {
+                                const m = mSnap.data() || {};
+                                emailForAuth = m.email || m.loginEmail || m.authEmail || m.primaryEmail || null;
+                            }
+                        } catch (_) { /* ignore mapping missing */ }
+                        // Fallback：若無映射，嘗試查詢 users（可能會因規則被拒絕）
+                        if (!emailForAuth && collection && query && where && getDocs) {
+                            try {
+                                const q = query(collection(db, 'users'), where('phone', '==', phone));
+                                const qs = await getDocs(q);
+                                qs.forEach(d => {
+                                    const u = d.data() || {};
+                                    emailForAuth = emailForAuth || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
+                                });
+                            } catch (permErr) {
+                                console.warn('查詢 users 失敗（可能規則限制）', permErr);
+                            }
+                        }
+                        if (!emailForAuth) throw new Error('此手機未綁定電子郵件或查詢受限。請改用電子郵件登入，或請管理員建立 loginMapping 映射。');
                         await signInWithEmailAndPassword(auth, emailForAuth, password);
                     }
                 } catch (error) {
@@ -1165,16 +1179,29 @@
                         if (isEmailFormat(account)) {
                             targetEmail = account;
                         } else {
-                            const { collection, query, where, getDocs } = window.__fs || {};
+                            const { doc, getDoc, collection, query, where, getDocs } = window.__fs || {};
                             const db = window.__db;
-                            if (!db || !collection || !query || !where || !getDocs) throw new Error('資料庫尚未就緒，請稍後再試');
+                            if (!db) throw new Error('資料庫尚未就緒，請稍後再試');
                             const phone = normalizePhone(account);
-                            const q = query(collection(db, 'users'), where('phone', '==', phone));
-                            const qs = await getDocs(q);
-                            qs.forEach(d => {
-                                const u = d.data() || {};
-                                targetEmail = targetEmail || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
-                            });
+                            try {
+                                const mSnap = await getDoc(doc(db, 'loginMapping', phone));
+                                if (mSnap?.exists()) {
+                                    const m = mSnap.data() || {};
+                                    targetEmail = m.email || m.loginEmail || m.authEmail || m.primaryEmail || null;
+                                }
+                            } catch (_) {}
+                            if (!targetEmail && collection && query && where && getDocs) {
+                                try {
+                                    const q = query(collection(db, 'users'), where('phone', '==', phone));
+                                    const qs = await getDocs(q);
+                                    qs.forEach(d => {
+                                        const u = d.data() || {};
+                                        targetEmail = targetEmail || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
+                                    });
+                                } catch (permErr) {
+                                    console.warn('查詢 users 失敗（可能規則限制）', permErr);
+                                }
+                            }
                         }
                         if (!targetEmail) {
                             loginError.textContent = '此手機未綁定電子郵件，無法寄送重設信。請改用電子郵件輸入或聯繫管理員。';
