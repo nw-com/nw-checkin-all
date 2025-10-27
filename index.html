@@ -2766,29 +2766,48 @@
                                 return result;
                             };
 
-                            const getDaysMap = async (year, monthIdx) => {
+                            // 分開取得：全域工作日與個人覆蓋，避免全域值覆蓋帳號預設
+                            const getGlobalDaysMap = async (year, monthIdx) => {
                                 const ymKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
-                                let daysMap = {};
                                 try {
                                     const sSnap = await getDoc(doc(db, 'settings', `workdays_${ymKey}`));
-                                    if (sSnap.exists()) { const sd = sSnap.data(); daysMap = sd?.days || {}; }
+                                    if (sSnap.exists()) { const sd = sSnap.data(); return sd?.days || {}; }
                                 } catch (_) {}
+                                return {};
+                            };
+                            const getUserDaysMap = async (year, monthIdx) => {
+                                const ymKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
                                 try {
                                     const uSnap = await getDoc(doc(db, 'users', user.uid, 'workdays', ymKey));
-                                    if (uSnap.exists()) { const ud = uSnap.data(); daysMap = { ...daysMap, ...(ud?.days || {}) }; }
+                                    if (uSnap.exists()) { const ud = uSnap.data(); return ud?.days || {}; }
                                 } catch (_) {}
-                                return daysMap;
+                                return {};
+                            };
+                            const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+                            const getEffectiveCfgForDate = (date, startDefault, endDefault, globalDaysMap, userDaysMap) => {
+                                const ymd = formatYMD(date);
+                                const userCfg = userDaysMap[ymd] || {};
+                                // 若個人覆蓋有明確設定（包含空字串表示非工作日），優先使用個人
+                                if (hasOwn(userCfg, 'start') || hasOwn(userCfg, 'end')) {
+                                    return { start: userCfg.start || '', end: userCfg.end || '' };
+                                }
+                                // 否則依假日規則決定是否給帳號預設
+                                const wk = date.getDay();
+                                const isWeekday = wk>=1 && wk<=5;
+                                if (!isHoliday(date) && isWeekday) {
+                                    return { start: startDefault, end: endDefault };
+                                }
+                                return { start: '', end: '' };
                             };
 
                             // 取得今日班表（表定）與實際打卡（上/下班），並計算下一個班表（表定上/下班）
                             const now = new Date();
-                            const daysMapNow = await getDaysMap(now.getFullYear(), now.getMonth());
-                            const ymdToday = formatYMD(now);
-                            const todayCfg = daysMapNow[ymdToday] || {};
-                            const isWeekday = now.getDay()>=1 && now.getDay()<=5;
+                            const globalDaysNow = await getGlobalDaysMap(now.getFullYear(), now.getMonth());
+                            const userDaysNow = await getUserDaysMap(now.getFullYear(), now.getMonth());
                             const { startDefault, endDefault } = await getUserDefaultShift();
-                            const todayStartExp = todayCfg.start || (!isHoliday(now) && isWeekday ? startDefault : '');
-                            const todayEndExp = todayCfg.end || (!isHoliday(now) && isWeekday ? endDefault : '');
+                            const todayEff = getEffectiveCfgForDate(now, startDefault, endDefault, globalDaysNow, userDaysNow);
+                            const todayStartExp = todayEff.start;
+                            const todayEndExp = todayEff.end;
 
                             // 查詢今日打卡紀錄以取得實際的上/下班時間
                             let actualStart = null;
@@ -2836,16 +2855,12 @@
                             let nextStartExp = '';
                             let nextEndExp = '';
                             for (let i = 0; i < 60; i++) {
-                                const map = await getDaysMap(nextDate.getFullYear(), nextDate.getMonth());
-                                const cfg = map[formatYMD(nextDate)] || {};
-                                const wk = nextDate.getDay();
-                                const defaultStart = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? startDefault : '';
-                                const defaultEnd = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? endDefault : '';
-                                const st = cfg.start || defaultStart;
-                                const ed = cfg.end || defaultEnd;
-                                if (st) {
-                                    nextStartExp = st;
-                                    nextEndExp = ed || '';
+                                const gMap = await getGlobalDaysMap(nextDate.getFullYear(), nextDate.getMonth());
+                                const uMap = await getUserDaysMap(nextDate.getFullYear(), nextDate.getMonth());
+                                const eff = getEffectiveCfgForDate(nextDate, startDefault, endDefault, gMap, uMap);
+                                if (eff.start) {
+                                    nextStartExp = eff.start;
+                                    nextEndExp = eff.end || '';
                                     break;
                                 }
                                 nextDate.setDate(nextDate.getDate() + 1);
