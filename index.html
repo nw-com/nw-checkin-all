@@ -3926,26 +3926,38 @@
                                     }
                                 }
 
-                                // 自動下班：超過下班30分鐘仍未下班（沿用原邏輯）
-                                if (endAt) ensureAutoClockOutForShift(endAt);
+                                // 自動下班：依班別排程（僅在已上班且未下班時啟動）
+                                if (endAt) ensureAutoClockOutForShift(endAt, shiftId, uiStatus);
                             });
                         } catch (e) { console.warn('applyShiftButtonEnable 失敗', e); }
                     }
-                    async function ensureAutoClockOutForShift(endAt) {
+                    async function ensureAutoClockOutForShift(endAt, shiftId, uiStatus) {
                         try {
                             const threshold = new Date(endAt.getTime() + 30*60*1000);
                             const now = new Date();
-                            if (state.clockInStatus === '下班') return;
-                            if (now >= threshold) { await createAutoClockOutRecord(now); return; }
-                            if (__autoClockTimerId) return;
-                            const delay = threshold.getTime() - now.getTime();
-                            __autoClockTimerId = setTimeout(async ()=>{
-                                __autoClockTimerId = null;
-                                if (state.clockInStatus !== '下班') { await createAutoClockOutRecord(new Date()); }
-                            }, Math.max(0, delay));
+                            // 每班別維持計時器，避免只用單一計時器導致漏觸發
+                            window.__autoClockTimerMap = window.__autoClockTimerMap || {};
+                            // 若未上班或已下班，清除既有排程並跳出
+                            if (!uiStatus?.started || uiStatus?.ended) {
+                                if (shiftId && window.__autoClockTimerMap[shiftId]) {
+                                    clearTimeout(window.__autoClockTimerMap[shiftId]);
+                                    delete window.__autoClockTimerMap[shiftId];
+                                }
+                                return;
+                            }
+                            // 時點已達：立即自動下班
+                            if (now >= threshold) { await createAutoClockOutRecord(new Date(), shiftId); return; }
+                            // 已有排程則不重複設定
+                            if (shiftId && window.__autoClockTimerMap[shiftId]) return;
+                            const delay = Math.max(0, threshold.getTime() - now.getTime());
+                            window.__autoClockTimerMap[shiftId] = setTimeout(async ()=>{
+                                delete window.__autoClockTimerMap[shiftId];
+                                const latest = state.uiShiftStatus?.[shiftId];
+                                if (!latest || !latest.ended) { await createAutoClockOutRecord(new Date(), shiftId); }
+                            }, delay);
                         } catch (e) { console.warn('ensureAutoClockOutForShift 失敗', e); }
                     }
-                    async function createAutoClockOutRecord(ts) {
+                    async function createAutoClockOutRecord(ts, shiftId) {
                         try {
                             const user = window.__auth?.currentUser; if (!user) return;
                             const db = window.__db; const { addDoc, collection, Timestamp, doc, updateDoc, serverTimestamp } = window.__fs;
@@ -3957,13 +3969,25 @@
                                 location: loc,
                                 photoUrls: [],
                                 descriptions: [],
-                                isAutomatic: true
+                                isAutomatic: true,
+                                shiftId: shiftId || ''
                             });
                             await updateDoc(doc(db, 'users', user.uid), {
                                 clockInStatus: '下班',
                                 status: '下班',
                                 lastUpdated: serverTimestamp()
                             });
+                            // 更新本地 UI 狀態與按鈕
+                            try {
+                                state.uiShiftStatus = state.uiShiftStatus || {};
+                                if (shiftId) { state.uiShiftStatus[shiftId] = { started: true, ended: true }; }
+                                if (shiftId && window.__autoClockTimerMap && window.__autoClockTimerMap[shiftId]) {
+                                    clearTimeout(window.__autoClockTimerMap[shiftId]);
+                                    delete window.__autoClockTimerMap[shiftId];
+                                }
+                                await __syncUiShiftStatusFromBackend();
+                                applyShiftButtonEnable(panel, iso, list);
+                            } catch (_) {}
                             try { showToast('已超過下班30分鐘，系統自動下班'); } catch(_){}
                         } catch (e) {
                             console.error('自動下班紀錄失敗', e);
