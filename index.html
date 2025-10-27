@@ -5326,18 +5326,7 @@
                         if (isLeave) {
                             indicators.push('請假');
                         }
-                        // 值班（有當日特殊勤務）
-                        const isDutyBySpecial = duties.some(di => {
-                            const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
-                            const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
-                            if (!s || !e) return false;
-                            return s < nextDay && e > dayStart; // overlap
-                        });
-                        const myName = state.currentUserData?.name || state.currentUser.displayName || state.currentUser.email || '';
-                        const rosterNames = fridayDutyRoster[dateLabel] || [];
-                        const normalizeName = (s) => (s || '').trim();
-                        const isRosterDuty = Array.isArray(rosterNames) && rosterNames.some(n => normalizeName(n) === normalizeName(myName));
-                        const isDutyFinal = isDutyBySpecial || isRosterDuty;
+                        
 
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
