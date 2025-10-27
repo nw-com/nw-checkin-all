@@ -2680,101 +2680,6 @@
                                 const d = String(date.getDate()).padStart(2, '0');
                                 return `${y}-${m}-${d}`;
                             };
-
-                            const holidays = window.__holidaySettingsCache || { weekendIsHoliday: false, holidays: [] };
-                            const holidaysSet = new Set(holidays.holidays || []);
-                            const isHoliday = (date) => {
-                                const ymd = formatYMD(date);
-                                const weekend = date.getDay() === 0 || date.getDay() === 6;
-                                return holidaysSet.has(ymd) || (holidays.weekendIsHoliday && weekend);
-                            };
-
-                            // 讀取使用者預設班表（優先使用帳號設定；其次角色預設；最後一般預設）
-                            const getUserDefaultShift = async () => {
-                                try {
-                                    if (window.__userShiftCache && window.__userShiftCache[user.uid]) {
-                                        return window.__userShiftCache[user.uid];
-                                    }
-                                } catch (_) {}
-                                let role = 'user';
-                                let startDefault = '';
-                                let endDefault = '';
-                                const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
-                                const parseRange = (s) => {
-                                    const m = (s || '').toString().match(/(\d{1,2}:\d{2})\s*[-~～至到]\s*(\d{1,2}:\d{2})/);
-                                    return m ? { start: m[1], end: m[2] } : null;
-                                };
-                                const pickFromObj = (obj) => {
-                                    if (!obj) return;
-                                    role = (obj.title || obj.role || role).toString().trim() || role;
-                                    const candidatesStart = ['shiftStart','workShiftStart','defaultStart','workStart','startTime','start','scheduleStart','classStart'];
-                                    const candidatesEnd   = ['shiftEnd','workShiftEnd','defaultEnd','workEnd','endTime','end','scheduleEnd','classEnd'];
-                                    for (const k of candidatesStart) { if (isHM(obj[k])) { startDefault = obj[k]; break; } }
-                                    for (const k of candidatesEnd)   { if (isHM(obj[k])) { endDefault = obj[k]; break; } }
-                                    if (!startDefault || !endDefault) {
-                                        const r = parseRange(obj.shift || obj.workShift || obj.defaultShift || obj.shiftHM);
-                                        if (r) { startDefault = startDefault || r.start; endDefault = endDefault || r.end; }
-                                    }
-                                    const nested = obj.shiftHours || obj.schedule || obj.workHours;
-                                    if (nested) {
-                                        if (isHM(nested.start)) startDefault = startDefault || nested.start;
-                                        if (isHM(nested.end))   endDefault   = endDefault   || nested.end;
-                                    }
-                                };
-                                try {
-                                    // 優先：Firestore users/{uid}
-                                    const uSnap = await getDoc(doc(db, 'users', user.uid));
-                                    if (uSnap?.exists()) pickFromObj(uSnap.data());
-                                } catch (_) {}
-                                try {
-                                    // 補：已載入的當前使用者資料
-                                    if (state.currentUserData) pickFromObj(state.currentUserData);
-                                } catch (_) {}
-                                try {
-                                    // 角色預設（設定檔）：settings/general.roleDefaults[role]
-                                    if (!startDefault || !endDefault) {
-                                        const sSnap = await getDoc(doc(db, 'settings', 'general'));
-                                        if (sSnap?.exists()) {
-                                            const g = sSnap.data() || {};
-                                            const roleDefs = g.roleDefaults || g.roleDefaultShifts || {};
-                                            const def = roleDefs[role] || roleDefs[(role||'').trim()];
-                                            if (def) {
-                                                if (isHM(def.start)) startDefault = startDefault || def.start;
-                                                if (isHM(def.end))   endDefault   = endDefault   || def.end;
-                                                const r = parseRange(def.shift || def.range);
-                                                if (r) { startDefault = startDefault || r.start; endDefault = endDefault || r.end; }
-                                            }
-                                        }
-                                    }
-                                } catch (_) {}
-                                // 角色缺省：保全使用 07:00–19:00
-                                if (!startDefault || !endDefault) {
-                                    const r = (role || '').trim();
-                                    if (r === '保全') {
-                                        startDefault = startDefault || '07:00';
-                                        endDefault = endDefault || '19:00';
-                                    }
-                                }
-                                // 一般缺省
-                                if (!startDefault) startDefault = '09:00';
-                                if (!endDefault) endDefault = '18:00';
-                                const result = { role, startDefault, endDefault };
-                                try {
-                                    window.__userShiftCache = window.__userShiftCache || {};
-                                    window.__userShiftCache[user.uid] = result;
-                                } catch (_) {}
-                                return result;
-                            };
-
-                            // 分開取得：全域工作日與個人覆蓋，避免全域值覆蓋帳號預設
-                            const getGlobalDaysMap = async (year, monthIdx) => {
-                                const ymKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
-                                try {
-                                    const sSnap = await getDoc(doc(db, 'settings', `workdays_${ymKey}`));
-                                    if (sSnap.exists()) { const sd = sSnap.data(); return sd?.days || {}; }
-                                } catch (_) {}
-                                return {};
-                            };
                             const getUserDaysMap = async (year, monthIdx) => {
                                 const ymKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
                                 try {
@@ -2784,7 +2689,7 @@
                                 return {};
                             };
                             const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
-                            // 解析一天的班表 HM（支援多種欄位與格式），若標示為非工作日則回傳空
+                            // 解析一天的班表 HM（僅使用「我的班表」資料），若標示為非工作日則回傳空
                             const resolveDayHM = (obj) => {
                                 const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
                                 let s = '', e = '';
@@ -2807,32 +2712,22 @@
                                 if (isOff) return { start: '', end: '' };
                                 return { start: s, end: e };
                             };
-                            const getEffectiveCfgForDate = (date, startDefault, endDefault, globalDaysMap, userDaysMap) => {
+                            // 僅依「我的班表」決定當日班表；無資料則視為未設定
+                            const getUserCfgForDate = (date, userDaysMap) => {
                                 const ymd = formatYMD(date);
-                                const userCfg = userDaysMap[ymd] || {};
-                                const uHM = resolveDayHM(userCfg);
-                                // 若於個人班表中有此日期（即便為非工作日），一律以個人班表為主
-                                if (uHM.start || uHM.end || (userCfg && (hasOwn(userCfg,'isWorkday') || hasOwn(userCfg,'workday') || hasOwn(userCfg,'isOff')))) {
-                                    return uHM;
-                                }
-                                // 次要：全域班表（若有具體時間）
-                                const gHM = resolveDayHM(globalDaysMap[ymd] || {});
-                                if (gHM.start || gHM.end) return gHM;
-                                // 其餘：非假日的平日使用帳號預設
-                                const wk = date.getDay();
-                                const isWeekday = wk>=1 && wk<=5;
-                                if (!isHoliday(date) && isWeekday) {
-                                    return { start: startDefault, end: endDefault };
-                                }
-                                return { start: '', end: '' };
+                                const userCfg = userDaysMap[ymd];
+                                if (!userCfg) return { start: '', end: '', _state: 'unset' };
+                                const hm = resolveDayHM(userCfg);
+                                const isOff = userCfg.isOff === true || userCfg.workday === false || userCfg.isWorkday === false || userCfg.off === true;
+                                if (isOff) return { start: '', end: '', _state: 'off' };
+                                if (hm.start || hm.end) return { ...hm, _state: 'set' };
+                                return { start: '', end: '', _state: 'unset' };
                             };
 
                             // 取得今日班表（表定）與實際打卡（上/下班），並計算下一個班表（表定上/下班）
                             const now = new Date();
-                            const globalDaysNow = await getGlobalDaysMap(now.getFullYear(), now.getMonth());
                             const userDaysNow = await getUserDaysMap(now.getFullYear(), now.getMonth());
-                            const { startDefault, endDefault } = await getUserDefaultShift();
-                            const todayEff = getEffectiveCfgForDate(now, startDefault, endDefault, globalDaysNow, userDaysNow);
+                            const todayEff = getUserCfgForDate(now, userDaysNow);
                             const todayStartExp = todayEff.start;
                             const todayEndExp = todayEff.end;
 
@@ -2877,15 +2772,14 @@
                                 }
                             }
 
-                            // 計算下一個班表（依工作日規則或個人覆蓋）
+                            // 計算下一個班表（僅依「我的班表」的個人設定）
                             let nextDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
                             let nextStartExp = '';
                             let nextEndExp = '';
                             for (let i = 0; i < 60; i++) {
-                                const gMap = await getGlobalDaysMap(nextDate.getFullYear(), nextDate.getMonth());
                                 const uMap = await getUserDaysMap(nextDate.getFullYear(), nextDate.getMonth());
-                                const eff = getEffectiveCfgForDate(nextDate, startDefault, endDefault, gMap, uMap);
-                                if (eff.start) {
+                                const eff = getUserCfgForDate(nextDate, uMap);
+                                if (eff._state === 'set' && eff.start) {
                                     nextStartExp = eff.start;
                                     nextEndExp = eff.end || '';
                                     break;
@@ -2894,8 +2788,12 @@
                             }
 
                             const fmtHM = (dt) => dt ? dt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
-                            const lineTodayStart = todayStartExp ? `上班：表定 ${todayStartExp}；實際 ${actualStart ? fmtHM(actualStart) : '尚未'}` : '上班：非工作日';
-                            const lineTodayEnd   = todayEndExp   ? `下班：表定 ${todayEndExp}；實際 ${actualEnd ? fmtHM(actualEnd) : '尚未'}`   : '下班：非工作日';
+                            const lineTodayStart = (todayEff._state === 'off')
+                                ? '上班：非工作日'
+                                : (todayStartExp ? `上班：表定 ${todayStartExp}；實際 ${actualStart ? fmtHM(actualStart) : '尚未'}` : '上班：未設定');
+                            const lineTodayEnd   = (todayEff._state === 'off')
+                                ? '下班：非工作日'
+                                : (todayEndExp ? `下班：表定 ${todayEndExp}；實際 ${actualEnd ? fmtHM(actualEnd) : '尚未'}` : '下班：未設定');
                             const nextDateText = `${String(nextDate.getMonth()+1).padStart(2,'0')}/${String(nextDate.getDate()).padStart(2,'0')}`;
                             const lineNext = nextStartExp ? `下一個班表（${nextDateText}）：上班（表定）${nextStartExp}${nextEndExp ? `，下班（表定）${nextEndExp}` : ''}` : '下一個班表：未設定';
 
