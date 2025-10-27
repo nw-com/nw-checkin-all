@@ -2238,13 +2238,7 @@
                         </div>
                         <div id="dashboard-notifications" class="bg-white p-4 rounded-lg mb-4 shadow-sm border">
                            <h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="bell" class="w-4 h-4 mr-2"></i>通知</h3>
-                           <div id="dashboard-duty-list" class="space-y-2 text-gray-700">
-                             <div class="text-gray-500">讀取中...</div>
-                           </div>
-                           <div class="mt-2 border-t border-gray-100"></div>
-                           <div id="dashboard-anomalies-list" class="space-y-2 text-gray-700 mt-2">
-                             <div class="text-gray-500">讀取中...</div>
-                           </div>
+                           <div id="dashboard-duty-list" class="space-y-2 text-gray-700"></div>
                         </div>`;
                 }
 
@@ -2709,53 +2703,88 @@
                                 return daysMap;
                             };
 
+                            // 取得今日班表（表定）與實際打卡（上/下班），並計算下一個班表（表定上/下班）
                             const now = new Date();
                             const daysMapNow = await getDaysMap(now.getFullYear(), now.getMonth());
                             const ymdToday = formatYMD(now);
                             const todayCfg = daysMapNow[ymdToday] || {};
-                            const todayStartExp = todayCfg.start || (!isHoliday(now) && (now.getDay()>=1 && now.getDay()<=5) ? '09:00' : '');
-                            
+                            const isWeekday = now.getDay()>=1 && now.getDay()<=5;
+                            const todayStartExp = todayCfg.start || (!isHoliday(now) && isWeekday ? '09:00' : '');
+                            const todayEndExp = todayCfg.end || (!isHoliday(now) && isWeekday ? '18:00' : '');
+
+                            // 查詢今日打卡紀錄以取得實際的上/下班時間
                             let actualStart = null;
-                            if (todayStartExp) {
-                                const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-                                const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                                const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
-                                const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
-                                let q;
-                                try {
-                                    q = query(collection(db, 'clockInRecords'), where('userId', '==', user.uid), where('timestamp', '>=', tsStart), where('timestamp', '<=', tsEnd), orderBy('timestamp', 'asc'));
-                                } catch (_) {
-                                    q = query(collection(db, 'clockInRecords'), where('userId', '==', user.uid), where('timestamp', '>=', tsStart), where('timestamp', '<=', tsEnd));
-                                }
-                                const snap = await getDocs(q);
-                                const recs = [];
-                                snap.forEach(d => recs.push(d.data()));
-                                const startRec = recs.find(r => r.type === '上班') || recs.find(r => r.type === '外出');
-                                if (startRec && startRec.timestamp) {
-                                    actualStart = startRec.timestamp?.toDate?.() ? startRec.timestamp.toDate() : new Date(startRec.timestamp);
+                            let actualEnd = null;
+                            const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+                            const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                            const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
+                            const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
+                            let qToday;
+                            try {
+                                qToday = query(
+                                    collection(db, 'clockInRecords'),
+                                    where('userId', '==', user.uid),
+                                    where('timestamp', '>=', tsStart),
+                                    where('timestamp', '<=', tsEnd),
+                                    orderBy('timestamp', 'asc')
+                                );
+                            } catch (_) {
+                                qToday = query(
+                                    collection(db, 'clockInRecords'),
+                                    where('userId', '==', user.uid),
+                                    where('timestamp', '>=', tsStart),
+                                    where('timestamp', '<=', tsEnd)
+                                );
+                            }
+                            const snapToday = await getDocs(qToday);
+                            const recsToday = [];
+                            snapToday.forEach(d => recsToday.push(d.data()));
+                            const startRec = recsToday.find(r => r.type === '上班') || recsToday.find(r => r.type === '外出');
+                            if (startRec && startRec.timestamp) {
+                                actualStart = startRec.timestamp?.toDate?.() ? startRec.timestamp.toDate() : new Date(startRec.timestamp);
+                            }
+                            for (let i = recsToday.length - 1; i >= 0; i--) {
+                                const r = recsToday[i];
+                                if (r.type === '下班' || r.type === '自動下班') {
+                                    if (r.timestamp) {
+                                        actualEnd = r.timestamp?.toDate?.() ? r.timestamp.toDate() : new Date(r.timestamp);
+                                    }
+                                    break;
                                 }
                             }
 
+                            // 計算下一個班表（依工作日規則或個人覆蓋）
                             let nextDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
                             let nextStartExp = '';
-                            for (let i = 0; i < 30; i++) {
+                            let nextEndExp = '';
+                            for (let i = 0; i < 60; i++) {
                                 const map = await getDaysMap(nextDate.getFullYear(), nextDate.getMonth());
                                 const cfg = map[formatYMD(nextDate)] || {};
                                 const wk = nextDate.getDay();
                                 const defaultStart = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? '09:00' : '';
+                                const defaultEnd = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? '18:00' : '';
                                 const st = cfg.start || defaultStart;
-                                if (st) { nextStartExp = st; break; }
+                                const ed = cfg.end || defaultEnd;
+                                if (st) {
+                                    nextStartExp = st;
+                                    nextEndExp = ed || '';
+                                    break;
+                                }
                                 nextDate.setDate(nextDate.getDate() + 1);
                             }
 
-                            const line1 = todayStartExp ? (actualStart ? `今天：${actualStart.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})}（已打卡）` : `今天：${todayStartExp}（預期）`) : '今天：非工作日';
-                            const line2 = nextStartExp ? `下一工作日（${String(nextDate.getMonth()+1).padStart(2,'0')}/${String(nextDate.getDate()).padStart(2,'0')}）：${nextStartExp}` : '下一工作日：未設定';
+                            const fmtHM = (dt) => dt ? dt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+                            const lineTodayStart = todayStartExp ? `上班：表定 ${todayStartExp}；實際 ${actualStart ? fmtHM(actualStart) : '尚未'}` : '上班：非工作日';
+                            const lineTodayEnd   = todayEndExp   ? `下班：表定 ${todayEndExp}；實際 ${actualEnd ? fmtHM(actualEnd) : '尚未'}`   : '下班：非工作日';
+                            const nextDateText = `${String(nextDate.getMonth()+1).padStart(2,'0')}/${String(nextDate.getDate()).padStart(2,'0')}`;
+                            const lineNext = nextStartExp ? `下一個班表（${nextDateText}）：上班（表定）${nextStartExp}${nextEndExp ? `，下班（表定）${nextEndExp}` : ''}` : '下一個班表：未設定';
 
                             const html = `
                                 <div id="workday-clock-card" class="p-3 bg-blue-50 border border-blue-200 rounded-md">
-                                  <div class="flex items-center"><i data-lucide="clock" class="w-4 h-4 mr-2 text-blue-600"></i><span class="font-medium text-blue-800">上班打卡時刻</span></div>
-                                  <div class="mt-1 text-sm text-gray-700">${line1}</div>
-                                  <div class="mt-1 text-sm text-gray-700">${line2}</div>
+                                  <div class="flex items-center"><i data-lucide="clock" class="w-4 h-4 mr-2 text-blue-600"></i><span class="font-medium text-blue-800">今日班表與打卡</span></div>
+                                  <div class="mt-1 text-sm text-gray-700">${lineTodayStart}</div>
+                                  <div class="mt-1 text-sm text-gray-700">${lineTodayEnd}</div>
+                                  <div class="mt-1 text-sm text-gray-700">${lineNext}</div>
                                 </div>`;
                             const existing = document.getElementById('workday-clock-card');
                             if (existing) existing.outerHTML = html;
