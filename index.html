@@ -3232,7 +3232,9 @@
 
                 const subPageContent = document.getElementById('sub-page-content');
                 if (subPage === 'records') {
-                    renderClockInRecords(subPageContent);
+                    // 改為顯示本人班表（月視圖），對齊追蹤佈局
+                    renderWorkDatesMonthView(subPageContent);
+                    try { updateMyScheduleButtons(); } catch (e) { console.warn('updateMyScheduleButtons 初始化失敗', e); }
                 } else if (subPage === 'retro') {
                     renderRetroClockRequestForm(subPageContent);
                 } else if (subPage === 'leaves') {
@@ -4548,445 +4550,157 @@
                         <div class="flex items-center space-x-2">
                             <label for="record-month" class="text-sm font-medium">篩選月份:</label>
                             <input type="month" id="record-month" value="${ym}" class="border border-gray-300 rounded-md px-2 py-1">
-                            <button id="open-month-report" class="ml-2 px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm">月報表</button>
                         </div>
-                        <div id="records-list" class="space-y-3">
-                            <div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>
+                        <div class="bg-white border rounded-lg overflow-hidden">
+                            <table class="min-w-full text-sm" style="border-collapse: collapse;">
+                                <thead class="bg-gray-50 text-gray-600">
+                                    <tr>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">角色</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">人員</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">職稱</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">守望站</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">開始日期</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">結束日期</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">起</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">迄</th>
+                                        <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">狀態</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="clock-schedule-body">
+                                    <tr><td colspan="9" class="px-2 py-3 text-center text-gray-500 border border-gray-300">正在載入我的班表...</td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 `;
 
                 const monthInput = document.getElementById('record-month');
+                const tbody = document.getElementById('clock-schedule-body');
+                const setBody = (html) => { if (tbody) tbody.innerHTML = html; };
 
-                const loadRecords = async () => {
-                    await ensureAbnormalMarkingConfig();
-                    await ensureCommunitiesCache();
-                    const [yearStr, monthStr] = (monthInput.value || ym).split('-');
-                    const year = parseInt(yearStr, 10);
-                    const monthIdx = parseInt(monthStr, 10) - 1;
-                    const startOfMonth = new Date(year, monthIdx, 1, 0, 0, 0, 0);
-                    const endOfMonth = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
-                    
-                    const recordsRef = collection(db, "clockInRecords");
-                    // Firestore 端月份範圍查詢以避免時區邊界誤差（保留前端過濾作為保險）
-                    const { Timestamp } = window.__fs || {};
-                    const startTS = Timestamp?.fromDate ? Timestamp.fromDate(startOfMonth) : startOfMonth;
-                    const endTS = Timestamp?.fromDate ? Timestamp.fromDate(endOfMonth) : endOfMonth;
-                    const q = query(
-                        recordsRef,
-                        where("userId", "==", state.currentUser.uid),
-                        where("timestamp", ">=", startTS),
-                        where("timestamp", "<=", endTS)
-                    );
+                const uid = state?.currentUser?.uid || window.__auth?.currentUser?.uid || '';
+                const cid = pageState?.communityId || state?.currentCommunityId || state?.selectedCommunityId || state?.currentUserData?.communityId || '';
 
-                    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-                        const recordsListEl = document.getElementById('records-list');
-                        if (!recordsListEl) return;
-                        
-                        if (querySnapshot.empty) {
-                            (async () => {
-                                try {
-                                    const { doc, getDoc } = window.__fs; const db2 = window.__db;
-                                    const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
-                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`; return; }
-                                    const userRef = doc(db2, 'users', uid);
-                                    const userSnap = await getDoc(userRef);
-                                    if (userSnap.exists()) {
-                                        const u = userSnap.data();
-                                        const ts = u.lastUpdated?.toDate?.() || (u.lastUpdated ? new Date(u.lastUpdated) : null);
-                                        if (u.clockInStatus && ts && ts >= startOfMonth && ts <= endOfMonth) {
-                                            const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
-                                            const statusColor = getStatusColor(statusText);
-                                            recordsListEl.innerHTML = `
-                                                <div class="bg-white p-3 rounded-lg shadow-sm border mb-3">
-                                                    <div class="flex justify-between items-start">
-                                                        <div>
-                                                            <p class="font-bold text-lg ${statusColor}">${statusText}</p>
-                                                            <p class="text-sm text-gray-600">${formatDate(ts)}</p>
-                                                        </div>
-                                                    </div>
-                                                    <div class="mt-2 text-xs text-gray-400">來源：使用者狀態快照（clockInRecords 建立失敗）</div>
-                                                </div>`;
-                                            try { lucide.createIcons(); } catch(e){}
-                                        } else {
-                                                recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`;
-                                            }
-                                        } else {
-                                            recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`;
-                                    }
-                                } catch (e) {
-                                    const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
-                                    const logFn = expectedCodes.includes(e?.code) ? console.warn : console.error;
-                                    logFn('讀取使用者狀態快照失敗:', e?.code, e?.message || e);
-                                    recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`;
-                                }
-                            })();
+                function parseDate(val) {
+                    if (!val) return null;
+                    if (val.toDate && typeof val.toDate === 'function') return val.toDate();
+                    if (typeof val === 'string') {
+                        const s = val.includes('T') ? val : `${val}T00:00:00`;
+                        const d = new Date(s);
+                        return isNaN(d.getTime()) ? null : d;
+                    }
+                    if (typeof val === 'object' && typeof val.seconds === 'number') {
+                        return new Date(val.seconds * 1000);
+                    }
+                    try { const d = new Date(val); return isNaN(d.getTime()) ? null : d; } catch { return null; }
+                }
+                function applyTime(date, timeStr, defaultH = 0, defaultM = 0) {
+                    if (!date) return null;
+                    const d = new Date(date);
+                    if (typeof timeStr === 'string' && /\d{1,2}:\d{2}/.test(timeStr)) {
+                        const [h, m] = timeStr.split(':').map(n => parseInt(n,10));
+                        d.setHours(h, m, 0, 0);
+                    } else {
+                        d.setHours(defaultH, defaultM, 0, 0);
+                    }
+                    return d;
+                }
+                const fmtYMD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                const fmtHM = (d) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                const statusLabel = (startDT, endDT) => {
+                    const now = new Date();
+                    if (now < startDT) return '未開始';
+                    if (now >= startDT && now <= endDT) return '進行中';
+                    return '已結束';
+                };
+
+                async function loadMySchedules() {
+                    try {
+                        if (!uid) { return setBody(`<tr><td colspan="9" class="px-2 py-3 text-center text-gray-500 border border-gray-300">尚未登入</td></tr>`); }
+                        if (!cid) { return setBody(`<tr><td colspan="9" class="px-2 py-3 text-center text-gray-500 border border-gray-300">尚未選擇社區</td></tr>`); }
+
+                        const { collection, query, where, getDocs } = window.__fs || {};
+                        const db = window.__db;
+                        if (!collection || !query || !where || !getDocs || !db) {
+                            return setBody(`<tr><td colspan="9" class="px-2 py-3 text-center text-red-600 border border-gray-300">Firestore 未就緒，無法讀取班表</td></tr>`);
+                        }
+
+                        const [yStr, mStr] = (monthInput?.value || ym).split('-');
+                        const year = parseInt(yStr, 10);
+                        const monthIdx = parseInt(mStr, 10) - 1;
+                        const monthStart = new Date(year, monthIdx, 1, 0, 0, 0, 0);
+                        const monthEnd = new Date(year, monthIdx + 1, 0, 23, 59, 59, 999);
+
+                        setBody(`<tr><td colspan="9" class="px-2 py-3 text-center text-gray-500 border border-gray-300">正在載入我的班表...</td></tr>`);
+
+                        const schedulesRef = collection(db, 'communities', cid, 'postSchedules');
+                        // 以 assignees 篩選本人；時間以前端過濾，避免多欄位 range 查詢限制
+                        const snap = await getDocs(query(schedulesRef, where('assignees', 'array-contains', uid)));
+                        const rows = [];
+
+                        const assigneeName = state?.currentUserData?.name || state?.currentUser?.displayName || state?.currentUser?.email || '本人';
+                        const titleName = typeof getUserTitleById === 'function' ? (getUserTitleById(uid) || '') : (state?.currentUserData?.title || '');
+
+                        snap.forEach(doc => {
+                            const d = doc.data();
+                            if (!d) return;
+
+                            const sDate = parseDate(d.startDate);
+                            const eDateRaw = parseDate(d.endDate);
+                            const eDate = eDateRaw || sDate;
+                            const startDT = applyTime(sDate, d.startTime || d.start, 0, 0);
+                            const endDT = applyTime(eDate, d.endTime || d.end, 23, 59);
+                            if (!startDT || !endDT) return;
+
+                            // 月份重疊判定
+                            const overlaps = (startDT <= monthEnd && endDT >= monthStart);
+                            if (!overlaps) return;
+
+                            const roleName = d.role || d.roleName || '—';
+                            const postName = d.post || d.postName || (pageState?.postsMap?.[d.postId]?.name) || '—';
+
+                            rows.push({
+                                role: roleName,
+                                assignee: assigneeName,
+                                title: titleName || '—',
+                                post: postName,
+                                startDateText: sDate ? `${fmtYMD(sDate)}(${typeof dayOfWeekShort === 'function' ? dayOfWeekShort(sDate) : ''})` : '',
+                                endDateText: eDate ? `${fmtYMD(eDate)}(${typeof dayOfWeekShort === 'function' ? dayOfWeekShort(eDate) : ''})` : '',
+                                startTimeText: startDT ? fmtHM(startDT) : '',
+                                endTimeText: endDT ? fmtHM(endDT) : '',
+                                status: statusLabel(startDT, endDT)
+                            });
+                        });
+
+                        if (!rows.length) {
+                            setBody(`<tr><td colspan="9" class="px-2 py-3 text-center text-gray-500 border border-gray-300">此月份無班表</td></tr>`);
                             return;
                         }
-                        
-                        const records = [];
-                        querySnapshot.forEach(doc => {
-                            records.push({ id: doc.id, ...doc.data() });
-                        });
-                        
-                        // 前端日期過濾與時間降序排序
-                        const filtered = records.filter(r => {
-                            const ts = r.timestamp?.toDate?.() || (r.timestamp ? new Date(r.timestamp) : null);
-                            if (!ts) return false;
-                            return ts >= startOfMonth && ts <= endOfMonth;
-                        }).sort((a, b) => {
-                            const timeA = a.timestamp?.toDate?.() || (a.timestamp ? new Date(a.timestamp) : new Date(0));
-                            const timeB = b.timestamp?.toDate?.() || (b.timestamp ? new Date(b.timestamp) : new Date(0));
-                            return timeB - timeA;
-                        });
-                        
-                        recordsListEl.innerHTML = '';
-                        filtered.forEach(record => {
-                            const card = document.createElement('div');
-                            card.className = 'bg-white p-3 rounded-lg shadow-sm border mb-3';
-                            const statusText = getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null);
-                            const statusColor = getStatusColor(statusText);
-                            const abnormalInfo = computeRecordAbnormal(record, state.currentUserData?.serviceCommunities || []);
-                            const abnormalHtml = (abnormalInfo && abnormalInfo.isAbnormal)
-                                ? `<div class="mt-1 flex items-center"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class="ml-2 text-xs text-gray-500">${abnormalInfo.detail}</span>` : ''}</div>`
-                                : '';
-                            card.innerHTML = `
-                                <div class="flex justify-between items-start">
-                                    <div>
-                                        <p class="font-bold text-lg ${statusColor}">${statusText}</p>
-                                        <p class="text-sm text-gray-600">${formatDate(record.timestamp)}</p>
-                                        ${abnormalHtml}
-                                    </div>
-                                </div>
-                                <div class="mt-2 flex space-x-2 overflow-x-auto">
-                                    <button class="photo-btn bg-green-500 text-white px-2 py-1 rounded text-sm" 
-                                        data-photos='${encodeURIComponent(JSON.stringify(record.photoUrls || []))}' 
-                                        data-descriptions='${encodeURIComponent(JSON.stringify(record.descriptions || []))}'>
-                                        <i data-lucide="image"></i> 照片 (${(record.photoUrls?.length || 0)})
-                                    </button>
-                                    <button class="map-btn bg-blue-500 text-white px-2 py-1 rounded text-sm" data-lat="${record.location?.latitude || 0}" data-lng="${record.location?.longitude || 0}">
-                                        <i data-lucide="map-pin"></i> 地圖
-                                    </button>
-                                    <button class="apply-mod-btn bg-orange-500 text-white px-2 py-1 rounded text-sm"
-                                        data-id="${record.id}"
-                                        data-type="${record.type || ''}"
-                                        data-ts="${(record.timestamp?.toMillis ? record.timestamp.toMillis() : (record.timestamp?.seconds ? record.timestamp.seconds * 1000 : (record.timestamp ? (new Date(record.timestamp)).getTime() : Date.now())))}"
-                                        data-locationname="${record.locationName || ''}">
-                                        <i data-lucide="edit"></i> 申請修改
-                                    </button>
-                                </div>
-                            `;
-                            recordsListEl.appendChild(card);
-                        });
-                         
-                        lucide.createIcons();
-                        
-                        document.querySelectorAll('.map-btn').forEach(btn => {
-                            btn.addEventListener('click', (e) => {
-                                const lat = parseFloat(e.currentTarget.dataset.lat);
-                                const lng = parseFloat(e.currentTarget.dataset.lng);
-                                if (Number.isFinite(lat) && Number.isFinite(lng)) openMapModal(lat, lng);
-                                else showToast("無位置資訊可顯示", true);
-                            });
-                        });
 
-                        // 申請修改按鈕事件（提交至 retroClockRequests，使用中文欄位）
-                        document.querySelectorAll('.apply-mod-btn').forEach(btn => {
-                            btn.addEventListener('click', async (e) => {
-                                const d = e.currentTarget.dataset;
-                                const tsMillis = parseInt(d.ts || '0', 10);
-                                const ts = Number.isFinite(tsMillis) && tsMillis > 0 ? new Date(tsMillis) : new Date();
-                                const recTypeRaw = d.type || '';
-                                const recLocationName = d.locationname || '';
-                                const typeMap = { clock_in: '上班', clock_out: '下班', out: '外出', arrive: '抵達', leave: '離開', return: '返回' };
-                                const recType = typeMap[recTypeRaw] || recTypeRaw;
-                                const backdrop = document.createElement('div');
-                                backdrop.className = 'fixed inset-0 bg-black bg-opacity-40 z-40';
-                                const modal = document.createElement('div');
-                                modal.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-4 z-50 w-[92%] max-w-[560px]';
-                                modal.innerHTML = `
-                                    <h3 class="text-lg font-bold mb-3">申請修改打卡資料</h3>
-                                    <div class="space-y-3">
-                                        <div class="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label class="text-sm font-medium">日期</label>
-                                                <input type="date" id="mod-date" class="w-full border border-gray-300 rounded-md p-2" value="${ts.toISOString().split('T')[0]}" />
-                                            </div>
-                                            <div>
-                                                <label class="text-sm font-medium">時間</label>
-                                                <input type="time" id="mod-time" class="w-full border border-gray-300 rounded-md p-2" value="${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}" />
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label class="text-sm font-medium">項目</label>
-                                            <select id="mod-type" class="w-full border border-gray-300 rounded-md p-2">
-                                                <option value="上班" ${recType==='上班' ? 'selected' : ''}>上班</option>
-                                                <option value="下班" ${recType==='下班' ? 'selected' : ''}>下班</option>
-                                                <option value="外出" ${recType==='外出' ? 'selected' : ''}>外出</option>
-                                                <option value="抵達" ${recType==='抵達' ? 'selected' : ''}>抵達</option>
-                                                <option value="離開" ${recType==='離開' ? 'selected' : ''}>離開</option>
-                                                <option value="返回" ${recType==='返回' ? 'selected' : ''}>返回</option>
-                                            </select>
-                                        </div>
-                                        <div id="mod-extra" class="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label class="text-sm font-medium">事由</label>
-                                                <input type="text" id="mod-reason" class="w-full border border-gray-300 rounded-md p-2" placeholder="請輸入事由" />
-                                            </div>
-                                            <div>
-                                                <label class="text-sm font-medium">地點</label>
-                                                <input type="text" id="mod-location" class="w-full border border-gray-300 rounded-md p-2" placeholder="請輸入地點" value="${recLocationName}" />
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label class="text-sm font-medium">備註</label>
-                                            <input type="text" id="mod-note" class="w-full border border-gray-300 rounded-md p-2" placeholder="請填寫申請原因/說明" />
-                                        </div>
-                                    </div>
-                                    <div class="flex justify-end gap-2 mt-4">
-                                        <button id="mod-cancel" class="px-3 py-2 border rounded-md">取消</button>
-                                        <button id="mod-submit" class="px-3 py-2 bg-orange-600 text-white rounded-md">送出審核</button>
-                                    </div>
-                                `;
-                                document.body.appendChild(backdrop);
-                                document.body.appendChild(modal);
-                                const typeSelect = modal.querySelector('#mod-type');
-                                const reasonInput = modal.querySelector('#mod-reason');
-                                const locInput = modal.querySelector('#mod-location');
-                                const toggle = () => {
-                                    const need = ['外出','抵達','離開'].includes(typeSelect.value);
-                                    modal.querySelector('#mod-extra').style.display = need ? 'grid' : 'none';
-                                };
-                                typeSelect.addEventListener('change', toggle); toggle();
-                                modal.querySelector('#mod-cancel').addEventListener('click', () => { backdrop.remove(); modal.remove(); });
-                                backdrop.addEventListener('click', () => { backdrop.remove(); modal.remove(); });
-                                modal.querySelector('#mod-submit').addEventListener('click', async () => {
-                                    try {
-                                        const { addDoc, collection, Timestamp } = window.__fs; const db = window.__db; const user = window.__auth?.currentUser;
-                                        if (!user) { showToast('尚未登入', true); return; }
-                                        const dateStr = modal.querySelector('#mod-date').value;
-                                        const timeStr = modal.querySelector('#mod-time').value;
-                                        const type = typeSelect.value;
-                                        const reason = (reasonInput.value || '').trim();
-                                        const locationName = (locInput.value || '').trim();
-                                        if (!dateStr || !timeStr) { showToast('請填寫日期與時間', true); return; }
-                                        if (['外出','抵達','離開'].includes(type) && (!reason || !locationName)) { showToast('外出/抵達/離開需填寫事由與地點', true); return; }
-                                        const dt = new Date(`${dateStr}T${timeStr}:00`);
-                                        const payload = {
-                                            userId: user.uid,
-                                            type,
-                                            reason: reason || '',
-                                            locationName: locationName || '',
-                                            requestedAt: Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date(),
-                                            targetTime: Timestamp?.fromDate ? Timestamp.fromDate(dt) : dt,
-                                            status: 'pending'
-                                        };
-                                        await addDoc(collection(db, 'retroClockRequests'), payload);
-                                        showToast('已送出修改申請');
-                                        backdrop.remove(); modal.remove();
-                                    } catch (err) {
-                                        console.error('送出申請失敗', err);
-                                        showToast('送出申請失敗，請稍後再試', true);
-                                    }
-                                });
-                            });
-                        });
-                        
-                        document.querySelectorAll('.photo-btn').forEach(btn => {
-                            btn.addEventListener('click', (e) => {
-                                const photos = JSON.parse(decodeURIComponent(e.currentTarget.dataset.photos || '%5B%5D'));
-                                const descriptions = JSON.parse(decodeURIComponent(e.currentTarget.dataset.descriptions || '%5B%5D'));
-                                openPhotoModal(photos, descriptions);
-                            });
-                        });
-                    }, (error) => {
-                        const recordsListEl = document.getElementById('records-list');
-                        const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
-                        if (expectedCodes.includes(error?.code)) {
-                            console.warn("讀取 clockInRecords 失敗:", error?.code, error?.message || error);
-                        } else {
-                            console.error("Error fetching records: ", error);
-                        }
-                        if (recordsListEl) {
-                            (async () => {
-                                try {
-                                    const { doc, getDoc, collection, query, where, getDocs } = window.__fs; const db2 = window.__db;
-                                    const uid = state.currentUser?.uid || window.__auth?.currentUser?.uid;
-                                    if (!uid) { recordsListEl.innerHTML = `<p class="text-center text-gray-500 p-4">本月無打卡紀錄</p>`; return; }
+                        setBody(rows.map(r => `
+                            <tr>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.role}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.assignee}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.title}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.post}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.startDateText}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.endDateText}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.startTimeText}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.endTimeText}</td>
+                                <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${r.status}</td>
+                            </tr>
+                        `).join(''));
+                    } catch (err) {
+                        console.error('載入班表失敗', err);
+                        setBody(`<tr><td colspan="9" class="px-2 py-3 text-center text-red-600 border border-gray-300">載入班表失敗，請稍後再試</td></tr>`);
+                    }
+                }
 
-                                    // Fallback：僅以 userId 讀取紀錄，再在前端依月份過濾
-                                    const q2 = query(collection(db2, 'clockInRecords'), where('userId', '==', uid));
-                                    const snap2 = await getDocs(q2);
-                                    const records = [];
-                                    snap2.forEach(d => { records.push({ id: d.id, ...d.data() }); });
-                                    const filtered = records.filter(r => {
-                                        const ts = r.timestamp?.toDate?.() || (r.timestamp ? new Date(r.timestamp) : null);
-                                        return ts && ts >= startOfMonth && ts <= endOfMonth;
-                                    }).sort((a, b) => {
-                                        const timeA = a.timestamp?.toDate?.() || (a.timestamp ? new Date(a.timestamp) : new Date(0));
-                                        const timeB = b.timestamp?.toDate?.() || (b.timestamp ? new Date(b.timestamp) : new Date(0));
-                                        return timeB - timeA;
-                                    });
+                monthInput?.addEventListener('change', loadMySchedules);
+                loadMySchedules();
+            }
 
-                                    if (filtered.length > 0) {
-                                        recordsListEl.innerHTML = '';
-                                        filtered.forEach(record => {
-                                            const card = document.createElement('div');
-                                            card.className = 'bg-white p-3 rounded-lg shadow-sm border mb-3';
-                                            const statusText = getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null);
-                                            const statusColor = getStatusColor(statusText);
-                                            const abnormalInfo = computeRecordAbnormal(record, state.currentUserData?.serviceCommunities || []);
-                                            const abnormalHtml = (abnormalInfo && abnormalInfo.isAbnormal)
-                                                ? `<div class="mt-1 flex items-center"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class="ml-2 text-xs text-gray-500">${abnormalInfo.detail}</span>` : ''}</div>`
-                                                : '';
-                                            card.innerHTML = `
-                                                <div class="flex justify-between items-start">
-                                                    <div>
-                                                        <p class="font-bold text-lg ${statusColor}">${statusText}</p>
-                                                        <p class="text-sm text-gray-600">${formatDate(record.timestamp)}</p>
-                                                        ${abnormalHtml}
-                                                    </div>
-                                                </div>
-                                                <div class="mt-2 flex space-x-2 overflow-x-auto">
-                                                    <button class="photo-btn bg-green-500 text-white px-2 py-1 rounded text-sm" 
-                                                        data-photos='${encodeURIComponent(JSON.stringify(record.photoUrls || []))}' 
-                                                        data-descriptions='${encodeURIComponent(JSON.stringify(record.descriptions || []))}'>
-                                                        <i data-lucide="image"></i> 照片 (${(record.photoUrls?.length || 0)})
-                                                    </button>
-                                                    <button class="map-btn bg-blue-500 text-white px-2 py-1 rounded text-sm" data-lat="${record.location?.latitude || 0}" data-lng="${record.location?.longitude || 0}">
-                                                        <i data-lucide="map-pin"></i> 地圖
-                                                    </button>
-                                                    <button class="apply-mod-btn bg-orange-500 text-white px-2 py-1 rounded text-sm"
-                                                        data-id="${record.id}"
-                                                        data-type="${record.type || ''}"
-                                                        data-ts="${(record.timestamp?.toMillis ? record.timestamp.toMillis() : (record.timestamp?.seconds ? record.timestamp.seconds * 1000 : (record.timestamp ? (new Date(record.timestamp)).getTime() : Date.now())))}"
-                                                        data-locationname="${record.locationName || ''}">
-                                                        <i data-lucide="edit"></i> 申請修改
-                                                    </button>
-                                                </div>
-                                            `;
-                                            recordsListEl.appendChild(card);
-                                        });
-                                         
-                                        try { lucide.createIcons(); } catch(e) {}
-                                        document.querySelectorAll('.map-btn').forEach(btn => {
-                                            btn.addEventListener('click', (e) => {
-                                                const lat = parseFloat(e.currentTarget.dataset.lat);
-                                                const lng = parseFloat(e.currentTarget.dataset.lng);
-                                                if (Number.isFinite(lat) && Number.isFinite(lng)) openMapModal(lat, lng);
-                                                else showToast("無位置資訊可顯示", true);
-                                            });
-                                        });
-                                        
-                                        document.querySelectorAll('.apply-mod-btn').forEach(btn => {
-                                            btn.addEventListener('click', async (e) => {
-                                                const d = e.currentTarget.dataset;
-                                                const tsMillis = parseInt(d.ts || '0', 10);
-                                                const ts = Number.isFinite(tsMillis) && tsMillis > 0 ? new Date(tsMillis) : new Date();
-                                                const recTypeRaw = d.type || '';
-                                                const recLocationName = d.locationname || '';
-                                                const typeMap = { clock_in: '上班', clock_out: '下班', out: '外出', arrive: '抵達', leave: '離開', return: '返回' };
-                                                const recType = typeMap[recTypeRaw] || recTypeRaw;
-                                                const backdrop = document.createElement('div');
-                                                backdrop.className = 'fixed inset-0 bg-black bg-opacity-40 z-40';
-                                                const modal = document.createElement('div');
-                                                modal.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-4 z-50 w-[92%] max-w-[560px]';
-                                                modal.innerHTML = `
-                                                    <h3 class="text-lg font-bold mb-3">申請修改打卡資料</h3>
-                                                    <div class="space-y-3">
-                                                        <div class="grid grid-cols-2 gap-3">
-                                                            <div>
-                                                                <label class="text-sm font-medium">日期</label>
-                                                                <input type="date" id="mod-date" class="w-full border border-gray-300 rounded-md p-2" value="${ts.toISOString().split('T')[0]}" />
-                                                            </div>
-                                                            <div>
-                                                                <label class="text-sm font-medium">時間</label>
-                                                                <input type="time" id="mod-time" class="w-full border border-gray-300 rounded-md p-2" value="${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}" />
-                                                            </div>
-                                                        </div>
-                                                        <div>
-                                                            <label class="text-sm font-medium">項目</label>
-                                                            <select id="mod-type" class="w-full border border-gray-300 rounded-md p-2">
-                                                                <option value="上班" ${recType==='上班' ? 'selected' : ''}>上班</option>
-                                                                <option value="下班" ${recType==='下班' ? 'selected' : ''}>下班</option>
-                                                                <option value="外出" ${recType==='外出' ? 'selected' : ''}>外出</option>
-                                                                <option value="抵達" ${recType==='抵達' ? 'selected' : ''}>抵達</option>
-                                                                <option value="離開" ${recType==='離開' ? 'selected' : ''}>離開</option>
-                                                                <option value="返回" ${recType==='返回' ? 'selected' : ''}>返回</option>
-                                                            </select>
-                                                        </div>
-                                                        <div id="mod-extra" class="grid grid-cols-2 gap-3">
-                                                            <div>
-                                                                <label class="text-sm font-medium">事由</label>
-                                                                <input type="text" id="mod-reason" class="w-full border border-gray-300 rounded-md p-2" placeholder="請輸入事由" />
-                                                            </div>
-                                                            <div>
-                                                                <label class="text-sm font-medium">地點</label>
-                                                                <input type="text" id="mod-location" class="w-full border border-gray-300 rounded-md p-2" placeholder="請輸入地點" value="${recLocationName}" />
-                                                            </div>
-                                                        </div>
-                                                        <div>
-                                                            <label class="text-sm font-medium">備註</label>
-                                                            <input type="text" id="mod-note" class="w-full border border-gray-300 rounded-md p-2" placeholder="請填寫申請原因/說明" />
-                                                        </div>
-                                                    </div>
-                                                    <div class="flex justify-end gap-2 mt-4">
-                                                        <button id="mod-cancel" class="px-3 py-2 border rounded-md">取消</button>
-                                                        <button id="mod-submit" class="px-3 py-2 bg-orange-600 text-white rounded-md">送出審核</button>
-                                                    </div>
-                                                `;
-                                                document.body.appendChild(backdrop);
-                                                document.body.appendChild(modal);
-                                                const typeSelect = modal.querySelector('#mod-type');
-                                                const reasonInput = modal.querySelector('#mod-reason');
-                                                const locInput = modal.querySelector('#mod-location');
-                                                const toggle = () => {
-                                                    const need = ['外出','抵達','離開'].includes(typeSelect.value);
-                                                    modal.querySelector('#mod-extra').style.display = need ? 'grid' : 'none';
-                                                };
-                                                typeSelect.addEventListener('change', toggle); toggle();
-                                                modal.querySelector('#mod-cancel').addEventListener('click', () => { backdrop.remove(); modal.remove(); });
-                                                backdrop.addEventListener('click', () => { backdrop.remove(); modal.remove(); });
-                                                modal.querySelector('#mod-submit').addEventListener('click', async () => {
-                                                    try {
-                                                        const { addDoc, collection, Timestamp } = window.__fs; const db = window.__db; const user = window.__auth?.currentUser;
-                                                        if (!user) { showToast('尚未登入', true); return; }
-                                                        const dateStr = modal.querySelector('#mod-date').value;
-                                                        const timeStr = modal.querySelector('#mod-time').value;
-                                                        const type = typeSelect.value;
-                                                        const reason = (reasonInput.value || '').trim();
-                                                        const locationName = (locInput.value || '').trim();
-                                                        if (!dateStr || !timeStr) { showToast('請填寫日期與時間', true); return; }
-                                                        if (['外出','抵達','離開'].includes(type) && (!reason || !locationName)) { showToast('外出/抵達/離開需填寫事由與地點', true); return; }
-                                                        const dt = new Date(`${dateStr}T${timeStr}:00`);
-                                                        const payload = {
-                                                            userId: user.uid,
-                                                            type,
-                                                            reason: reason || '',
-                                                            locationName: locationName || '',
-                                                            requestedAt: Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date(),
-                                                            targetTime: Timestamp?.fromDate ? Timestamp.fromDate(dt) : dt,
-                                                            status: 'pending'
-                                                        };
-                                                        await addDoc(collection(db, 'retroClockRequests'), payload);
-                                                        showToast('已送出修改申請');
-                                                        backdrop.remove(); modal.remove();
-                                                    } catch (err) {
-                                                        console.error('送出申請失敗', err);
-                                                        showToast('送出申請失敗，請稍後再試', true);
-                                                    }
-                                                });
-                                            });
-                                        });
-                                        
-                                        document.querySelectorAll('.photo-btn').forEach(btn => {
-                                            btn.addEventListener('click', (e) => {
-                                                const photos = JSON.parse(decodeURIComponent(e.currentTarget.dataset.photos || '%5B%5D'));
-                                                const descriptions = JSON.parse(decodeURIComponent(e.currentTarget.dataset.descriptions || '%5B%5D'));
-                                                openPhotoModal(photos, descriptions);
-                                            });
-                                        });
-                                    } else {
+
                                         const userRef = doc(db2, 'users', uid);
                                         const userSnap = await getDoc(userRef);
                                         if (userSnap.exists() && userSnap.data().clockInStatus) {
@@ -5023,50 +4737,8 @@
                         }
                     });
 
-                    state.activeListeners.push(unsubscribe);
-                };
 
-                monthInput.addEventListener('change', loadRecords);
-                loadRecords();
-
-                // 月報表：選擇月份彈窗
-                const monthBtn = document.getElementById('open-month-report');
-                monthBtn?.addEventListener('click', () => openMonthReportModal());
-
-                function openMonthReportModal() {
-                    const now = new Date();
-                    const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-                    const modal = document.createElement('div');
-                    modal.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
-                    modal.innerHTML = `
-                        <div class="bg-white rounded-lg shadow-xl w-11/12 max-w-md overflow-hidden">
-                            <div class="px-4 py-3 bg-indigo-600 text-white flex items-center justify-between">
-                                <h3 class="font-semibold">選擇月份</h3>
-                                <button class="close-month-modal">
-                                    <i data-lucide="x" class="w-5 h-5"></i>
-                                </button>
-                            </div>
-                            <div class="p-4 space-y-4">
-                                <div>
-                                    <label class="block text-sm font-medium mb-1">月份</label>
-                                    <input type="month" id="month-input" value="${ym}" class="w-full border border-gray-300 rounded-md px-3 py-2">
-                                </div>
-                                <div class="flex justify-end space-x-2">
-                                    <button class="close-month-modal px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">取消</button>
-                                    <button id="gen-month-report" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">生成月報表</button>
-                                </div>
-                            </div>
-                        </div>`;
-                    document.body.appendChild(modal);
-                    try { lucide.createIcons(); } catch(e) {}
-                    modal.querySelectorAll('.close-month-modal').forEach(btn => btn.addEventListener('click', () => document.body.removeChild(modal)));
-                    document.getElementById('gen-month-report').addEventListener('click', async () => {
-                        const mi = document.getElementById('month-input').value;
-                        if (!mi) { showToast('請選擇月份', true); return; }
-                        document.body.removeChild(modal);
-                        await generateMonthlyReport(mi);
-                    });
-                }
+                /* 已移除月報表彈窗（改以本人班表表格呈現） */
 
                 async function generateMonthlyReport(ymStr) {
                     // ymStr: YYYY-MM
