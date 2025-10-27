@@ -2699,24 +2699,51 @@
                                 let role = 'user';
                                 let startDefault = '';
                                 let endDefault = '';
+                                const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
+                                const parseRange = (s) => {
+                                    const m = (s || '').toString().match(/(\d{1,2}:\d{2})\s*[-~～至到]\s*(\d{1,2}:\d{2})/);
+                                    return m ? { start: m[1], end: m[2] } : null;
+                                };
+                                const pickFromObj = (obj) => {
+                                    if (!obj) return;
+                                    role = (obj.title || obj.role || role).toString().trim() || role;
+                                    const candidatesStart = ['shiftStart','workShiftStart','defaultStart','workStart','startTime','start','scheduleStart','classStart'];
+                                    const candidatesEnd   = ['shiftEnd','workShiftEnd','defaultEnd','workEnd','endTime','end','scheduleEnd','classEnd'];
+                                    for (const k of candidatesStart) { if (isHM(obj[k])) { startDefault = obj[k]; break; } }
+                                    for (const k of candidatesEnd)   { if (isHM(obj[k])) { endDefault = obj[k]; break; } }
+                                    if (!startDefault || !endDefault) {
+                                        const r = parseRange(obj.shift || obj.workShift || obj.defaultShift || obj.shiftHM);
+                                        if (r) { startDefault = startDefault || r.start; endDefault = endDefault || r.end; }
+                                    }
+                                    const nested = obj.shiftHours || obj.schedule || obj.workHours;
+                                    if (nested) {
+                                        if (isHM(nested.start)) startDefault = startDefault || nested.start;
+                                        if (isHM(nested.end))   endDefault   = endDefault   || nested.end;
+                                    }
+                                };
                                 try {
+                                    // 優先：Firestore users/{uid}
                                     const uSnap = await getDoc(doc(db, 'users', user.uid));
-                                    if (uSnap?.exists()) {
-                                        const u = uSnap.data();
-                                        role = (u?.title || u?.role || role).toString().trim() || role;
-                                        const candidatesStart = ['shiftStart','workShiftStart','defaultStart','workStart','startTime','start'];
-                                        const candidatesEnd   = ['shiftEnd','workShiftEnd','defaultEnd','workEnd','endTime','end'];
-                                        const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
-                                        for (const k of candidatesStart) {
-                                            if (isHM(u?.[k])) { startDefault = u[k]; break; }
-                                        }
-                                        for (const k of candidatesEnd) {
-                                            if (isHM(u?.[k])) { endDefault = u[k]; break; }
-                                        }
-                                        if (!startDefault || !endDefault) {
-                                            const sh = (u?.shift || u?.workShift || '').toString();
-                                            const m = sh.match(/(\d{1,2}:\d{2})\s*[-~～]\s*(\d{1,2}:\d{2})/);
-                                            if (m) { startDefault = startDefault || m[1]; endDefault = endDefault || m[2]; }
+                                    if (uSnap?.exists()) pickFromObj(uSnap.data());
+                                } catch (_) {}
+                                try {
+                                    // 補：已載入的當前使用者資料
+                                    if (state.currentUserData) pickFromObj(state.currentUserData);
+                                } catch (_) {}
+                                try {
+                                    // 角色預設（設定檔）：settings/general.roleDefaults[role]
+                                    if (!startDefault || !endDefault) {
+                                        const sSnap = await getDoc(doc(db, 'settings', 'general'));
+                                        if (sSnap?.exists()) {
+                                            const g = sSnap.data() || {};
+                                            const roleDefs = g.roleDefaults || g.roleDefaultShifts || {};
+                                            const def = roleDefs[role] || roleDefs[(role||'').trim()];
+                                            if (def) {
+                                                if (isHM(def.start)) startDefault = startDefault || def.start;
+                                                if (isHM(def.end))   endDefault   = endDefault   || def.end;
+                                                const r = parseRange(def.shift || def.range);
+                                                if (r) { startDefault = startDefault || r.start; endDefault = endDefault || r.end; }
+                                            }
                                         }
                                     }
                                 } catch (_) {}
