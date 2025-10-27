@@ -3742,14 +3742,52 @@
                             state.uiShiftStatus = statusMap;
                         } catch (e) { console.warn('同步班表狀態失敗', e); }
                     };
-                    __syncUiShiftStatusFromBackend().then(()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} })
+                    // 回溯自動下班：針對已過 30 分鐘仍未下班的過去班別，自動補紀錄為排定 endAt
+                    const __ensureRetroAutoClockOutForPastShifts = async () => {
+                        try {
+                            const user = window.__auth?.currentUser; const db = window.__db; const fs = window.__fs || {};
+                            const { collection, query, where, orderBy, getDocs, Timestamp } = fs || {};
+                            if (!user || !db || !collection || !query || !where || !getDocs || !Timestamp) return;
+                            const now = new Date();
+                            for (const it of (list || [])) {
+                                const shiftId = deriveShiftId(it, iso);
+                                const endAt = toDateFromIsoHM(it.endDateIso || iso, it.end || '');
+                                if (!endAt) continue;
+                                const threshold = new Date(endAt.getTime() + 30*60*1000);
+                                if (now < threshold) continue;
+                                const windowStart = new Date(endAt.getTime() - 12*60*60*1000);
+                                const windowEnd = new Date(endAt.getTime() + 12*60*60*1000);
+                                const q = query(
+                                    collection(db, 'clockInRecords'),
+                                    where('userId','==', user.uid),
+                                    where('timestamp','>=', Timestamp.fromDate(windowStart)),
+                                    where('timestamp','<=', Timestamp.fromDate(windowEnd)),
+                                    orderBy('timestamp','asc')
+                                );
+                                const snap = await getDocs(q);
+                                let ended = false;
+                                snap.docs.forEach(d=>{
+                                    const r = d.data() || {};
+                                    const rt = r?.timestamp?.toDate ? r.timestamp.toDate() : null;
+                                    if (!rt) return;
+                                    if (rt >= endAt && rt <= new Date(endAt.getTime()+30*60*1000) &&
+                                        (r.type === '下班' || r.type === '自動下班')) { ended = true; }
+                                });
+                                const ui = state.uiShiftStatus?.[shiftId];
+                                if (!ended && (!ui || !ui.ended)) {
+                                    await createAutoClockOutRecord(endAt, shiftId);
+                                }
+                            }
+                        } catch (e) { console.warn('回溯自動下班失敗', e); }
+                    };
+                    __syncUiShiftStatusFromBackend().then(async ()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} try { await __ensureRetroAutoClockOutForPastShifts(); } catch(_){}})
                         .catch(()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} });
-                    // 每分鐘動態刷新提示與按鈕狀態（含後端紀錄同步）
+                    // 每分鐘動態刷新提示與按鈕狀態（含後端紀錄同步＋回溯檢查）
                     try {
                         if (window.__shiftRefreshIntervalId) { clearInterval(window.__shiftRefreshIntervalId); }
                         window.__shiftRefreshIntervalId = setInterval(() => {
                             try {
-                                __syncUiShiftStatusFromBackend().then(()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} });
+                                __syncUiShiftStatusFromBackend().then(async ()=>{ try { applyShiftButtonEnable(panel, iso, list); } catch (_) {} try { await __ensureRetroAutoClockOutForPastShifts(); } catch(_){}} );
                             } catch (_) {}
                         }, 60 * 1000);
                     } catch (_) {}
@@ -3945,28 +3983,29 @@
                                 }
                                 return;
                             }
-                            // 時點已達：立即自動下班
-                            if (now >= threshold) { await createAutoClockOutRecord(new Date(), shiftId); return; }
+                            // 時點已達：立即自動下班（紀錄時間為排定下班時間 endAt）
+                            if (now >= threshold) { await createAutoClockOutRecord(endAt, shiftId); return; }
                             // 已有排程則不重複設定
                             if (shiftId && window.__autoClockTimerMap[shiftId]) return;
                             const delay = Math.max(0, threshold.getTime() - now.getTime());
                             window.__autoClockTimerMap[shiftId] = setTimeout(async ()=>{
                                 delete window.__autoClockTimerMap[shiftId];
                                 const latest = state.uiShiftStatus?.[shiftId];
-                                if (!latest || !latest.ended) { await createAutoClockOutRecord(new Date(), shiftId); }
+                                if (!latest || !latest.ended) { await createAutoClockOutRecord(endAt, shiftId); }
                             }, delay);
                         } catch (e) { console.warn('ensureAutoClockOutForShift 失敗', e); }
                     }
                     async function createAutoClockOutRecord(ts, shiftId) {
                         try {
                             const user = window.__auth?.currentUser; if (!user) return;
-                            const db = window.__db; const { addDoc, collection, Timestamp, doc, updateDoc, serverTimestamp } = window.__fs;
+                            const db = window.__db; const { addDoc, collection, Timestamp, doc, updateDoc, serverTimestamp, GeoPoint } = window.__fs;
                             const loc = state.currentLocation || { lat: 0, lng: 0 };
+                            const gp = (typeof GeoPoint === 'function') ? new GeoPoint(loc.lat || 0, loc.lng || 0) : { lat: loc.lat || 0, lng: loc.lng || 0 };
                             await addDoc(collection(db, 'clockInRecords'), {
                                 userId: user.uid,
                                 type: '自動下班',
                                 timestamp: Timestamp.fromDate(ts),
-                                location: loc,
+                                location: gp,
                                 photoUrls: [],
                                 descriptions: [],
                                 isAutomatic: true,
