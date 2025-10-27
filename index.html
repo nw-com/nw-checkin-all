@@ -5205,12 +5205,11 @@
                                             <thead>
                                                 <tr class="bg-gray-100">
                                                     <th class="border px-2 py-1">日期</th>
-                                                    <th class="border px-2 py-1">星期幾</th>
-                                                    <th class="border px-2 py-1">當日上班狀態+打卡時間</th>
-                                                    <th class="border px-2 py-1">當日下班狀態+打卡時間</th>
+                                                    <th class="border px-2 py-1">星期</th>
+                                                    <th class="border px-2 py-1">上班打卡時間</th>
+                                                    <th class="border px-2 py-1">下班打卡時間</th>
                                                     <th class="border px-2 py-1">總時數</th>
-                                                    <th class="border px-2 py-1">外出次數</th>
-                                                    <th class="border px-2 py-1">假日/請假日/值班</th>
+                                                    <th class="border px-2 py-1">備註</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="month-report-body"></tbody>
@@ -5247,8 +5246,8 @@
                         const fmt = (dt) => dt ? `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}` : '';
                         const startTime = startRecord ? (startRecord.timestamp?.toDate?.() || new Date(startRecord.timestamp)) : null;
                         const endTime = endRecord ? (endRecord.timestamp?.toDate?.() || new Date(endRecord.timestamp)) : null;
-                        const startText = startRecord ? `${startRecord.type}${startTime ? ' '+fmt(startTime) : ''}` : '';
-                        const endText = endRecord ? `${endRecord.type}${endTime ? ' '+fmt(endTime) : ''}` : '';
+                        const startText = startTime ? fmt(startTime) : '';
+                        const endText = endTime ? fmt(endTime) : '';
 
                         // 總時數
                         let totalHours = '';
@@ -5257,8 +5256,6 @@
                             totalHours = (diffMs / 3600000).toFixed(2);
                         }
 
-                        // 外出次數
-                        const outboundCount = records.filter(r => r.type === '外出').length;
 
                         // 讀取使用者本月上班設定以判斷假日（若為值班日則不標示假日）
                         let indicators = [];
@@ -5285,7 +5282,7 @@
                                 const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
                                 const isDuty = isDutyBySpecial || isRosterDuty;
                                 // 非值班且不在使用者自訂工作日，才標示假日
-                                if (!isDuty && !set.has(d)) indicators.push('假日');
+                                if (!isDuty && !set.has(d)) indicators.push('排休');
                             } else {
                                 // 後備判斷：週末為假日
                                 // 若為值班則不標示假日
@@ -5301,7 +5298,7 @@
                                 const normalize = (s) => (s || '').trim();
                                 const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
                                 const isDuty = isDutyBySpecial || isRosterDuty;
-                                if (!isDuty && (w === 6 || w === 0)) indicators.push('假日');
+                                if (!isDuty && (w === 6 || w === 0)) indicators.push('排休');
                             }
                         } catch(e) {
                             // 讀取失敗，維持週末為假日
@@ -5317,7 +5314,7 @@
                             const normalize = (s) => (s || '').trim();
                             const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
                             const isDuty = isDutyBySpecial || isRosterDuty;
-                            if (!isDuty && (w === 6 || w === 0)) indicators.push('假日');
+                            if (!isDuty && (w === 6 || w === 0)) indicators.push('排休');
                         }
                         // 請假日（時間範圍相交）
                         const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
@@ -5327,7 +5324,7 @@
                             if (!s || !e) return false;
                             return s < nextDay && e > dayStart; // overlap
                         });
-                        if (isLeave) indicators.push('請假日');
+                        if (isLeave) indicators.push('請假');
                         // 值班（有當日特殊勤務）
                         const isDutyBySpecial = duties.some(di => {
                             const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
@@ -5340,7 +5337,6 @@
                         const normalizeName = (s) => (s || '').trim();
                         const isRosterDuty = Array.isArray(rosterNames) && rosterNames.some(n => normalizeName(n) === normalizeName(myName));
                         const isDutyFinal = isDutyBySpecial || isRosterDuty;
-                        if (isDutyFinal) indicators.push('值班');
 
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
@@ -5349,7 +5345,6 @@
                             <td class="border px-2 py-1">${startText}</td>
                             <td class="border px-2 py-1">${endText}</td>
                             <td class="border px-2 py-1">${totalHours}</td>
-                            <td class="border px-2 py-1 text-center">${outboundCount}</td>
                             <td class="border px-2 py-1">${indicators.join('、')}</td>`;
                         bodyEl.appendChild(tr);
                     }
@@ -13529,8 +13524,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const captureControls = document.getElementById('capture-controls');
                 const confirmControls = document.getElementById('confirm-controls');
 
-                // 以偏好後鏡頭開始，失敗時回退到前鏡頭，再回退為任何相機
-                let currentFacingMode = "environment";
+                // 強制使用前鏡頭（自拍）
+                let currentFacingMode = "user";
                 const setupStream = async (stream) => {
                     videoStream = stream;
                     video.muted = true;
@@ -13541,45 +13536,17 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     lucide.createIcons();
                 };
 
-                navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode }, audio: false })
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "user" } }, audio: false })
                     .then(stream => setupStream(stream))
-                    .catch(async err => {
-                        console.warn("Camera first attempt failed:", err);
-                        // 回退：前鏡頭
-                        try {
-                            currentFacingMode = "user";
-                            const stream2 = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode }, audio: false });
-                            await setupStream(stream2);
-                        } catch (err2) {
-                            console.warn("Camera second attempt failed (user):", err2);
-                            // 最終回退：任意可用相機
-                            try {
-                                const stream3 = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                                await setupStream(stream3);
-                            } catch (err3) {
-                                console.error("Camera failed after all fallbacks:", err, err2, err3);
-                                showToast("無法開啟相機，請授權或檢查裝置", true);
-                                close();
-                                return;
-                            }
-                        }
+                    .catch((err) => {
+                        console.error("前鏡頭開啟失敗:", err);
+                        showToast("無法開啟前鏡頭，請授權或檢查裝置", true);
+                        close();
+                        return;
                     });
 
-                document.getElementById('switch-camera-btn').addEventListener('click', async () => {
-                    stopCamera();
-                    const camLoaderEl2 = document.getElementById('camera-loader');
-                    if (camLoaderEl2 && camLoaderEl2.classList) { camLoaderEl2.classList.remove('hide'); }
-                    currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
-                    try {
-                        const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode }, audio: false });
-                        await setupStream(newStream);
-                    } catch (error) {
-                        console.error("切換相機失敗:", error);
-                        showToast("切換相機失敗，請重試", true);
-                        const camLoaderEl3 = document.getElementById('camera-loader');
-                        if (camLoaderEl3 && camLoaderEl3.classList) { camLoaderEl3.classList.add('hide'); }
-                    }
-                });
+                const switchBtn = document.getElementById('switch-camera-btn');
+                if (switchBtn) { switchBtn.style.display = 'none'; }
 
                 document.getElementById('capture-btn').addEventListener('click', () => {
                     const context = canvas.getContext('2d');
