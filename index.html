@@ -5295,86 +5295,35 @@
                         }
 
 
-                        // 讀取使用者本月上班設定以判斷假日（若為值班日則不標示假日）
+                        // 指示標註：依班表與請假來判斷「排休」，不再以週末或使用者工作日設定判斷。
+                        // 規則：當日未排班、未請假、亦非值班（特殊勤務/週五值班名單），標示「排休」。
                         let indicators = [];
-                        try {
-                            const ymId = `${year}-${String(monthIndex+1).padStart(2,'0')}`;
-                            const { doc, getDoc } = window.__fs || {};
-                            const db = window.__db;
-                            if (doc && getDoc && db) {
-                                const ref = doc(db, 'users', state.currentUser.uid, 'workdays', ymId);
-                                const snap = await getDoc(ref);
-                                const days = snap.exists() ? (snap.data().days || []) : [];
-                                const set = new Set(days.map(n => Number(n)));
-                                const hasWorkdayConfig = Array.isArray(days) && days.length > 0;
-                                // 值班判定（特殊勤務或在週五值班名單內）
-                                const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
-                                const isDutyBySpecial = duties.some(di => {
-                                    const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
-                                    const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
-                                    if (!s || !e) return false;
-                                    return s < nextDay && e > dayStart;
-                                });
-                                const myName = state.currentUserData?.name || state.currentUser.displayName || state.currentUser.email || '';
-                                const names = fridayDutyRoster[dateLabel] || [];
-                                const normalize = (s) => (s || '').trim();
-                                const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
-                                const isDuty = isDutyBySpecial || isRosterDuty;
-                                const hasAnyRecord = records.length > 0;
-                                const scheduled = hasScheduleForUser(dateLabel);
-                                // 非值班、非排班、當日無打卡，才標示「排休」。
-                                // 若「工作日設定」為空（尚未配置），則僅在週末標示「排休」。
-                                const isWeekend = (w === 6 || w === 0);
-                                const shouldMarkRest = !isDuty && !scheduled && !hasAnyRecord && (hasWorkdayConfig ? !set.has(d) : isWeekend);
-                                if (shouldMarkRest) indicators.push('排休');
-                            } else {
-                                // 後備判斷：週末為假日
-                                // 若為值班則不標示假日
-                                const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
-                                const isDutyBySpecial = duties.some(di => {
-                                    const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
-                                    const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
-                                    if (!s || !e) return false;
-                                    return s < nextDay && e > dayStart;
-                                });
-                                const myName = state.currentUserData?.name || state.currentUser.displayName || state.currentUser.email || '';
-                                const names = fridayDutyRoster[dateLabel] || [];
-                                const normalize = (s) => (s || '').trim();
-                                const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
-                                const isDuty = isDutyBySpecial || isRosterDuty;
-                                const hasAnyRecord = records.length > 0;
-                                const scheduled = hasScheduleForUser(dateLabel);
-                                if (!isDuty && !scheduled && !hasAnyRecord && (w === 6 || w === 0)) indicators.push('排休');
-                            }
-                        } catch(e) {
-                            // 讀取失敗，維持週末為假日
-                            const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
-                            const isDutyBySpecial = duties.some(di => {
-                                const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
-                                const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
-                                if (!s || !e) return false;
-                                return s < nextDay && e > dayStart;
-                            });
-                            const myName = state.currentUserData?.name || state.currentUser.displayName || state.currentUser.email || '';
-                            const names = fridayDutyRoster[dateLabel] || [];
-                            const normalize = (s) => (s || '').trim();
-                            const isRosterDuty = Array.isArray(names) && names.some(n => normalize(n) === normalize(myName));
-                            const isDuty = isDutyBySpecial || isRosterDuty;
-                            const hasAnyRecord = records.length > 0;
-                            const scheduled = hasScheduleForUser(dateLabel);
-                            if (!isDuty && !scheduled && !hasAnyRecord && (w === 6 || w === 0)) indicators.push('排休');
-                        }
-                        // 請假日（時間範圍相交）
                         const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
+                        // 值班判定（特殊勤務或在週五值班名單內）
+                        const isDutyBySpecial = duties.some(di => {
+                            const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
+                            const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
+                            if (!s || !e) return false;
+                            return s < nextDay && e > dayStart;
+                        });
+                        const myName = state.currentUserData?.name || state.currentUser.displayName || state.currentUser.email || '';
+                        const rosterNamesForDay = fridayDutyRoster[dateLabel] || [];
+                        const normalizeName = (s) => (s || '').trim();
+                        const isRosterDuty = Array.isArray(rosterNamesForDay) && rosterNamesForDay.some(n => normalizeName(n) === normalizeName(myName));
+                        const isDuty = isDutyBySpecial || isRosterDuty;
+                        const scheduled = hasScheduleForUser(dateLabel);
+                        const hasAnyRecord = records.length > 0;
+                        // 請假日（時間範圍相交）
                         const isLeave = leaves.some(l => {
                             const s = l.startTime?.toDate?.() || (l.startTime ? new Date(l.startTime) : null);
                             const e = l.endTime?.toDate?.() || (l.endTime ? new Date(l.endTime) : null);
                             if (!s || !e) return false;
                             return s < nextDay && e > dayStart; // overlap
                         });
+                        if (!scheduled && !isLeave && !isDuty && !hasAnyRecord) {
+                            indicators.push('排休');
+                        }
                         if (isLeave) {
-                            // 有休假就不是排休：移除既有「排休」標註
-                            indicators = indicators.filter(x => x !== '排休');
                             indicators.push('請假');
                         }
                         // 值班（有當日特殊勤務）
