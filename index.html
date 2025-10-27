@@ -2689,6 +2689,56 @@
                                 return holidaysSet.has(ymd) || (holidays.weekendIsHoliday && weekend);
                             };
 
+                            // 讀取使用者預設班表（優先使用帳號設定；其次角色預設；最後一般預設）
+                            const getUserDefaultShift = async () => {
+                                try {
+                                    if (window.__userShiftCache && window.__userShiftCache[user.uid]) {
+                                        return window.__userShiftCache[user.uid];
+                                    }
+                                } catch (_) {}
+                                let role = 'user';
+                                let startDefault = '';
+                                let endDefault = '';
+                                try {
+                                    const uSnap = await getDoc(doc(db, 'users', user.uid));
+                                    if (uSnap?.exists()) {
+                                        const u = uSnap.data();
+                                        role = (u?.title || u?.role || role).toString().trim() || role;
+                                        const candidatesStart = ['shiftStart','workShiftStart','defaultStart','workStart','startTime','start'];
+                                        const candidatesEnd   = ['shiftEnd','workShiftEnd','defaultEnd','workEnd','endTime','end'];
+                                        const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
+                                        for (const k of candidatesStart) {
+                                            if (isHM(u?.[k])) { startDefault = u[k]; break; }
+                                        }
+                                        for (const k of candidatesEnd) {
+                                            if (isHM(u?.[k])) { endDefault = u[k]; break; }
+                                        }
+                                        if (!startDefault || !endDefault) {
+                                            const sh = (u?.shift || u?.workShift || '').toString();
+                                            const m = sh.match(/(\d{1,2}:\d{2})\s*[-~～]\s*(\d{1,2}:\d{2})/);
+                                            if (m) { startDefault = startDefault || m[1]; endDefault = endDefault || m[2]; }
+                                        }
+                                    }
+                                } catch (_) {}
+                                // 角色缺省：保全使用 07:00–19:00
+                                if (!startDefault || !endDefault) {
+                                    const r = (role || '').trim();
+                                    if (r === '保全') {
+                                        startDefault = startDefault || '07:00';
+                                        endDefault = endDefault || '19:00';
+                                    }
+                                }
+                                // 一般缺省
+                                if (!startDefault) startDefault = '09:00';
+                                if (!endDefault) endDefault = '18:00';
+                                const result = { role, startDefault, endDefault };
+                                try {
+                                    window.__userShiftCache = window.__userShiftCache || {};
+                                    window.__userShiftCache[user.uid] = result;
+                                } catch (_) {}
+                                return result;
+                            };
+
                             const getDaysMap = async (year, monthIdx) => {
                                 const ymKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}`;
                                 let daysMap = {};
@@ -2709,8 +2759,9 @@
                             const ymdToday = formatYMD(now);
                             const todayCfg = daysMapNow[ymdToday] || {};
                             const isWeekday = now.getDay()>=1 && now.getDay()<=5;
-                            const todayStartExp = todayCfg.start || (!isHoliday(now) && isWeekday ? '09:00' : '');
-                            const todayEndExp = todayCfg.end || (!isHoliday(now) && isWeekday ? '18:00' : '');
+                            const { startDefault, endDefault } = await getUserDefaultShift();
+                            const todayStartExp = todayCfg.start || (!isHoliday(now) && isWeekday ? startDefault : '');
+                            const todayEndExp = todayCfg.end || (!isHoliday(now) && isWeekday ? endDefault : '');
 
                             // 查詢今日打卡紀錄以取得實際的上/下班時間
                             let actualStart = null;
@@ -2761,8 +2812,8 @@
                                 const map = await getDaysMap(nextDate.getFullYear(), nextDate.getMonth());
                                 const cfg = map[formatYMD(nextDate)] || {};
                                 const wk = nextDate.getDay();
-                                const defaultStart = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? '09:00' : '';
-                                const defaultEnd = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? '18:00' : '';
+                                const defaultStart = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? startDefault : '';
+                                const defaultEnd = (!isHoliday(nextDate) && wk>=1 && wk<=5) ? endDefault : '';
                                 const st = cfg.start || defaultStart;
                                 const ed = cfg.end || defaultEnd;
                                 if (st) {
