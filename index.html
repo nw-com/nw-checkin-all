@@ -2784,14 +2784,41 @@
                                 return {};
                             };
                             const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+                            // 解析一天的班表 HM（支援多種欄位與格式），若標示為非工作日則回傳空
+                            const resolveDayHM = (obj) => {
+                                const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v);
+                                let s = '', e = '';
+                                if (!obj || typeof obj !== 'object') return { start: '', end: '' };
+                                const candidatesStart = ['start','startHM','startTime','startTimeDefault','expectedStart','scheduleStart','workStart'];
+                                const candidatesEnd   = ['end','endHM','endTime','endTimeDefault','expectedEnd','scheduleEnd','workEnd'];
+                                for (const k of candidatesStart) { if (isHM(obj[k])) { s = obj[k]; break; } }
+                                for (const k of candidatesEnd)   { if (isHM(obj[k])) { e = obj[k]; break; } }
+                                if (!s || !e) {
+                                    const nested = obj.shiftHours || obj.schedule || obj.workHours || obj.hm || {};
+                                    if (isHM(nested.start)) s = s || nested.start;
+                                    if (isHM(nested.end))   e = e || nested.end;
+                                    if (!s || !e) {
+                                        const rangeStr = (obj.shift || obj.workShift || obj.range || obj.shiftHM || obj.defaultShift || '').toString();
+                                        const m = rangeStr.match(/(\d{1,2}:\d{2})\s*[-~～至到]\s*(\d{1,2}:\d{2})/);
+                                        if (m) { s = s || m[1]; e = e || m[2]; }
+                                    }
+                                }
+                                const isOff = obj.isOff === true || obj.workday === false || obj.isWorkday === false || obj.off === true;
+                                if (isOff) return { start: '', end: '' };
+                                return { start: s, end: e };
+                            };
                             const getEffectiveCfgForDate = (date, startDefault, endDefault, globalDaysMap, userDaysMap) => {
                                 const ymd = formatYMD(date);
                                 const userCfg = userDaysMap[ymd] || {};
-                                // 若個人覆蓋有明確設定（包含空字串表示非工作日），優先使用個人
-                                if (hasOwn(userCfg, 'start') || hasOwn(userCfg, 'end')) {
-                                    return { start: userCfg.start || '', end: userCfg.end || '' };
+                                const uHM = resolveDayHM(userCfg);
+                                // 若於個人班表中有此日期（即便為非工作日），一律以個人班表為主
+                                if (uHM.start || uHM.end || (userCfg && (hasOwn(userCfg,'isWorkday') || hasOwn(userCfg,'workday') || hasOwn(userCfg,'isOff')))) {
+                                    return uHM;
                                 }
-                                // 否則依假日規則決定是否給帳號預設
+                                // 次要：全域班表（若有具體時間）
+                                const gHM = resolveDayHM(globalDaysMap[ymd] || {});
+                                if (gHM.start || gHM.end) return gHM;
+                                // 其餘：非假日的平日使用帳號預設
                                 const wk = date.getDay();
                                 const isWeekday = wk>=1 && wk<=5;
                                 if (!isHoliday(date) && isWeekday) {
