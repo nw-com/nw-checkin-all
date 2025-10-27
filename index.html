@@ -5309,6 +5309,7 @@
                                 const snap = await getDoc(ref);
                                 const days = snap.exists() ? (snap.data().days || []) : [];
                                 const set = new Set(days.map(n => Number(n)));
+                                const hasWorkdayConfig = Array.isArray(days) && days.length > 0;
                                 // 值班判定（特殊勤務或在週五值班名單內）
                                 const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
                                 const isDutyBySpecial = duties.some(di => {
@@ -5324,8 +5325,11 @@
                                 const isDuty = isDutyBySpecial || isRosterDuty;
                                 const hasAnyRecord = records.length > 0;
                                 const scheduled = hasScheduleForUser(dateLabel);
-                                // 非值班、非排班、當日無打卡，且不在自訂工作日，才標示假日
-                                if (!isDuty && !scheduled && !hasAnyRecord && !set.has(d)) indicators.push('排休');
+                                // 非值班、非排班、當日無打卡，才標示「排休」。
+                                // 若「工作日設定」為空（尚未配置），則僅在週末標示「排休」。
+                                const isWeekend = (w === 6 || w === 0);
+                                const shouldMarkRest = !isDuty && !scheduled && !hasAnyRecord && (hasWorkdayConfig ? !set.has(d) : isWeekend);
+                                if (shouldMarkRest) indicators.push('排休');
                             } else {
                                 // 後備判斷：週末為假日
                                 // 若為值班則不標示假日
