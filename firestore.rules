@@ -1,56 +1,517 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // 是否已登入
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    // 管理員判斷：
-    // 1) 以自訂 Claims: request.auth.token.isAdmin / .admin
-    // 2) 或存在 admins/{uid} 文件
+    // 角色判斷輔助函式
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.isAdmin == true ||
-        request.auth.token.admin == true ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    // 社區維護角色：允許管理員、人事、主管、初階主管、社區管理員
+    function isCommunityEditor() {
+      return (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager','community_admin','社區管理員']
       );
     }
-
-    // 是否本人（文件 id 為該使用者 uid）
-    function isSelf(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+    // 補打申請審核角色：管理員、人事、高階主管
+    function isReviewer() {
+      return (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'hr' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager'
+      );
     }
-
-    // 手機→Email登入映射：loginMapping/{phone}
-    // 說明：為了在未登入時可依手機取得 Email，僅允許 get 單筆讀取；禁止 list/查詢。
+    // 全域預設：允許所有已登入用戶讀取，但不允許任意寫入
+    // 具體集合的寫入權限在下方細則中分別定義
+    match /{document=**} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    
+    // 登入前使用：手機→Email 單筆映射
+    // 僅允許 get（以文件ID讀取），禁止 list/查詢；寫入僅限管理員
     match /loginMapping/{phone} {
-      allow get: if true;           // 允許任何人以文件ID讀取（不允許查詢）
-      allow list: if false;         // 禁止集合查詢與列出
+      allow get: if true;
+      allow list: if false;
       allow create, update, delete: if isAdmin();
     }
 
-    // 管理員名單，可搭配 isAdmin() 使用；僅限管理員存取
-    match /admins/{uid} {
-      allow read, write: if isAdmin();
+    // 帳號申請表：未登入可建立；僅管理員/人事可讀取與管理
+    match /accountApplications/{docId} {
+      allow create: if true;
+      allow get, list: if isAdmin() || isCommunityEditor();
+      allow update, delete: if isAdmin() || isCommunityEditor();
     }
+    
+    // 為了讓儀表板能顯示所有員工的狀態，允許所有登入的使用者讀取所有人的基本資料。
+    // 使用者仍然只能更新自己的個人資料，但管理員可以更新所有用戶資料。
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      // 管理員可更新任意欄位；一般使用者僅能更新安全欄位
+      allow update: if isAdmin() || (
+        request.auth.uid == userId &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'name',
+          'avatarUrl',
+          'clockInStatus',
+          'outboundLocation',
+          'dutyType',
+          'leaveReason',
+          'leaveStatus',
+          'status',
+          'lastUpdated',
+          'firstClockInDeviceId'
+        ])
+      ) || (
+        isReviewer() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt','jobTitle'
+        ]) &&
+        (request.resource.data.name == null || request.resource.data.name is string) &&
+        (request.resource.data.phone == null || request.resource.data.phone is string) &&
+        (request.resource.data.email == null || request.resource.data.email is string) &&
+        (request.resource.data.role == null || request.resource.data.role == 'user') &&
+        (request.resource.data.serviceCommunities == null || request.resource.data.serviceCommunities is list) &&
+        (request.resource.data.homeAddress == null || request.resource.data.homeAddress is string) &&
+        (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
+        (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&
+        (request.resource.data.license == null || request.resource.data.license in ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照']) &&
+        (request.resource.data.serviceCommunityCode == null || request.resource.data.serviceCommunityCode is string) &&
+        (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
+        (request.resource.data.points == null || request.resource.data.points is number) &&
+        (request.resource.data.status == null || request.resource.data.status is string) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.jobTitle == null || request.resource.data.jobTitle is string)
+      );
+      // 允許管理員刪除；允許審核角色建立使用者（核准帳號申請）
+      allow delete: if isAdmin();
+      allow create: if isAdmin() || (isReviewer() &&
+        request.resource.data.keys().hasOnly([
+          'name','phone','email','role','serviceCommunities','homeAddress','birthDate','idNumber','license','serviceCommunityCode','avatarUrl','points','status','createdAt','jobTitle'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.phone == null || request.resource.data.phone is string) &&
+        request.resource.data.email is string &&
+        request.resource.data.role == 'user' &&
+        (request.resource.data.serviceCommunities == null || request.resource.data.serviceCommunities is list) &&
+        (request.resource.data.homeAddress == null || request.resource.data.homeAddress is string) &&
+        (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
+        (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&
+        request.resource.data.license in ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照'] &&
+        (request.resource.data.applicationTitle == null || request.resource.data.applicationTitle in ['總幹事','秘書','保全','清潔','機電']) &&
+        (request.resource.data.serviceCommunityCode == null || request.resource.data.serviceCommunityCode is string) &&
+        (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
+        (request.resource.data.points == null || request.resource.data.points is number) &&
+        (request.resource.data.status == null || request.resource.data.status is string) &&
+        request.resource.data.createdAt is timestamp &&
+        (request.resource.data.jobTitle == null || request.resource.data.jobTitle is string)
+      );
+    }
+    
+    // 允許所有登入的使用者讀取所有人的打卡紀錄。
+    // 注意：Firestore 的讀取權限是針對整個文件，無法只開放部分欄位。
+    // 使用者仍然只能為自己建立打卡紀錄。
+    match /clockInRecords/{recordId} {
+      // 本人可建立；管理員可代建。並限制欄位與型別以提高安全性
+      allow create: if (
+        request.auth.uid == request.resource.data.userId || isReviewer()
+      ) &&
+      request.resource.data.keys().hasOnly([
+        'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','shiftId'
+      ]) &&
+      request.resource.data.type in ['上班','下班','外出','返回','抵達','離開','自動下班'] &&
+      request.resource.data.timestamp is timestamp &&
+      request.resource.data.location is latlng &&
+      request.resource.data.photoUrls is list &&
+      request.resource.data.descriptions is list &&
+      (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic is bool) &&
+      request.resource.data.photoUrls.size() <= 3 &&
+      request.resource.data.descriptions.size() == request.resource.data.photoUrls.size();
 
-    // 使用者資料：users/{uid}（建議文件 id = Firebase Auth uid）
-    match /users/{uid} {
-      // 本人或管理員可讀取單筆；查詢/列出僅限管理員（避免未授權的搜尋行為）
-      allow get: if isSelf(uid) || isAdmin();
-      allow list: if isAdmin();
+      allow read: if request.auth != null;
+      // 僅管理員可更新或刪除打卡紀錄，並限制可更新欄位與型別
+      allow update: if isAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','shiftId','updatedBy','updatedAt'
+        ]) &&
+        request.resource.data.type in ['上班','下班','外出','返回','抵達','離開','自動下班'] &&
+        request.resource.data.timestamp is timestamp &&
+        (request.resource.data.location == null || request.resource.data.location is latlng) &&
+        (request.resource.data.photoUrls == null || request.resource.data.photoUrls is list) &&
+        (request.resource.data.descriptions == null || request.resource.data.descriptions is list) &&
+        (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic is bool) &&
+        (request.resource.data.updatedBy == null || request.resource.data.updatedBy is string) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp) &&
+        (request.resource.data.photoUrls == null || request.resource.data.photoUrls.size() <= 3) &&
+        (request.resource.data.descriptions == null || request.resource.data.descriptions.size() == (request.resource.data.photoUrls == null ? resource.data.photoUrls.size() : request.resource.data.photoUrls.size()));
 
-      // 建立／更新：本人可管理自己的資料，管理員可代管；刪除僅限管理員
-      allow create: if isSelf(uid) || isAdmin();
-      allow update: if isSelf(uid) || isAdmin();
       allow delete: if isAdmin();
     }
+    
+    // 只有管理員可以讀寫計點規則
+    match /pointRules/{ruleId} {
+      allow read, write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // 大頭照存放於 Firestore：限制欄位與型別
+    match /userAvatars/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if (
+        request.auth.uid == userId ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      ) &&
+      request.resource.data.keys().hasOnly(['data','mimeType','updatedAt']) &&
+      request.resource.data.data is string &&
+      request.resource.data.mimeType in ['image/jpeg','image/png','image/webp'] &&
+      (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 禁止刪除以保留歷史（如需可改為同上角色允許）
+      allow delete: if false;
+    }
+    
+    // 允許用戶提交請假申請，並允許管理員審核
+    match /leaves/{leaveId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null;
+      // 使用者可取消自己待審核的請假（僅 pending -> canceled）
+      allow update: if (
+        // 管理員可更新任意請假申請
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      ) || (
+        // 本人可將自己提交且為 pending 的假單取消（更新為 canceled）
+        request.auth.uid == resource.data.userId &&
+        resource.data.status == 'pending' &&
+        request.resource.data.status == 'canceled' &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'canceledAt'])
+      );
+      allow delete: if false;
+    }
+    
+    // 允許用戶提交特殊勤務申請，並允許管理員審核
+    match /specialDuties/{dutyId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null;
+      // 允許管理員更新特殊勤務申請狀態（審核功能）
+      allow update: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow delete: if false;
+    }
 
-    // 其他未明確定義的集合一律拒絕
-    match /{document=**} {
-      allow read, write: if false;
+    // 補打卡申請：使用者提交，管理員審核
+    match /retroClockRequests/{requestId} {
+      // 本人可提交申請；限制欄位與型別
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.userId &&
+        request.resource.data.keys().hasOnly([
+          'userId','type','reason','locationName','requestedAt','targetTime','status'
+        ]) &&
+        request.resource.data.type in ['上班','下班','外出','抵達','離開'] &&
+        (request.resource.data.reason == null || request.resource.data.reason is string) &&
+        (request.resource.data.locationName == null || request.resource.data.locationName is string) &&
+        request.resource.data.requestedAt is timestamp &&
+        request.resource.data.targetTime is timestamp &&
+        request.resource.data.status == 'pending';
+
+      // 任何登入者可讀（供管理員審核、一般使用者查看自己的申請狀態）
+      allow read: if request.auth != null;
+
+      // 管理員、人事、高階主管可審核並更新狀態；限制可更新欄位與型別
+      allow update: if isReviewer() &&
+        request.resource.data.keys().hasOnly([
+          'userId','type','reason','locationName','requestedAt','targetTime','status','reviewerId','reviewedAt'
+        ]) &&
+        request.resource.data.type in ['上班','下班','外出','抵達','離開'] &&
+        (request.resource.data.reason == null || request.resource.data.reason is string) &&
+        (request.resource.data.locationName == null || request.resource.data.locationName is string) &&
+        request.resource.data.requestedAt is timestamp &&
+        request.resource.data.targetTime is timestamp &&
+        request.resource.data.status in ['approved','rejected','pending'] &&
+        (request.resource.data.reviewerId == null || request.resource.data.reviewerId is string) &&
+        (request.resource.data.reviewedAt == null || request.resource.data.reviewedAt is timestamp);
+
+      // 禁止刪除
+      allow delete: if false;
+    }
+    
+    // 允許讀取所有人員狀態資訊（用於人員地圖和追蹤功能）
+    match /userStatus/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth.uid == userId || 
+                             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow delete: if false;
+    }
+
+    // 設定資料：general 與 group
+    // general：任何登入者可讀，僅管理員可寫
+    match /settings/general {
+      allow read: if request.auth != null;
+      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // group：供群組頁載入指定可見成員名單
+    // 管理員與初階主管可讀，僅管理員可寫
+    match /settings/group {
+      allow read: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'junior_manager';
+      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // 位置設定：任何登入者可讀，僅管理員可寫
+    match /settings/location {
+      allow read: if request.auth != null;
+      allow write: if isAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'companyLat','companyLng','companyRadius','markAbnormalLocation','otherLocations','updatedAt'
+        ]) &&
+        (request.resource.data.companyLat == null || request.resource.data.companyLat is number) &&
+        (request.resource.data.companyLng == null || request.resource.data.companyLng is number) &&
+        (request.resource.data.companyRadius == null || request.resource.data.companyRadius is number) &&
+        (request.resource.data.markAbnormalLocation == null || request.resource.data.markAbnormalLocation is bool) &&
+        (request.resource.data.otherLocations == null || request.resource.data.otherLocations is list) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+    }
+
+    // 社區列表：任何登入者可讀，僅社區維護角色可寫
+    match /communities/{communityId} {
+      allow read: if request.auth != null;
+      // 僅社區維護角色可新增社區；限制欄位與型別
+      allow create: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'name','address','region','code','shortName','location','radius','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.address == null || request.resource.data.address is string) &&
+        (request.resource.data.shortName == null || request.resource.data.shortName is string) &&
+        request.resource.data.region in ['台北','新北','桃園'] &&
+        request.resource.data.code is string &&
+        request.resource.data.location is latlng &&
+        (request.resource.data.radius == null || (request.resource.data.radius is number && request.resource.data.radius >= 0)) &&
+        request.resource.data.createdAt is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+
+      // 僅社區維護角色可更新社區；限制欄位與型別
+      allow update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'name','address','region','code','shortName','location','radius','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.address == null || request.resource.data.address is string) &&
+        (request.resource.data.shortName == null || request.resource.data.shortName is string) &&
+        request.resource.data.region in ['台北','新北','桃園'] &&
+        request.resource.data.code is string &&
+        request.resource.data.location is latlng &&
+        (request.resource.data.radius == null || (request.resource.data.radius is number && request.resource.data.radius >= 0)) &&
+        request.resource.data.updatedAt is timestamp;
+
+      // 僅社區維護角色可刪除社區
+      allow delete: if isCommunityEditor();
+    }
+
+    // 哨點（排班頁的子分頁）：可自定義名稱，允許重名
+    match /posts/{postId} {
+      allow read: if request.auth != null;
+      // 建立時需要完整欄位
+      allow create: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','name','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.name is string &&
+        request.resource.data.createdAt is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 更新時允許只改名稱與更新時間
+      allow update: if isCommunityEditor() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['name','updatedAt']) &&
+        request.resource.data.name is string &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除操作不應檢查 request.resource.data（delete 時為 null）
+      allow delete: if isCommunityEditor();
+    }
+
+    // 哨點每日班表與規則
+    match /postSchedules/{docId} {
+      allow read: if request.auth != null;
+      allow create, update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','postId','dateIso','dateTS','isScheduledDay','shifts','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.postId is string &&
+        request.resource.data.dateIso is string &&
+        request.resource.data.dateTS is timestamp &&
+        (request.resource.data.isScheduledDay == null || request.resource.data.isScheduledDay is bool) &&
+        (request.resource.data.shifts == null || request.resource.data.shifts is list) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除時 request.resource 為 null，因此僅需角色檢查
+      allow delete: if isCommunityEditor();
+    }
+
+    // 社區巢狀子集合：哨點
+    match /communities/{communityId}/posts/{postId} {
+      allow read: if request.auth != null;
+      // 建立時需要完整欄位，且 communityId 必須匹配路徑
+      allow create: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','name','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        request.resource.data.name is string &&
+        request.resource.data.createdAt is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 更新時允許只改名稱與更新時間
+      allow update: if isCommunityEditor() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['name','updatedAt']) &&
+        request.resource.data.name is string &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除時 request.resource 為 null，因此僅需角色檢查
+      allow delete: if isCommunityEditor();
+    }
+
+    // 哨點子集合：模板（目前僅需允許刪除以清理舊資料）
+    match /communities/{communityId}/posts/{postId}/templates/{templateId} {
+      allow read: if request.auth != null;
+      allow delete: if isCommunityEditor();
+    }
+
+    // 社區巢狀子集合：每日班表與規則
+    match /communities/{communityId}/postSchedules/{docId} {
+      allow read: if request.auth != null;
+      allow create, update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','postId','dateIso','dateTS','isScheduledDay','shifts','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        request.resource.data.postId is string &&
+        request.resource.data.dateIso is string &&
+        request.resource.data.dateTS is timestamp &&
+        (request.resource.data.isScheduledDay == null || request.resource.data.isScheduledDay is bool) &&
+        (request.resource.data.shifts == null || request.resource.data.shifts is list) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 刪除時 request.resource 為 null，因此僅需角色檢查
+      allow delete: if isCommunityEditor();
+    }
+
+    // 帳號申請：任何人可提交（未登入也可），僅管理端可讀取與審核
+    // 巡邏：巡邏點、任務、紀錄
+    match /communities/{communityId}/patrolPoints/{pointId} {
+      allow read: if request.auth != null;
+      // 僅社區維護角色可新增/更新/刪除巡邏點；限制欄位與型別
+      allow create, update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','pointId','name','itemName','code','expectedStartHour','expectedEndHour','expectedStartHM','expectedEndHM','weekly','daysOfWeek','tasks','defaultAssigneeRole','defaultAssigneeId','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        request.resource.data.pointId is string &&
+        request.resource.data.name is string &&
+        (request.resource.data.itemName == null || request.resource.data.itemName is string) &&
+        request.resource.data.code is string &&
+        (request.resource.data.code.size() == 12) &&
+        request.resource.data.code.matches('^[A-Za-z0-9]{12}$') &&
+        (request.resource.data.expectedStartHour == null || request.resource.data.expectedStartHour is int) &&
+        (request.resource.data.expectedEndHour == null || request.resource.data.expectedEndHour is int) &&
+        (request.resource.data.expectedStartHM == null || request.resource.data.expectedStartHM is string) &&
+        (request.resource.data.expectedEndHM == null || request.resource.data.expectedEndHM is string) &&
+        (request.resource.data.weekly == null || request.resource.data.weekly is bool) &&
+        (request.resource.data.daysOfWeek == null || request.resource.data.daysOfWeek is list) &&
+        (request.resource.data.tasks == null || request.resource.data.tasks is list) &&
+        (request.resource.data.tasks == null || request.resource.data.tasks.size() <= 30) &&
+        (request.resource.data.defaultAssigneeRole == null || request.resource.data.defaultAssigneeRole is string) &&
+        (request.resource.data.defaultAssigneeId == null || request.resource.data.defaultAssigneeId is string) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      allow delete: if isCommunityEditor();
+    }
+
+    match /communities/{communityId}/patrolTasks/{taskId} {
+      allow read: if request.auth != null;
+      // 僅社區維護角色可新增/更新/刪除巡邏任務；限制欄位與型別
+      allow create, update: if isCommunityEditor() &&
+        request.resource.data.keys().hasOnly([
+          'communityId','pointId','pointName','pointCode','dateIso','dateTS','assignedRole','assignedUserId','expectedStartHM','expectedEndHM','actualStartTS','actualEndTS','status','checklist','createdAt','updatedAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        request.resource.data.pointId is string &&
+        (request.resource.data.pointName == null || request.resource.data.pointName is string) &&
+        (request.resource.data.pointCode == null || request.resource.data.pointCode is string) &&
+        request.resource.data.dateIso is string &&
+        request.resource.data.dateTS is timestamp &&
+        (request.resource.data.assignedRole == null || request.resource.data.assignedRole is string) &&
+        (request.resource.data.assignedUserId == null || request.resource.data.assignedUserId is string) &&
+        (request.resource.data.expectedStartHM == null || request.resource.data.expectedStartHM is string) &&
+        (request.resource.data.expectedEndHM == null || request.resource.data.expectedEndHM is string) &&
+        (request.resource.data.actualStartTS == null || request.resource.data.actualStartTS is timestamp) &&
+        (request.resource.data.actualEndTS == null || request.resource.data.actualEndTS is timestamp) &&
+        (request.resource.data.status == null || request.resource.data.status in ['尚未開始','進行中','已完成','未執行']) &&
+        (request.resource.data.checklist == null || request.resource.data.checklist is list) &&
+        (request.resource.data.checklist == null || request.resource.data.checklist.size() <= 30) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      allow delete: if isCommunityEditor();
+    }
+
+    match /communities/{communityId}/patrolLogs/{logId} {
+      // 巡邏感應紀錄：任何登入者可讀；允許建立，但限制欄位與型別
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+        request.resource.data.keys().hasOnly([
+          'communityId','pointId','pointCode','action','timestamp','deviceId','userId','createdAt'
+        ]) &&
+        request.resource.data.communityId is string &&
+        request.resource.data.communityId == communityId &&
+        (request.resource.data.pointId == null || request.resource.data.pointId is string) &&
+        (request.resource.data.pointCode == null || request.resource.data.pointCode is string) &&
+        request.resource.data.action in ['start','end'] &&
+        request.resource.data.timestamp is timestamp &&
+        (request.resource.data.deviceId == null || request.resource.data.deviceId is string) &&
+        (request.resource.data.userId == null || request.resource.data.userId is string) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp);
+      // 僅社區維護角色可更新、刪除紀錄（修正錯誤用）
+      allow update, delete: if isCommunityEditor();
+    }
+
+    match /accountApplications/{appId} {
+      // 允許未登入者或登入者提交申請；嚴格限制欄位與型別
+      allow create: if
+        request.resource.data.keys().hasOnly([
+          'name','phone','email','homeAddress','birthDate','idNumber','license','serviceCommunityCode','bloodType','emergencyName','emergencyRelation','emergencyPhone','applicationTitle','applyPassword','avatarUrl','status','createdAt'
+        ]) &&
+        request.resource.data.name is string &&
+        (request.resource.data.phone == null || request.resource.data.phone is string) &&
+        request.resource.data.email is string &&
+        (request.resource.data.homeAddress == null || request.resource.data.homeAddress is string) &&
+        (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
+        (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&
+        request.resource.data.license in ['無','職業安全衛生業務主管證照','職業安全衛生管理員證照','防火避難設施管理人員證照','設備安全管理人員證照','救生員證照'] &&
+
+        (request.resource.data.serviceCommunityCode == null || request.resource.data.serviceCommunityCode is string) &&
+        (request.resource.data.bloodType == null || request.resource.data.bloodType is string) &&
+        (request.resource.data.emergencyName == null || request.resource.data.emergencyName is string) &&
+        (request.resource.data.emergencyRelation == null || request.resource.data.emergencyRelation is string) &&
+        (request.resource.data.emergencyPhone == null || request.resource.data.emergencyPhone is string) &&
+        (request.resource.data.applyPassword == null || request.resource.data.applyPassword is string) &&
+        (request.resource.data.avatarUrl == null || request.resource.data.avatarUrl is string) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.createdAt is timestamp;
+
+      // 僅管理端（管理員、人事、主管）可讀取所有申請（用於審核）
+      allow read: if isReviewer();
+
+      // 僅管理端可更新審核狀態；限制僅能變更審核相關欄位（允許舊文件保留其他欄位）
+      allow update: if isReviewer() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'status','reviewerId','reviewedAt','convertedUserId','reviewNotes','applyPassword'
+        ]) &&
+        request.resource.data.status in ['approved','rejected','pending'] &&
+        (request.resource.data.reviewerId == null || request.resource.data.reviewerId is string) &&
+        (request.resource.data.reviewedAt == null || request.resource.data.reviewedAt is timestamp) &&
+        (request.resource.data.convertedUserId == null || request.resource.data.convertedUserId is string) &&
+        (request.resource.data.reviewNotes == null || request.resource.data.reviewNotes is string) &&
+        (request.resource.data.applyPassword == null || request.resource.data.applyPassword is string);
+
+      // 禁止刪除申請（保留審核紀錄）
+      allow delete: if false;
     }
   }
 }
