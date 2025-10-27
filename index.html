@@ -796,7 +796,14 @@
                 const sendBtn = document.getElementById('admin-password-send');
                 const accountInput = document.getElementById('admin-password-account');
                 const isEmailFormat = (val) => /@/.test(val);
-                const normalizePhone = (val) => (val || '').replace(/\s+/g, '').replace(/-/g, '');
+                const normalizePhone = (val) => {
+                    const digits = (val || '').replace(/[^0-9]/g, '');
+                    if (digits.startsWith('886') && digits.length >= 11) {
+                        const tail = digits.slice(3);
+                        if (tail.length >= 9) return '0' + tail.slice(-9);
+                    }
+                    return digits;
+                };
                 let targetEmail = null;
                 let targetUser = null;
                 queryBtn.addEventListener('click', async () => {
@@ -1172,7 +1179,14 @@
                         return;
                     }
                     const isEmailFormat = (val) => /@/.test(val);
-                    const normalizePhone = (val) => (val || '').replace(/\s+/g, '').replace(/-/g, '');
+                    const normalizePhone = (val) => {
+                        const digits = (val || '').replace(/[^0-9]/g, '');
+                        if (digits.startsWith('886') && digits.length >= 11) {
+                            const tail = digits.slice(3);
+                            if (tail.length >= 9) return '0' + tail.slice(-9);
+                        }
+                        return digits;
+                    };
                     showLoading(true);
                     try {
                         let targetEmail = null;
