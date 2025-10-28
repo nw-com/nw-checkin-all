@@ -26,21 +26,6 @@ service cloud.firestore {
       allow write: if false;
     }
     
-    // 登入前使用：手機→Email 單筆映射
-    // 僅允許 get（以文件ID讀取），禁止 list/查詢；寫入僅限管理員
-    match /loginMapping/{phone} {
-      allow get: if true;
-      allow list: if false;
-      allow create, update, delete: if isAdmin();
-    }
-
-    // 帳號申請表：未登入可建立；僅管理員/人事可讀取與管理
-    match /accountApplications/{docId} {
-      allow create: if true;
-      allow get, list: if isAdmin() || isCommunityEditor();
-      allow update, delete: if isAdmin() || isCommunityEditor();
-    }
-    
     // 為了讓儀表板能顯示所有員工的狀態，允許所有登入的使用者讀取所有人的基本資料。
     // 使用者仍然只能更新自己的個人資料，但管理員可以更新所有用戶資料。
     match /users/{userId} {

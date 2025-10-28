@@ -164,18 +164,18 @@
         <div class="text-center mb-8">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
             <h1 class="text-2xl font-bold text-gray-800 mt-4">西北社區打卡系統</h1>
-            <p class="text-gray-500">社區網頁版V3.1.1</p>
+            <p class="text-gray-500">社區網頁版V2.1.2</p>
         </div>
         <form id="login-form">
             <div class="mb-4">
                  <div class="flex justify-between items-center mb-1">
-                    <label for="email" class="block text-sm font-medium text-gray-700">帳號（手機或Email）</label>
+                    <label for="email" class="block text-sm font-medium text-gray-700">電子郵件</label>
                     <div class="flex items-center">
                         <input id="remember-me" type="checkbox" class="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded">
                         <label for="remember-me" class="ml-2 block text-sm text-gray-700">記住我</label>
                     </div>
                 </div>
-                <input type="text" id="email" placeholder="請輸入手機或電子郵件" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" required>
+                <input type="email" id="email" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" required>
             </div>
             <div class="mb-6">
                 <label for="password" class="block text-sm font-medium text-gray-700 mb-1">密碼</label>
@@ -212,7 +212,6 @@
                     <span id="header-title" class="text-lg font-bold text-gray-800 whitespace-nowrap">西北社區打卡系統</span>
                 </a>
                 <span id="welcome-message" class="text-sm text-gray-600 ml-2"></span>
-                <button id="admin-password-tools-btn" class="ml-2 px-2 py-1 text-xs rounded bg-red-50 border border-red-300 text-red-700 hide">密碼管理</button>
             </div>
             <button id="profile-avatar-btn">
                 <img id="header-avatar" src="https://placehold.co/40x40/EFEFEF/333333?text=U" alt="User Avatar" class="w-10 h-10 rounded-full object-cover">
@@ -579,8 +578,8 @@
                                     <input type="text" id="apply-name" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
                                 <div>
-                                    <label for="apply-phone" class="block text-sm font-medium text-gray-700">手機號碼 (必填)</label>
-                                    <input type="tel" id="apply-phone" class="w-full mt-1 px-3 py-2 border rounded-md" required>
+                                    <label for="apply-phone" class="block text-sm font-medium text-gray-700">手機號碼</label>
+                                    <input type="tel" id="apply-phone" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
                                 <div>
                                     <label for="apply-title" class="block text-sm font-medium text-gray-700">申請職稱</label>
@@ -594,8 +593,8 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件 (選填)</label>
-                                    <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                    <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件 (必填)</label>
+                                    <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
                                 <div>
                                     <label for="apply-password" class="block text-sm font-medium text-gray-700">設定密碼 (至少6位)</label>
@@ -729,10 +728,7 @@
                         const serviceCommunityCode = document.getElementById('apply-service-code').value.trim();
                         const applicationTitle = document.getElementById('apply-title').value;
 
-                        const normalizePhone = (val) => (val || '').replace(/\s+/g, '').replace(/-/g, '');
-                        if (!name || !phone) throw new Error('請填寫姓名與手機號碼');
-                        const phoneNorm = normalizePhone(phone);
-                        if (phoneNorm.length < 8) throw new Error('手機號碼格式不正確，請確認');
+                        if (!name || !email) throw new Error('請填寫姓名與電子郵件');
                         if (password || confirmPassword) {
                             if (password.length < 6) throw new Error('密碼至少 6 位數');
                             if (password !== confirmPassword) throw new Error('兩次密碼不一致');
@@ -754,123 +750,6 @@
                     } catch (err) {
                         console.error('apply account error', err);
                         errorEl.textContent = err.message || '送出失敗，請稍後再試';
-                    } finally {
-                        showLoading(false);
-                    }
-                });
-            }
-            
-            function openAdminPasswordToolsModal() {
-                const modalId = `admin-password-tools-${Date.now()}`;
-                const close = () => document.getElementById(modalId)?.remove();
-                const html = `
-                    <div id="${modalId}" class="modal-backdrop">
-                        <div class="modal-content w-[90%] max-w-md bg-white rounded-lg shadow-xl flex flex-col" style="max-height: 90vh;">
-                            <div class="flex justify-between items-center p-4 border-b flex-shrink-0">
-                                <h3 class="font-bold text-lg">管理員密碼管理</h3>
-                                <button class="close-btn text-gray-500 hover:text-gray-700"><i data-lucide="x" class="w-5 h-5"></i></button>
-                            </div>
-                            <div class="p-4 space-y-3 overflow-y-auto">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700">帳號（手機或Email）</label>
-                                    <input type="text" id="admin-password-account" class="w-full mt-1 px-3 py-2 border rounded-md" placeholder="輸入手機或電子郵件">
-                                </div>
-                                <div class="text-xs text-gray-500">系統將以手機查詢對應使用者並寄送重設密碼信至其電子郵件。</div>
-                                <p id="admin-password-error" class="text-red-600 text-sm"></p>
-                                <div id="admin-password-result" class="text-sm text-gray-800"></div>
-                                <div class="flex justify-end gap-2">
-                                    <button type="button" id="admin-password-query" class="px-3 py-2 bg-gray-200 rounded">查詢</button>
-                                    <button type="button" id="admin-password-send" class="px-3 py-2 bg-red-600 text-white rounded" disabled>寄送重設密碼信</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>`;
-                modalContainer.innerHTML = html;
-                try { lucide.createIcons(); } catch (_) {}
-                const modal = document.getElementById(modalId);
-                const closeBtn = modal.querySelector('.close-btn');
-                closeBtn.addEventListener('click', close);
-                const errEl = document.getElementById('admin-password-error');
-                const resultEl = document.getElementById('admin-password-result');
-                const queryBtn = document.getElementById('admin-password-query');
-                const sendBtn = document.getElementById('admin-password-send');
-                const accountInput = document.getElementById('admin-password-account');
-                const isEmailFormat = (val) => /@/.test(val);
-                const normalizePhone = (val) => {
-                    const digits = (val || '').replace(/[^0-9]/g, '');
-                    if (digits.startsWith('886') && digits.length >= 11) {
-                        const tail = digits.slice(3);
-                        if (tail.length >= 9) return '0' + tail.slice(-9);
-                    }
-                    return digits;
-                };
-                let targetEmail = null;
-                let targetUser = null;
-                queryBtn.addEventListener('click', async () => {
-                    errEl.textContent = ''; resultEl.textContent = ''; targetEmail = null; targetUser = null; sendBtn.disabled = true;
-                    const account = (accountInput.value || '').trim();
-                    if (!account) { errEl.textContent = '請輸入手機或電子郵件'; return; }
-                    showLoading(true);
-                    try {
-                        if (isEmailFormat(account)) {
-                            // 以 Email 直接查，支援多欄位 email/loginEmail/authEmail/primaryEmail
-                            const { collection, query, where, getDocs } = window.__fs || {};
-                            const db = window.__db;
-                            const tryQuery = async (field) => {
-                                const qq = query(collection(db, 'users'), where(field, '==', account));
-                                const qss = await getDocs(qq);
-                                let found = null;
-                                qss.forEach(d => { if (!found) found = { id: d.id, ...d.data() }; });
-                                return found;
-                            };
-                            targetUser = await tryQuery('email') || await tryQuery('loginEmail') || await tryQuery('authEmail') || await tryQuery('primaryEmail');
-                            targetEmail = account;
-                        } else {
-                            const { collection, query, where, getDocs } = window.__fs || {};
-                            const db = window.__db;
-                            const phone = normalizePhone(account);
-                            const q = query(collection(db, 'users'), where('phone', '==', phone));
-                            const qs = await getDocs(q);
-                            qs.forEach(d => {
-                                const u = d.data() || {};
-                                targetUser = { id: d.id, ...u };
-                                targetEmail = targetEmail || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
-                            });
-                            // 若以正規化查不到，再嘗試使用原始輸入的 phone（可能含 - 或空白）
-                            if (!targetUser && phone !== account) {
-                                const q2 = query(collection(db, 'users'), where('phone', '==', account));
-                                const qs2 = await getDocs(q2);
-                                qs2.forEach(d => {
-                                    const u = d.data() || {};
-                                    targetUser = { id: d.id, ...u };
-                                    targetEmail = targetEmail || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
-                                });
-                            }
-                        }
-                        if (!targetUser) { errEl.textContent = '查無此使用者'; return; }
-                        const name = targetUser.name || targetUser.displayName || '(未命名)';
-                        const phone = targetUser.phone || '(未填手機)';
-                        const email = targetEmail || targetUser.email || '(未綁定Email)';
-                        resultEl.innerHTML = `<div>姓名：${name}</div><div>手機：${phone}</div><div>Email：${email}</div>`;
-                        if (targetEmail) { sendBtn.disabled = false; }
-                    } catch (e) {
-                        console.error('admin password query error', e);
-                        errEl.textContent = e?.message || '查詢失敗，請稍後再試';
-                    } finally {
-                        showLoading(false);
-                    }
-                });
-                sendBtn.addEventListener('click', async () => {
-                    errEl.textContent = '';
-                    if (!targetEmail) { errEl.textContent = '此使用者未綁定電子郵件'; return; }
-                    showLoading(true);
-                    try {
-                        await sendPasswordResetEmail(auth, targetEmail);
-                        showToast('已寄出重設密碼通知信');
-                    } catch (e) {
-                        console.error('admin send reset error', e);
-                        const msg = translateAuthError(e);
-                        errEl.textContent = msg || e?.message || '寄送失敗，請稍後再試';
                     } finally {
                         showLoading(false);
                     }
@@ -1073,9 +952,9 @@
             }
 
             // Remember me logic
-            const savedAccount = localStorage.getItem('rememberedAccount') || localStorage.getItem('rememberedEmail');
-            if (savedAccount) {
-                emailInput.value = savedAccount;
+            const savedEmail = localStorage.getItem('rememberedEmail');
+            if (savedEmail) {
+                emailInput.value = savedEmail;
                 rememberMeCheckbox.checked = true;
             }
             
@@ -1108,60 +987,23 @@
             loginForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 showLoading(true);
-                const account = emailInput.value.trim();
+                const email = emailInput.value.trim();
                 const password = passwordInput.value;
                 const loginError = document.getElementById('login-error');
                 loginError.textContent = '';
 
-                const isEmailFormat = (val) => /@/.test(val);
-                const normalizePhone = (val) => (val || '').replace(/\s+/g, '').replace(/-/g, '');
-
                 if (rememberMeCheckbox.checked) {
-                    localStorage.setItem('rememberedAccount', account);
-                    localStorage.removeItem('rememberedEmail');
+                    localStorage.setItem('rememberedEmail', email);
                 } else {
-                    localStorage.removeItem('rememberedAccount');
                     localStorage.removeItem('rememberedEmail');
                 }
 
                 try {
-                    if (!account) throw new Error('請輸入手機或電子郵件');
-                    if (isEmailFormat(account)) {
-                        await signInWithEmailAndPassword(auth, account, password);
-                    } else {
-                        // 以手機查公開映射（loginMapping/{phone}）取得 Email 後登入，避免未授權讀 users
-                        const { doc, getDoc, collection, query, where, getDocs } = window.__fs || {};
-                        const db = window.__db;
-                        if (!db) throw new Error('資料庫尚未就緒，請稍後再試');
-                        const phone = normalizePhone(account);
-                        let emailForAuth = null;
-                        try {
-                            const mSnap = await getDoc(doc(db, 'loginMapping', phone));
-                            if (mSnap?.exists()) {
-                                const m = mSnap.data() || {};
-                                emailForAuth = m.email || m.loginEmail || m.authEmail || m.primaryEmail || null;
-                            }
-                        } catch (_) { /* ignore mapping missing */ }
-                        // Fallback：若無映射，嘗試查詢 users（可能會因規則被拒絕）
-                        if (!emailForAuth && collection && query && where && getDocs) {
-                            try {
-                                const q = query(collection(db, 'users'), where('phone', '==', phone));
-                                const qs = await getDocs(q);
-                                qs.forEach(d => {
-                                    const u = d.data() || {};
-                                    emailForAuth = emailForAuth || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
-                                });
-                            } catch (permErr) {
-                                console.warn('查詢 users 失敗（可能規則限制）', permErr);
-                            }
-                        }
-                        if (!emailForAuth) throw new Error('此手機未綁定電子郵件或查詢受限。請改用電子郵件登入，或請管理員建立 loginMapping 映射。');
-                        await signInWithEmailAndPassword(auth, emailForAuth, password);
-                    }
+                    await signInWithEmailAndPassword(auth, email, password);
                 } catch (error) {
                     console.error('login error', error);
                     const msg = translateAuthError(error);
-                    loginError.textContent = msg || (error?.message || '登入失敗，請檢查帳號密碼。');
+                    loginError.textContent = msg || '登入失敗，請檢查帳號密碼。';
                 } finally {
                     showLoading(false);
                 }
@@ -1171,62 +1013,21 @@
             const forgotPasswordBtn = document.getElementById('forgot-password-btn');
             if (forgotPasswordBtn) {
                 forgotPasswordBtn.addEventListener('click', async () => {
-                    const account = emailInput.value.trim();
+                    const email = emailInput.value.trim();
                     const loginError = document.getElementById('login-error');
                     loginError.textContent = '';
-                    if (!account) {
-                        loginError.textContent = '請先輸入您的手機或電子郵件，再點選忘記密碼。';
+                    if (!email) {
+                        loginError.textContent = '請先輸入您的電子郵件，再點選忘記密碼。';
                         return;
                     }
-                    const isEmailFormat = (val) => /@/.test(val);
-                    const normalizePhone = (val) => {
-                        const digits = (val || '').replace(/[^0-9]/g, '');
-                        if (digits.startsWith('886') && digits.length >= 11) {
-                            const tail = digits.slice(3);
-                            if (tail.length >= 9) return '0' + tail.slice(-9);
-                        }
-                        return digits;
-                    };
                     showLoading(true);
                     try {
-                        let targetEmail = null;
-                        if (isEmailFormat(account)) {
-                            targetEmail = account;
-                        } else {
-                            const { doc, getDoc, collection, query, where, getDocs } = window.__fs || {};
-                            const db = window.__db;
-                            if (!db) throw new Error('資料庫尚未就緒，請稍後再試');
-                            const phone = normalizePhone(account);
-                            try {
-                                const mSnap = await getDoc(doc(db, 'loginMapping', phone));
-                                if (mSnap?.exists()) {
-                                    const m = mSnap.data() || {};
-                                    targetEmail = m.email || m.loginEmail || m.authEmail || m.primaryEmail || null;
-                                }
-                            } catch (_) {}
-                            if (!targetEmail && collection && query && where && getDocs) {
-                                try {
-                                    const q = query(collection(db, 'users'), where('phone', '==', phone));
-                                    const qs = await getDocs(q);
-                                    qs.forEach(d => {
-                                        const u = d.data() || {};
-                                        targetEmail = targetEmail || u.email || u.loginEmail || u.authEmail || u.primaryEmail || null;
-                                    });
-                                } catch (permErr) {
-                                    console.warn('查詢 users 失敗（可能規則限制）', permErr);
-                                }
-                            }
-                        }
-                        if (!targetEmail) {
-                            loginError.textContent = '此手機未綁定電子郵件，無法寄送重設信。請改用電子郵件輸入或聯繫管理員。';
-                            return;
-                        }
-                        await sendPasswordResetEmail(auth, targetEmail);
+                        await sendPasswordResetEmail(auth, email);
                         showToast('已寄出重設密碼通知信');
                     } catch (error) {
                         console.error('reset password error', error);
                         const msg = translateAuthError(error);
-                        loginError.textContent = msg || (error?.message || '寄送重設密碼失敗，請稍後再試。');
+                        loginError.textContent = msg || '寄送重設密碼失敗，請稍後再試。';
                     } finally {
                         showLoading(false);
                     }
@@ -1312,7 +1113,6 @@
                 const navSchedule = document.getElementById('nav-schedule');
                 const navDashboard = document.querySelector('.tab-btn[data-tab="dashboard"]');
                 const navClockIn = document.querySelector('.tab-btn[data-tab="clock-in"]');
-                const adminPwdBtn = document.getElementById('admin-password-tools-btn');
 
                 // 導覽顯示權限（角色：admin、manager、junior_manager、總幹事、秘書、保全、清潔、機電）
                 const role = state.currentUserData.role;
@@ -1325,12 +1125,6 @@
                     navSettings && navSettings.classList.add('hide');
                     // 人事分頁不再針對「人事」角色開放，預設隱藏
                     navHr && navHr.classList.add('hide');
-                    if (adminPwdBtn) {
-                        adminPwdBtn.classList.remove('hide');
-                        adminPwdBtn.addEventListener('click', () => {
-                            try { openAdminPasswordToolsModal(); } catch (e) { console.error('openAdminPasswordToolsModal error', e); }
-                        });
-                    }
                 } else if (role === 'manager') {
                     // 高階主管：顯示追蹤與排班
                     navTracking && navTracking.classList.remove('hide');
