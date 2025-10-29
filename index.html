@@ -1167,12 +1167,12 @@
                 [navTracking, navSettings, navHr, navGroup, navSchedule].forEach(el => el && el.classList.add('hide'));
 
                 if (role === 'admin') {
-                    // 管理員：顯示追蹤與排班；設定已移至導覽頁
+                    // 管理員：顯示追蹤、排班與人事；設定已移至導覽頁
                     navTracking && navTracking.classList.remove('hide');
                     navSchedule && navSchedule.classList.remove('hide');
                     navSettings && navSettings.classList.add('hide');
-                    // 人事分頁不再針對「人事」角色開放，預設隱藏
-                    navHr && navHr.classList.add('hide');
+                    // 人事分頁開放給管理員
+                    navHr && navHr.classList.remove('hide');
                 } else if (role === 'manager') {
                     // 高階主管：顯示追蹤與排班
                     navTracking && navTracking.classList.remove('hide');
@@ -1182,6 +1182,8 @@
                     // 初階主管：僅顯示群組
                     navGroup && navGroup.classList.remove('hide');
                     navSettings && navSettings.classList.add('hide');
+                    // 初階主管：顯示人事分頁
+                    navHr && navHr.classList.remove('hide');
                 } else if (role === '總幹事') {
                     // 總幹事：儀錶板、打卡、追蹤、功能、行事曆
                     navTracking && navTracking.classList.remove('hide');
@@ -1473,8 +1475,8 @@
                     navSchedule && navSchedule.classList.remove('hide');
                     // 全域設定已移至導覽頁設定，保持隱藏
                     navSettings && navSettings.classList.add('hide');
-                    // 人事保持隱藏
-                    navHr && navHr.classList.add('hide');
+                    // 人事顯示
+                    navHr && navHr.classList.remove('hide');
                 } else if (role === 'manager') {
                     navTracking && navTracking.classList.remove('hide');
                     navSchedule && navSchedule.classList.remove('hide');
@@ -1482,6 +1484,8 @@
                 } else if (role === 'junior_manager') {
                     navGroup && navGroup.classList.remove('hide');
                     navSettings && navSettings.classList.add('hide');
+                    // 初階主管顯示人事分頁
+                    navHr && navHr.classList.remove('hide');
                 } else if (role === '總幹事') {
                     navTracking && navTracking.classList.remove('hide');
                     navSettings && navSettings.classList.add('hide');
@@ -1524,13 +1528,14 @@
                     if (['admin','hr','manager','junior_manager'].includes(role)) {
                         pushItem('schedule', 'calendar-days', '排班');
                     }
+                    // 插入人事於排班與功能之間
+                    if (['admin','hr','manager','junior_manager'].includes(role)) {
+                        pushItem('hr', 'users', '人事');
+                    }
                     pushItem('features', 'layers', '功能');
                     // 巡邏：目前對 junior_manager 必定顯示，管理員/高階主管/人事若具權限也顯示
                     if (['admin','manager','junior_manager','hr'].includes(role)) {
                         pushItem('group', 'git-branch', '巡邏');
-                    }
-                    if (['admin','hr','manager','junior_manager'].includes(role)) {
-                        pushItem('hr', 'users', '人員');
                     }
                 } else if (isStaff) {
                     // 總幹事、秘書、保全、清潔、機電
@@ -6071,24 +6076,323 @@
                 await renderList();
             } */
 
-            // 人員分頁：帳號申請、帳號列表（各社區獨立內容）
+            // 人事分頁：物業核薪、保全核薪、計點列表（並保留帳號申請／帳號列表）
             function renderHR(subPage) {
                 const role = state.currentUserData?.role || '';
-                // 依需求：人員頁只提供帳號申請、帳號列表
+                const tabKey = subPage || 'applications';
                 mainContent.innerHTML = `
-                    <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
-                        <button data-subtab="applications" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'applications' ? 'active' : ''}">帳號申請</button>
-                        <button data-subtab="accounts" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'accounts' ? 'active' : ''}">帳號列表</button>
+                    <div class="h-[50px] flex items-center justify-between border-b border-gray-200 bg-white px-2">
+                        <div class="flex items-center justify-start gap-2 overflow-x-auto no-scrollbar">
+                            <button data-subtab="property-payroll" class="sub-tab-btn px-3 py-2 rounded-md text-sm font-medium text-gray-600 ${tabKey === 'property-payroll' ? 'active' : ''}">物業核薪</button>
+                            <button data-subtab="security-payroll" class="sub-tab-btn px-3 py-2 rounded-md text-sm font-medium text-gray-600 ${tabKey === 'security-payroll' ? 'active' : ''}">保全核薪</button>
+                            <button data-subtab="counting-list" class="sub-tab-btn px-3 py-2 rounded-md text-sm font-medium text-gray-600 ${tabKey === 'counting-list' ? 'active' : ''}">計點列表</button>
+                        </div>
+                        <div class="flex items-center justify-end gap-2 overflow-x-auto no-scrollbar">
+                            <button data-subtab="applications" class="sub-tab-btn px-3 py-2 rounded-md text-xs font-medium text-gray-500 ${tabKey === 'applications' ? 'active' : ''}">帳號申請</button>
+                            <button data-subtab="accounts" class="sub-tab-btn px-3 py-2 rounded-md text-xs font-medium text-gray-500 ${tabKey === 'accounts' ? 'active' : ''}">帳號列表</button>
+                        </div>
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
 
                 const subPageContent = document.getElementById('sub-page-content');
-                if (subPage === 'accounts') {
-                    renderSettingsAccounts(subPageContent);
-                } else {
-                    renderSettingsApplications(subPageContent);
+                switch (tabKey) {
+                    case 'property-payroll':
+                        renderHRPropertyPayroll(subPageContent);
+                        break;
+                    case 'security-payroll':
+                        renderHRSecurityPayroll(subPageContent);
+                        break;
+                    case 'counting-list':
+                        renderHRCountingList(subPageContent);
+                        break;
+                    case 'accounts':
+                        renderSettingsAccounts(subPageContent);
+                        break;
+                    case 'applications':
+                    default:
+                        renderSettingsApplications(subPageContent);
+                        break;
                 }
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('hr', btn.dataset.subtab)));
+            }
+
+            async function renderHRPropertyPayroll(container) {
+                // 準備社區清單
+                try { await ensureCommunitiesCache(); } catch (_) {}
+                try { computeAvailableCommunities(); } catch (_) {}
+                const communities = Object.values(state.communitiesById || {}).slice().sort(compareCommunitiesByCode);
+                const currentComm = state.currentCommunity || communities[0] || null;
+
+                container.innerHTML = `
+                    <div class="p-4 space-y-4">
+                        <div class="bg-white p-3 rounded-md shadow-sm border">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">社區</label>
+                                    <select id="hr-property-community" class="w-full px-3 py-2 border rounded-md"></select>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="block text-sm text-gray-600 mb-1">人員角色</label>
+                                    <div id="hr-property-role-chips" class="flex items-center flex-wrap gap-2">
+                                        <button data-role="總幹事" class="px-2 py-1 text-xs rounded-md bg-amber-500 text-white">總幹事</button>
+                                        <button data-role="秘書" class="px-2 py-1 text-xs rounded-md bg-purple-500 text-white">秘書</button>
+                                        <button data-role="清潔" class="px-2 py-1 text-xs rounded-md bg-pink-500 text-white">清潔</button>
+                                        <button data-role="機電" class="px-2 py-1 text-xs rounded-md bg-blue-500 text-white">機電</button>
+                                        <button data-role="" class="px-2 py-1 text-xs rounded-md bg-gray-200 text-gray-700">全部</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="md:col-span-2 space-y-2">
+                                <h3 class="font-bold text-lg">人員列表</h3>
+                                <div id="hr-property-user-list" class="space-y-2"></div>
+                            </div>
+                            <div class="space-y-2">
+                                <h3 class="font-bold text-lg">核薪明細</h3>
+                                <div id="hr-property-detail" class="bg-white p-3 rounded-md shadow-sm border text-sm text-gray-600">請選擇人員以查看核薪明細（開發中）。</div>
+                            </div>
+                        </div>
+                    </div>`;
+                try { lucide.createIcons(); } catch (_) {}
+
+                const communitySelect = document.getElementById('hr-property-community');
+                const roleChips = document.getElementById('hr-property-role-chips');
+                const listEl = document.getElementById('hr-property-user-list');
+                const detailEl = document.getElementById('hr-property-detail');
+
+                communitySelect.innerHTML = communities.map(c => `<option value="${c.id}" data-code="${c.code || ''}" ${currentComm && currentComm.id===c.id ? 'selected' : ''}>${c.code ? '['+c.code+'] ' : ''}${c.name || '(未命名社區)'}</option>`).join('');
+
+                const getEffectiveRole = (u) => {
+                    const jt = ((u?.jobTitle || u?.applicationTitle || '').trim());
+                    return isFieldLikeRole(jt) ? jt : (u?.role || 'user');
+                };
+                const propertyRoles = new Set(['總幹事','秘書','清潔','機電']);
+                let selectedRole = '';
+                let allUsers = [];
+
+                const loadUsers = async () => {
+                    const usersRef = collection(db, 'users');
+                    const snap = await getDocs(usersRef);
+                    allUsers = [];
+                    snap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
+                };
+
+                const renderList = () => {
+                    const commId = communitySelect.value || '';
+                    const selectedComm = communities.find(c => c.id === commId) || null;
+                    const selectedCode = selectedComm?.code || '';
+                    let base = allUsers.filter(u => propertyRoles.has(getEffectiveRole(u)));
+                    base = base.filter(u => {
+                        const byId = Array.isArray(u.serviceCommunities) && u.serviceCommunities.includes(commId);
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const byCode = selectedCode ? (codesArr.includes(selectedCode) || (u.serviceCommunityCode === selectedCode)) : false;
+                        return byId || byCode;
+                    });
+                    if (selectedRole) base = base.filter(u => getEffectiveRole(u) === selectedRole);
+                    base = base.slice().sort(compareUsersBySurnameStroke);
+
+                    listEl.innerHTML = '';
+                    if (!base.length) {
+                        listEl.innerHTML = `<div class="text-center text-gray-500 p-4 bg-white rounded border">此社區目前無符合條件的人員</div>`;
+                        detailEl.textContent = '請選擇人員以查看核薪明細（開發中）。';
+                        return;
+                    }
+                    base.forEach(u => {
+                        const row = document.createElement('div');
+                        row.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
+                        row.innerHTML = `
+                            <div class="flex items-center">
+                                <img src="${u.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(u.name||'?').charAt(0)}`}" class="w-10 h-10 rounded-full mr-3 object-cover">
+                                <div>
+                                    <p class="font-medium text-gray-800">${u.name || '(未命名)'} </p>
+                                    <div class="text-xs text-gray-500">${getEffectiveRole(u)}</div>
+                                </div>
+                            </div>
+                            <button data-userid="${u.id}" class="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700">查看</button>`;
+                        row.querySelector('button[data-userid]').addEventListener('click', () => {
+                            detailEl.innerHTML = `
+                                <div class="space-y-2">
+                                    <div class="text-gray-700 font-medium">${u.name || ''}（${getEffectiveRole(u)}）</div>
+                                    <div class="text-xs text-gray-500">社區：${selectedComm ? (selectedComm.code ? '['+selectedComm.code+'] ' : '') + (selectedComm.name||'') : ''}</div>
+                                    <div class="text-sm text-gray-600">核薪明細尚未配置，後續將提供工時、津貼與扣款彙整。</div>
+                                </div>`;
+                        });
+                        listEl.appendChild(row);
+                    });
+                    try { lucide.createIcons(); } catch (_) {}
+                };
+
+                roleChips.querySelectorAll('button[data-role]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        selectedRole = btn.getAttribute('data-role') || '';
+                        // 視覺強調選擇
+                        roleChips.querySelectorAll('button[data-role]').forEach(b => b.classList.toggle('ring-2', b===btn));
+                        renderList();
+                    });
+                });
+                communitySelect.addEventListener('change', () => renderList());
+
+                await loadUsers();
+                renderList();
+            }
+
+            async function renderHRSecurityPayroll(container) {
+                try { await ensureCommunitiesCache(); } catch (_) {}
+                try { computeAvailableCommunities(); } catch (_) {}
+                const communities = Object.values(state.communitiesById || {}).slice().sort(compareCommunitiesByCode);
+                const currentComm = state.currentCommunity || communities[0] || null;
+
+                container.innerHTML = `
+                    <div class="p-4 space-y-4">
+                        <div class="bg-white p-3 rounded-md shadow-sm border">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">社區</label>
+                                    <select id="hr-security-community" class="w-full px-3 py-2 border rounded-md"></select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="md:col-span-2 space-y-2">
+                                <h3 class="font-bold text-lg">哨點列表</h3>
+                                <div id="hr-security-post-list" class="space-y-2"></div>
+                            </div>
+                            <div class="space-y-2">
+                                <h3 class="font-bold text-lg">核薪明細</h3>
+                                <div id="hr-security-detail" class="bg-white p-3 rounded-md shadow-sm border text-sm text-gray-600">請選擇哨點以查看保全核薪明細（開發中）。</div>
+                            </div>
+                        </div>
+                    </div>`;
+                try { lucide.createIcons(); } catch (_) {}
+
+                const communitySelect = document.getElementById('hr-security-community');
+                const listEl = document.getElementById('hr-security-post-list');
+                const detailEl = document.getElementById('hr-security-detail');
+                communitySelect.innerHTML = communities.map(c => `<option value="${c.id}" data-code="${c.code || ''}" ${currentComm && currentComm.id===c.id ? 'selected' : ''}>${c.code ? '['+c.code+'] ' : ''}${c.name || '(未命名社區)'}</option>`).join('');
+
+                let posts = [];
+                const loadPosts = async () => {
+                    const commId = communitySelect.value || '';
+                    if (!commId) { posts = []; return; }
+                    const snap = await getDocs(collection(db, 'communities', commId, 'posts'));
+                    posts = [];
+                    snap.forEach(d => posts.push({ id: d.id, ...d.data() }));
+                };
+                const renderList = () => {
+                    listEl.innerHTML = '';
+                    if (!posts.length) {
+                        listEl.innerHTML = `<div class="text-center text-gray-500 p-4 bg-white rounded border">此社區尚未建立哨點</div>`;
+                        detailEl.textContent = '請選擇哨點以查看保全核薪明細（開發中）。';
+                        return;
+                    }
+                    posts.forEach(p => {
+                        const row = document.createElement('div');
+                        row.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
+                        row.innerHTML = `
+                            <div>
+                                <p class="font-medium text-gray-800">${p.name || '未命名哨點'}</p>
+                                <div class="text-xs text-gray-500">${p.id}</div>
+                            </div>
+                            <button data-postid="${p.id}" class="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700">查看</button>`;
+                        row.querySelector('button[data-postid]').addEventListener('click', () => {
+                            const comm = communities.find(c => c.id === communitySelect.value) || null;
+                            detailEl.innerHTML = `
+                                <div class="space-y-2">
+                                    <div class="text-gray-700 font-medium">哨點：${p.name || ''}</div>
+                                    <div class="text-xs text-gray-500">社區：${comm ? (comm.code ? '['+comm.code+'] ' : '') + (comm.name||'') : ''}</div>
+                                    <div class="text-sm text-gray-600">保全核薪明細尚未配置，後續將提供班表、工時與獎懲彙整。</div>
+                                </div>`;
+                        });
+                        listEl.appendChild(row);
+                    });
+                    try { lucide.createIcons(); } catch (_) {}
+                };
+
+                communitySelect.addEventListener('change', async () => { await loadPosts(); renderList(); });
+                await loadPosts();
+                renderList();
+            }
+
+            async function renderHRCountingList(container) {
+                try { await ensureCommunitiesCache(); } catch (_) {}
+                try { computeAvailableCommunities(); } catch (_) {}
+                const communities = Object.values(state.communitiesById || {}).slice().sort(compareCommunitiesByCode);
+                const currentComm = state.currentCommunity || communities[0] || null;
+
+                container.innerHTML = `
+                    <div class="p-4 space-y-4">
+                        <div class="bg-white p-3 rounded-md shadow-sm border">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">社區</label>
+                                    <select id="hr-counting-community" class="w-full px-3 py-2 border rounded-md"></select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                            <h3 class="font-bold text-lg">人員列表</h3>
+                            <div id="hr-counting-user-list" class="space-y-2"></div>
+                        </div>
+                    </div>`;
+                try { lucide.createIcons(); } catch (_) {}
+
+                const communitySelect = document.getElementById('hr-counting-community');
+                const listEl = document.getElementById('hr-counting-user-list');
+                communitySelect.innerHTML = communities.map(c => `<option value="${c.id}" data-code="${c.code || ''}" ${currentComm && currentComm.id===c.id ? 'selected' : ''}>${c.code ? '['+c.code+'] ' : ''}${c.name || '(未命名社區)'}</option>`).join('');
+
+                const getEffectiveRole = (u) => {
+                    const jt = ((u?.jobTitle || u?.applicationTitle || '').trim());
+                    return isFieldLikeRole(jt) ? jt : (u?.role || 'user');
+                };
+                const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
+                let allUsers = [];
+
+                const loadUsers = async () => {
+                    const usersRef = collection(db, 'users');
+                    const snap = await getDocs(usersRef);
+                    allUsers = [];
+                    snap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
+                };
+
+                const renderList = () => {
+                    const commId = communitySelect.value || '';
+                    const selectedComm = communities.find(c => c.id === commId) || null;
+                    const selectedCode = selectedComm?.code || '';
+                    let base = allUsers.filter(u => allowedRoles.has(getEffectiveRole(u)));
+                    base = base.filter(u => {
+                        const byId = Array.isArray(u.serviceCommunities) && u.serviceCommunities.includes(commId);
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const byCode = selectedCode ? (codesArr.includes(selectedCode) || (u.serviceCommunityCode === selectedCode)) : false;
+                        return byId || byCode;
+                    });
+                    base = base.slice().sort(compareUsersBySurnameStroke);
+
+                    listEl.innerHTML = '';
+                    if (!base.length) {
+                        listEl.innerHTML = `<div class="text-center text-gray-500 p-4 bg-white rounded border">此社區目前無符合條件的人員</div>`;
+                        return;
+                    }
+                    base.forEach(u => {
+                        const row = document.createElement('div');
+                        row.className = 'flex items-center justify-between bg-white p-3 rounded-md shadow-sm border';
+                        row.innerHTML = `
+                            <div class="flex items-center">
+                                <img src="${u.avatarUrl || `https://placehold.co/40x40/EFEFEF/333333?text=${(u.name||'?').charAt(0)}`}" class="w-10 h-10 rounded-full mr-3 object-cover">
+                                <div>
+                                    <p class="font-medium text-gray-800">${u.name || '(未命名)'} </p>
+                                    <div class="text-xs text-gray-500">${getEffectiveRole(u)}</div>
+                                </div>
+                            </div>
+                            <button class="px-2 py-1 text-xs rounded bg-gray-200 text-gray-700" disabled>計點明細（開發中）</button>`;
+                        listEl.appendChild(row);
+                    });
+                    try { lucide.createIcons(); } catch (_) {}
+                };
+
+                communitySelect.addEventListener('change', () => renderList());
+                await loadUsers();
+                renderList();
             }
 
             // 群組分頁：人員地圖、出勤紀錄（僅顯示指定成員）
