@@ -169,13 +169,13 @@
         <form id="login-form">
             <div class="mb-4">
                  <div class="flex justify-between items-center mb-1">
-                    <label for="email" class="block text-sm font-medium text-gray-700">帳號（手機或電子郵件）</label>
+                    <label for="email" class="block text-sm font-medium text-gray-700">電子郵件或手機號碼</label>
                     <div class="flex items-center">
                         <input id="remember-me" type="checkbox" class="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded">
                         <label for="remember-me" class="ml-2 block text-sm text-gray-700">記住我</label>
                     </div>
                 </div>
-                <input type="text" id="email" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" required placeholder="輸入手機號或 Email">
+                <input type="text" id="email" placeholder="請輸入電子郵件或手機號碼" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" required>
             </div>
             <div class="mb-6">
                 <label for="password" class="block text-sm font-medium text-gray-700 mb-1">密碼</label>
@@ -288,9 +288,8 @@
         import { 
             getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut,
             createUserWithEmailAndPassword, updatePassword, reauthenticateWithCredential,
-            EmailAuthProvider, sendPasswordResetEmail, signInWithCustomToken
+            EmailAuthProvider, sendPasswordResetEmail
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
         import { 
             getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot,
             query, where, getDocs, serverTimestamp, orderBy, limit, GeoPoint, Timestamp, writeBatch,
@@ -507,7 +506,6 @@
             } catch (_) {}
             
             const storage = getStorage(app);
-            const functions = getFunctions(app, 'us-central1');
 
             // 暫掛到 window 供過渡期腳本（如 reset-points.js）使用
             window.__app = app;
@@ -516,8 +514,6 @@
         // 通知其他腳本 Firebase 與全域 helpers 已就緒
         try { window.dispatchEvent(new Event('firebase-ready')); } catch (e) { /* noop */ }
             window.__storage = storage;
-            window.__functions = functions;
-            window.__httpsCallable = httpsCallable;
 
             const loginPage = document.getElementById('login-page');
             const appContainer = document.getElementById('app-container');
@@ -597,8 +593,8 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件 (選填)</label>
-                                    <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                    <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件 (必填)</label>
+                                    <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
                                 <div>
                                     <label for="apply-password" class="block text-sm font-medium text-gray-700">設定密碼 (至少6位)</label>
@@ -956,9 +952,9 @@
             }
 
             // Remember me logic
-            const savedAccount = localStorage.getItem('rememberedAccount');
-            if (savedAccount) {
-                emailInput.value = savedAccount;
+            const savedEmail = localStorage.getItem('rememberedEmail');
+            if (savedEmail) {
+                emailInput.value = savedEmail;
                 rememberMeCheckbox.checked = true;
             }
             
@@ -979,66 +975,82 @@
             // --- Authentication Logic ---
             const translateAuthError = (error) => {
                 const code = error?.code || '';
-                const message = error?.message || '';
                 if (code === 'auth/invalid-email') return '電子郵件格式不正確。';
                 if (code === 'auth/user-not-found') return '查無此帳號，請先由管理端建立或核准。';
                 if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') return '密碼錯誤，如忘記請使用「忘記密碼」。';
                 if (code === 'auth/too-many-requests') return '嘗試次數過多，已暫時封鎖，稍後再試。';
                 if (code === 'auth/operation-not-allowed') return '未啟用 Email/密碼登入，請聯繫系統管理員。';
                 if (code === 'auth/network-request-failed') return '網路異常，請檢查連線。';
-                // Callable Functions 與網路／CORS 錯誤
-                if (code === 'functions/not-found') return '查無此手機對應的帳號，請確認或改用 Email 登入。';
-                if (code === 'functions/failed-precondition') return '此手機帳號尚未設定電子郵件，請聯絡管理員。';
-                if (code === 'functions/invalid-argument') return '請輸入有效的手機號碼。';
-                if (code === 'functions/internal' || code === 'internal' || code === 'unavailable') return '服務暫時不可用，請稍後再試。';
-                // 常見 CORS/網路錯誤訊息關鍵字
-                if (/ERR_FAILED|CORS|Access-Control-Allow-Origin|Failed to fetch/i.test(message)) return '服務暫時不可用，請稍後再試。';
                 return '';
             };
 
-            function isEmailAccount(str) {
-                return /@/.test(str);
+            // 輔助：判斷是否為看起來像手機的字串（簡化版）
+            function looksLikePhone(input) {
+                const s = (input || '').trim();
+                // 簡單規則：不含 '@' 且至少 8 位數字（允許空格、破折號、+）
+                const digits = s.replace(/[^0-9]/g, '');
+                return s && !s.includes('@') && digits.length >= 8;
             }
 
-            function formatTaiwanPhoneToE164(raw) {
-                const s = (raw || '').replace(/[^0-9+]/g, '');
-                if (!s) return '';
-                if (s.startsWith('+')) return s;
-                if (s.startsWith('09') && s.length === 10) return '+886' + s.slice(1);
-                return s;
+            // 輔助：標準化手機號碼（移除空白與破折號），保留國碼 + 號
+            function normalizePhone(input) {
+                const s = (input || '').trim();
+                // 保留前導 +，其他非數字全部移除
+                if (s.startsWith('+')) {
+                    return '+' + s.slice(1).replace(/[^0-9]/g, '');
+                }
+                return s.replace(/[^0-9]/g, '');
+            }
+
+            // 輔助：將使用者輸入的識別值（Email 或手機）解析為可供 Firebase Auth 使用的 Email
+            async function resolveEmailFromIdentifier(identifier) {
+                const raw = (identifier || '').trim();
+                // 基本 Email 格式判斷
+                const isEmail = /.+@.+\..+/.test(raw);
+                if (isEmail) return raw;
+                if (!looksLikePhone(raw)) {
+                    throw new Error('請輸入正確的電子郵件或手機號碼');
+                }
+                // 嘗試以手機號碼查詢對應的 Email（使用 loginIndex）
+                const phone = normalizePhone(raw);
+                try {
+                    const idxSnap = await getDoc(doc(db, 'loginIndex', phone));
+                    if (!idxSnap || !idxSnap.exists()) {
+                        throw new Error('查無此手機號碼，請改用電子郵件登入或聯繫管理員');
+                    }
+                    const data = idxSnap.data() || {};
+                    const email = (data.email || '').trim();
+                    if (!email) {
+                        throw new Error('此手機號碼未綁定電子郵件，請聯繫管理員');
+                    }
+                    return email;
+                } catch (e) {
+                    if (e && e.message) throw e;
+                    throw new Error('登入查詢失敗，請稍後再試');
+                }
             }
 
             loginForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 showLoading(true);
-                const account = emailInput.value.trim();
+                const identifier = emailInput.value.trim();
                 const password = passwordInput.value;
                 const loginError = document.getElementById('login-error');
                 loginError.textContent = '';
 
                 if (rememberMeCheckbox.checked) {
-                    localStorage.setItem('rememberedAccount', account);
+                    localStorage.setItem('rememberedEmail', identifier);
                 } else {
-                    localStorage.removeItem('rememberedAccount');
+                    localStorage.removeItem('rememberedEmail');
                 }
 
                 try {
-                    if (isEmailAccount(account)) {
-                        await signInWithEmailAndPassword(auth, account, password);
-                    } else {
-                        // 以手機號登入：呼叫雲端函式查詢對應 Email，再用 Email/密碼登入
-                        const phone = formatTaiwanPhoneToE164(account);
-                        const fn = httpsCallable(window.__functions, 'resolveEmailByPhone');
-                        const res = await fn({ phone });
-                        const email = (res?.data?.email || '').trim();
-                        if (!email) throw { code: 'auth/user-not-found' };
-                        await signInWithEmailAndPassword(auth, email, password);
-                    }
+                    const emailForAuth = await resolveEmailFromIdentifier(identifier);
+                    await signInWithEmailAndPassword(auth, emailForAuth, password);
                 } catch (error) {
                     console.error('login error', error);
                     const msg = translateAuthError(error);
-                    const fallback = isEmailAccount(account) ? '登入失敗，請檢查帳號密碼。' : '服務暫時不可用，請稍後再試。';
-                    loginError.textContent = msg || fallback;
+                    loginError.textContent = (msg || error?.message) || '登入失敗，請檢查帳號密碼。';
                 } finally {
                     showLoading(false);
                 }
@@ -1048,21 +1060,22 @@
             const forgotPasswordBtn = document.getElementById('forgot-password-btn');
             if (forgotPasswordBtn) {
                 forgotPasswordBtn.addEventListener('click', async () => {
-                    const email = emailInput.value.trim();
+                    const identifier = emailInput.value.trim();
                     const loginError = document.getElementById('login-error');
                     loginError.textContent = '';
-                    if (!email) {
-                        loginError.textContent = '請先輸入您的電子郵件，再點選忘記密碼。';
+                    if (!identifier) {
+                        loginError.textContent = '請先輸入您的電子郵件或手機號碼，再點選忘記密碼。';
                         return;
                     }
                     showLoading(true);
                     try {
-                        await sendPasswordResetEmail(auth, email);
+                        const emailForReset = await resolveEmailFromIdentifier(identifier);
+                        await sendPasswordResetEmail(auth, emailForReset);
                         showToast('已寄出重設密碼通知信');
                     } catch (error) {
                         console.error('reset password error', error);
                         const msg = translateAuthError(error);
-                        loginError.textContent = msg || '寄送重設密碼失敗，請稍後再試。';
+                        loginError.textContent = (msg || error?.message) || '寄送重設密碼失敗，請稍後再試。';
                     } finally {
                         showLoading(false);
                     }
@@ -10565,6 +10578,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const roleOpts = (isHRPage ? rolesHR : rolesGlobal)
                     .map(r => `<option value="${r}">${roleLabel(r)}</option>`)
                     .join('');
+                const canBackfill = ['admin','hr'].includes(state.currentUserData?.role);
+                const backfillBtnHtml = canBackfill ? `<button id="backfill-loginindex-btn" class="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700">批次回填 loginIndex</button>` : '';
                 const communityFilterHtml = isGlobalSettings ? `
                                 <div>
                                     <label class="block text-sm text-gray-600 mb-1">社區</label>
@@ -10581,7 +10596,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         <div class="bg-white p-3 rounded-md shadow-sm border space-y-2">
                             <div class="flex items-center justify-between">
                                 <h3 class="font-bold text-lg">帳號列表</h3>
-                                ${ (state.currentPage === 'navigation' && (state.currentUserData?.role === 'admin')) ? `<button id="add-user-btn" class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700">新增帳號</button>` : '' }
+                                <div class="flex items-center gap-2">
+                                    ${backfillBtnHtml}
+                                    ${ (state.currentPage === 'navigation' && (state.currentUserData?.role === 'admin')) ? `<button id="add-user-btn" class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700">新增帳號</button>` : '' }
+                                </div>
                             </div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
@@ -10629,6 +10647,55 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const addBtn = document.getElementById('add-user-btn');
                 if (addBtn) {
                     addBtn.addEventListener('click', () => openUserModal());
+                }
+                const backfillBtn = document.getElementById('backfill-loginindex-btn');
+                if (backfillBtn) {
+                    backfillBtn.addEventListener('click', async () => {
+                        try {
+                            const role = state.currentUserData?.role || '';
+                            if (!['admin','hr'].includes(role)) {
+                                showToast('您沒有權限執行回填', true);
+                                return;
+                            }
+                            // 取目前清單（依篩選結果）
+                            const usersToProcess = Array.isArray(lastRendered) && lastRendered.length ? lastRendered.slice() : allUsers.slice();
+                            if (!usersToProcess.length) {
+                                showToast('目前清單為空，無需回填');
+                                return;
+                            }
+                            showLoading(true);
+                            const { doc, setDoc, serverTimestamp } = window.__fs || {};
+                            const db = window.__db;
+                            let success = 0, skippedNoPhone = 0, skippedNoEmail = 0;
+                            const seen = new Set();
+                            for (const u of usersToProcess) {
+                                const rawPhone = ((u?.phone || '') + '').trim();
+                                const email = ((u?.email || '') + '').trim();
+                                if (!rawPhone) { skippedNoPhone++; continue; }
+                                if (!email || !email.includes('@')) { skippedNoEmail++; continue; }
+                                const phoneKey = normalizePhone(rawPhone);
+                                if (!phoneKey) { skippedNoPhone++; continue; }
+                                if (seen.has(phoneKey)) { continue; }
+                                seen.add(phoneKey);
+                                try {
+                                    await setDoc(doc(db, 'loginIndex', phoneKey), {
+                                        email,
+                                        userId: u.id,
+                                        updatedAt: serverTimestamp()
+                                    }, { merge: true });
+                                    success++;
+                                } catch (e) {
+                                    console.warn('回填單筆失敗', u?.id, e);
+                                }
+                            }
+                            showToast(`回填完成：成功 ${success} 筆；無手機 ${skippedNoPhone}；無有效 email ${skippedNoEmail}`);
+                        } catch (err) {
+                            console.error('批次回填失敗', err);
+                            showToast('批次回填失敗', true);
+                        } finally {
+                            showLoading(false);
+                        }
+                    });
                 }
 
                 const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -10918,6 +10985,22 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         };
                         if (targetUserId) {
                             await fsSetDoc(fsDoc(db, 'users', targetUserId), userDoc, { merge: true });
+                            // 寫入登入索引：phoneKey -> email, userId
+                            try {
+                                const rawPhone = (app.phone || '').trim();
+                                if (rawPhone) {
+                                    const phoneKey = rawPhone.startsWith('+')
+                                        ? ('+' + rawPhone.slice(1).replace(/[^0-9]/g, ''))
+                                        : rawPhone.replace(/[^0-9]/g, '');
+                                    await fsSetDoc(fsDoc(db, 'loginIndex', phoneKey), {
+                                        email,
+                                        userId: targetUserId,
+                                        updatedAt: fsServerTimestamp()
+                                    }, { merge: true });
+                                }
+                            } catch (e) {
+                                console.warn('寫入 loginIndex 失敗', e);
+                            }
                         }
 
                         const updates = {
@@ -11046,39 +11129,6 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                             <i data-lucide="refresh-ccw" class="w-4 h-4 mr-2"></i>批次補齊
                                         </button>
                                     </div>
-                                </div>
-
-                                <!-- 批次補齊 Email 與建立 Auth 帳號 -->
-                                <div class="p-3 border rounded-md">
-                                    <h4 class="font-medium text-gray-800 mb-2">批次補齊 Email 與建立 Auth 帳號</h4>
-                                    <p class="text-sm text-gray-500 mb-2">依 users.phone 為尚未設定 Email 的帳號建立 Email 與 Auth 使用者（可乾跑）</p>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
-                                        <div>
-                                            <label class="text-sm text-gray-700">Email 網域</label>
-                                            <input type="text" id="backfill-domain-input" class="border rounded-md px-2 py-1 w-full" placeholder="例如 example.local">
-                                        </div>
-                                        <div>
-                                            <label class="text-sm text-gray-700">預設密碼（留空則自動產生）</label>
-                                            <input type="text" id="backfill-password-input" class="border rounded-md px-2 py-1 w-full" placeholder="至少 6 位數">
-                                        </div>
-                                        <div>
-                                            <label class="text-sm text-gray-700">社區代號（選填）</label>
-                                            <input type="text" id="backfill-community-input" class="border rounded-md px-2 py-1 w-full" placeholder="僅處理指定社區">
-                                        </div>
-                                        <div>
-                                            <label class="text-sm text-gray-700">限制筆數（選填）</label>
-                                            <input type="number" id="backfill-limit-input" class="border rounded-md px-2 py-1 w-full" placeholder="例如 100">
-                                        </div>
-                                    </div>
-                                    <div class="flex space-x-2">
-                                        <button id="backfill-auth-dryrun-btn" class="bg-gray-600 text-white px-3 py-2 rounded-md hover:bg-gray-700 flex items-center">
-                                            <i data-lucide="search" class="w-4 h-4 mr-2"></i>乾跑
-                                        </button>
-                                        <button id="backfill-auth-exec-btn" class="bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 flex items-center">
-                                            <i data-lucide="play" class="w-4 h-4 mr-2"></i>執行
-                                        </button>
-                                    </div>
-                                    <div id="backfill-auth-results" class="mt-3 text-sm text-gray-700"></div>
                                 </div>
 
                                 <div id="overtime-results" class="hidden">
@@ -11273,41 +11323,6 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 if (backfillEmailBtn) backfillEmailBtn.addEventListener('click', backfillByEmail);
                 const batchBtn = document.getElementById('batch-backfill-users-btn');
                 if (batchBtn) batchBtn.addEventListener('click', batchBackfillUsers);
-
-                async function runBackfillAuth(dryRun) {
-                    try {
-                        showLoading(true);
-                        const domain = (document.getElementById('backfill-domain-input')?.value || '').trim();
-                        const password = (document.getElementById('backfill-password-input')?.value || '').trim();
-                        const communityCode = (document.getElementById('backfill-community-input')?.value || '').trim();
-                        const limitVal = parseInt(document.getElementById('backfill-limit-input')?.value || '0', 10) || 0;
-                        if (!domain) { showToast('請輸入 Email 網域', true); return; }
-                        const fn = window.__functions ? (await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js')).httpsCallable(window.__functions, 'backfillEmailsAndAuth') : null;
-                        if (!fn) { showToast('Functions 未就緒', true); return; }
-                        const res = await fn({ domain, password, communityCode, limit: limitVal, dryRun: !!dryRun });
-                        const data = res?.data || {};
-                        const div = document.getElementById('backfill-auth-results');
-                        const items = Array.isArray(data.items) ? data.items.slice(0, 50) : [];
-                        div.innerHTML = `
-                            <div class="bg-gray-50 border border-gray-200 rounded-md p-2">
-                                <p>處理筆數：${data.processed || 0}；建立：${data.created || 0}；更新：${data.updated || 0}；衝突：${data.conflicts || 0}；無效：${data.invalid || 0}；錯誤：${data.errors || 0}</p>
-                                <div class="mt-2 space-y-1">
-                                    ${items.map(it => `<div class="flex justify-between"><span>${it.uid}</span><span>${it.email || ''}</span><span class="text-gray-500">${it.action || it.error || ''}</span></div>`).join('')}
-                                </div>
-                                ${items.length >= 50 ? '<p class="text-xs text-gray-500 mt-1">僅顯示前 50 筆</p>' : ''}
-                            </div>
-                        `;
-                        showToast(dryRun ? '乾跑完成' : '批次執行完成');
-                    } catch (err) {
-                        console.error('runBackfillAuth error', err);
-                        showToast('執行失敗：' + (err?.message || '未知錯誤'), true);
-                    } finally { showLoading(false); }
-                }
-
-                const dryBtn = document.getElementById('backfill-auth-dryrun-btn');
-                if (dryBtn) dryBtn.addEventListener('click', () => runBackfillAuth(true));
-                const execBtn = document.getElementById('backfill-auth-exec-btn');
-                if (execBtn) execBtn.addEventListener('click', () => runBackfillAuth(false));
                 
                 // 從 Firebase 讀取設定
                 const settingsRef = doc(db, "settings", "general");
@@ -13180,6 +13195,33 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             updateData.createdAt = serverTimestamp();
                             await setDoc(doc(db, "users", targetUserId), updateData);
                             showToast("新帳號建立成功");
+                        }
+
+                        // --- 強一致：同步更新 loginIndex（phoneKey → email,userId）---
+                        try {
+                            const oldPhoneRaw = isEditing ? ((user.phone || '') + '').trim() : '';
+                            const newPhoneRaw = ((phone || '') + '').trim();
+                            const oldPhoneKey = oldPhoneRaw ? normalizePhone(oldPhoneRaw) : '';
+                            const newPhoneKey = newPhoneRaw ? normalizePhone(newPhoneRaw) : '';
+
+                            // 若手機有變更，清空舊索引以避免舊號仍可登入
+                            if (isEditing && oldPhoneKey && oldPhoneKey !== newPhoneKey) {
+                                await setDoc(doc(db, 'loginIndex', oldPhoneKey), {
+                                    email: '',
+                                    userId: targetUserId,
+                                    updatedAt: serverTimestamp()
+                                }, { merge: true });
+                            }
+                            // 寫入新號索引（若新號存在）
+                            if (newPhoneKey) {
+                                await setDoc(doc(db, 'loginIndex', newPhoneKey), {
+                                    email,
+                                    userId: targetUserId,
+                                    updatedAt: serverTimestamp()
+                                }, { merge: true });
+                            }
+                        } catch (e) {
+                            console.warn('同步 loginIndex 失敗', e);
                         }
                         
                         close();

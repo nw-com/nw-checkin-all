@@ -1,0 +1,30 @@
+[
+  {
+    "origin": [
+      "https://nw-com.github.io",
+      "https://nw-checkin-all.web.app",
+      "https://nw-checkin-all.firebaseapp.com",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost:3010",
+      "http://127.0.0.1:3010",
+      "http://localhost:3013",
+      "http://127.0.0.1:3013",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      "http://localhost:5174",
+      "http://127.0.0.1:5174",
+      "http://localhost:5175",
+      "http://127.0.0.1:5175"
+    ],
+    "method": ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Authorization",
+      "x-goog-meta-*",
+      "x-goog-upload-*",
+      "x-goog-resumable"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

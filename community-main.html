@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>社區主頁（同 index 架構）</title>
+  <script>
+    // 將社區主頁直接改為使用 index.html 的原本內容架構（以重導向方式）
+    (function(){
+      var url = new URL(window.location.href);
+      var params = new URLSearchParams(url.search);
+      // 預設進入社區模式並顯示儀表板（不強制導向導覽頁）
+      if (!params.has('mode')) {
+        params.set('mode', 'community');
+      }
+      // 若舊連結帶有強制導覽的參數，移除以回到儀表板預設
+      if (params.get('goto') === 'navigation' && !params.has('communityId')) {
+        params.delete('goto');
+        params.delete('sub');
+      }
+      var target = 'index.html' + '?' + params.toString();
+      window.location.replace(target);
+    })();
+  </script>
+  <noscript>
+    <!-- 無 JS 環境下以 meta refresh 導向 index.html -->
+    <meta http-equiv="refresh" content="0; url=index.html?mode=community" />
+  </noscript>
+</head>
+<body>
+  <!-- 本頁已改為重導向到 index.html，以使用相同的內容架構 -->
+</body>
+</html>
