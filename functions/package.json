@@ -1,0 +1,13 @@
+{
+  "name": "nw-checkin-functions",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "18"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.5.0",
+    "firebase-functions": "^4.4.1"
+  }
+}
