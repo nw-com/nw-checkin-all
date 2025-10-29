@@ -14321,8 +14321,13 @@ const roleBorderClass = roleColorMap[titleKey] || null;
 
     const stopCamera = () => {
         try {
+            // 停止目前記錄的串流 tracks
             if (videoStream) {
                 videoStream.getTracks().forEach(track => track.stop());
+            }
+            // 若 video.srcObject 仍掛載串流，保險地停止其 tracks
+            if (video && video.srcObject && typeof video.srcObject.getTracks === 'function') {
+                video.srcObject.getTracks().forEach(track => track.stop());
             }
         } catch (_) {}
         try {
@@ -14353,14 +14358,13 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             </div>
 
                             <div class="flex-shrink-0 pt-4">
-                                <div id="capture-controls" class="flex items-center justify-between relative" style="z-index: 999;">
-                                    <button id="switch-camera-btn" class="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center">
+                                <div id="capture-controls" class="flex items-center justify-center gap-6 relative" style="z-index: 999;">
+                                    <button id="switch-camera-btn" class="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center" style="display:none;">
                                         <i data-lucide="refresh-cw" class="w-6 h-6"></i>
                                     </button>
-                        <button id="capture-btn" class="w-32 h-20 bg-white rounded-full border-4 border-gray-500 flex items-center justify-center" style="z-index: 1000;">
+                        <button id="capture-btn" class="w-24 h-24 bg-white rounded-full border-4 border-gray-500 flex items-center justify-center" style="z-index: 1000;">
                                         <i data-lucide="camera" class="w-10 h-10 text-gray-800"></i>
                                     </button>
-                                    <div class="w-12 h-12"></div><!-- 空白元素保持對稱 -->
                                 </div>
                                 <div id="confirm-controls" class="hide grid grid-cols-2 gap-2">
                                     <button id="add-another-btn" class="py-3 bg-gray-600 rounded-lg">拍下一張</button>
