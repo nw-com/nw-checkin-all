@@ -2431,15 +2431,18 @@
                                     const ln = (typeof rec.locationName === 'string' && rec.locationName) ? rec.locationName : (rec.location?.address || null);
                                     return ln || (community?.name || '');
                                 };
-                                const makeRows = (startDay, endDay)=> Array.from({length: endDay-startDay+1}, (_,i)=>{
+                                const makeRows = (startDay, endDay, opts = {})=> Array.from({length: endDay-startDay+1}, (_,i)=>{
                                     const day = startDay + i;
                                     const rec = byDay[day] || {};
                                     const ws = weekdayLabel(yyyy, mm, day, daysInMonth);
                                     const placeText = resolvePlace(rec.startRec) || resolvePlace(rec.endRec) || '';
+                                    const dateW = opts.dateWClass || 'w-10';
+                                    const weekW = opts.weekdayWClass || 'w-10';
+                                    const dateStyle = opts.dateStyle || '';
                                     return `
                                         <tr>
-                                            <td class="border px-2 py-1 text-center w-10">${day}</td>
-                                            <td class="border px-2 py-1 text-center w-10">${ws}</td>
+                                            <td class="border px-2 py-1 text-center ${dateW}" style="${dateStyle}">${day}</td>
+                                            <td class="border px-2 py-1 text-center ${weekW}">${ws}</td>
                                             <td class="border px-2 py-1 text-center w-20">${hm(rec.start) || ''}</td>
                                             <td class="border px-2 py-1 text-center w-20">${hm(rec.end) || ''}</td>
                                             <td class="border px-2 py-1 text-center">${placeText}</td>
@@ -2458,7 +2461,7 @@
                                             <table class="w-full border border-gray-300 text-sm">
                                                 <thead>
                                                     <tr>
-                                                        <th class="border px-2 py-1">日期</th>
+                                                        <th class="border px-2 py-1 w-8" style="width:2rem;">日期</th>
                                                         <th class="border px-2 py-1">星期</th>
                                                         <th class="border px-2 py-1">上班時間</th>
                                                         <th class="border px-2 py-1">下班時間</th>
@@ -2466,7 +2469,7 @@
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    ${makeRows(1, leftEnd)}
+                                                    ${makeRows(1, leftEnd, { dateWClass: 'w-8', weekdayWClass: 'w-10', dateStyle: 'width:2rem;' })}
                                                 </tbody>
                                             </table>
                                             ${rightHas ? `
