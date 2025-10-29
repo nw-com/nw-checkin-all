@@ -1458,6 +1458,34 @@
                     });
                 });
                 try { lucide.createIcons(); } catch (_) {}
+
+                // 管理角色：若有待核准帳號申請，將「依社區」按鈕以淺紫色底顯示
+                (async () => {
+                    try {
+                        if (!managerial.has(role)) return; // 非管理角色不檢查
+                        const btn = mainNav.querySelector('button[data-subtab="community"]');
+                        if (!btn) return;
+                        let hasPending = false;
+                        // 優先使用 window.__fs 包裝（與其他設定頁一致），若不可用則回退原生 API
+                        const fs = window.__fs || {};
+                        if (fs.collection && fs.query && fs.where && fs.getDocs && window.__db) {
+                            const q = fs.query(fs.collection(window.__db, 'accountApplications'), fs.where('status','==','pending'));
+                            const snap = await fs.getDocs(q);
+                            hasPending = !snap.empty;
+                        } else if (typeof collection === 'function' && typeof query === 'function' && typeof where === 'function' && typeof getDocs === 'function' && window.__db) {
+                            const q = query(collection(window.__db, 'accountApplications'), where('status','==','pending'));
+                            const snap = await getDocs(q);
+                            hasPending = !snap.empty;
+                        }
+                        if (hasPending) {
+                            // 僅改底色以符合「淺紫色底」需求，不改 active 的紅色字/頂線
+                            btn.classList.add('bg-purple-100');
+                        }
+                    } catch (e) {
+                        // 無權限或查詢失敗時忽略，不影響導覽
+                        // console.warn('檢查待核准帳號申請失敗', e);
+                    }
+                })();
             }
 
             function applyRoleNavVisibility() {
