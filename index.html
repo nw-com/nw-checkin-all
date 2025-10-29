@@ -2344,6 +2344,8 @@
                                 <div class="flex items-center gap-2 mb-2">
                                     <label class="text-sm text-gray-700">選擇月份</label>
                                     <input id="hr-month-input" type="month" class="px-2 py-1 border rounded text-sm" value="${state.navHRMonth}" />
+                                    <button id="hr-print-user" class="px-2 py-1 border rounded text-sm">列印此人</button>
+                                    <button id="hr-print-all" class="px-2 py-1 border rounded text-sm">列印全員</button>
                                     <div id="hr-selected-user-label" class="text-sm text-gray-600"></div>
                                 </div>
                                 <div id="payroll-table-container" class="bg-white border rounded"></div>
@@ -2368,16 +2370,11 @@
                                 });
                             });
 
-                            async function renderPropertyPayrollTable() {
-                                const containerEl = document.getElementById('payroll-table-container');
-                                if (!containerEl) return;
-                                const uid = state.navHRSelectedUserId || '';
-                                const ym = state.navHRMonth || defMonth;
-                                if (!uid) { containerEl.innerHTML = `<div class="p-4 text-gray-500">請先選擇人員</div>`; return; }
+                            function buildPayrollTableHtmlForUser(uid, ym) {
+                                const defMonthLocal = ym || state.navHRMonth || defMonth;
                                 const user = users.find(u => u.id === uid);
                                 const userName = (user?.name || user?.displayName || user?.email || '(未命名)') + '';
-                                if (labelEl) labelEl.textContent = `人員：${userName}`;
-                                const [yearStr, monStr] = (ym||'').split('-');
+                                const [yearStr, monStr] = (defMonthLocal||'').split('-');
                                 const yyyy = parseInt(yearStr,10)||now.getFullYear();
                                 const mm = parseInt(monStr,10)||now.getMonth()+1;
                                 const daysInMonth = new Date(yyyy, mm, 0).getDate();
@@ -2388,11 +2385,24 @@
                                 try {
                                     const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(startDt) : startDt;
                                     const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(endDt) : endDt;
-                                    const snapRec = await getDocs(query(collection(db, 'clockInRecords'), where('userId','==', uid), where('timestamp','>=', tsStart), where('timestamp','<=', tsEnd)));
-                                    snapRec.forEach(d=> records.push({ id: d.id, ...d.data() }));
+                                    const snapRec = window.__fs && window.__db ? window.__fs.getDocs(query(collection(db, 'clockInRecords'), where('userId','==', uid), where('timestamp','>=', tsStart), where('timestamp','<=', tsEnd))) : null;
+                                    if (snapRec && snapRec.then) {
+                                        // await for snapshot
+                                        return snapRec.then(s => {
+                                            s.forEach(d=> records.push({ id: d.id, ...d.data() }));
+                                            return __buildPayrollHtmlFromRecords(records, { yyyy, mm, daysInMonth, userName, community: c });
+                                        });
+                                    }
                                 } catch (e) {
                                     console.warn('載入打卡紀錄失敗', e);
                                 }
+                                // 非 async 情境（理論上不會進到這裡），直接組 HTML
+                                return __buildPayrollHtmlFromRecords(records, { yyyy, mm, daysInMonth, userName, community: c });
+                            }
+
+                            function __buildPayrollHtmlFromRecords(records, ctx) {
+                                const { yyyy, mm, daysInMonth, userName, community } = ctx;
+                                const containerEl = document.getElementById('payroll-table-container');
                                 const byDay = {};
                                 const toDate = (t)=> (t?.toDate?.() ? t.toDate() : (t ? new Date(t) : null));
                                 const hm = (dt)=> dt ? `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}` : '';
@@ -2402,11 +2412,11 @@
                                     const day = dt.getDate();
                                     const key = day;
                                     const type = r.type || '';
-                                    const cur = byDay[key] || { start:null, end:null };
+                                    const cur = byDay[key] || { start:null, end:null, startRec:null, endRec:null };
                                     if (type === '上班') {
-                                        if (!cur.start || dt < cur.start) cur.start = dt;
+                                        if (!cur.start || dt < cur.start) { cur.start = dt; cur.startRec = r; }
                                     } else if (type === '下班') {
-                                        if (!cur.end || dt > cur.end) cur.end = dt;
+                                        if (!cur.end || dt > cur.end) { cur.end = dt; cur.endRec = r; }
                                     }
                                     byDay[key] = cur;
                                 });
@@ -2414,27 +2424,34 @@
                                     const wd = new Date(y, m-1, d).getDay();
                                     return ['日','一','二','三','四','五','六'][wd];
                                 };
+                                const resolvePlace = (rec)=>{
+                                    if (!rec) return '';
+                                    const ln = (typeof rec.locationName === 'string' && rec.locationName) ? rec.locationName : (rec.location?.address || null);
+                                    return ln || (community?.name || '');
+                                };
                                 const makeRows = (startDay, endDay)=> Array.from({length: endDay-startDay+1}, (_,i)=>{
                                     const day = startDay + i;
                                     const rec = byDay[day] || {};
                                     const ws = weekdayLabel(yyyy, mm, day);
+                                    const placeText = resolvePlace(rec.startRec) || resolvePlace(rec.endRec) || '';
                                     return `
                                         <tr>
                                             <td class="border px-2 py-1 text-center w-10">${day}</td>
                                             <td class="border px-2 py-1 text-center w-10">${ws}</td>
                                             <td class="border px-2 py-1 text-center w-20">${hm(rec.start) || ''}</td>
                                             <td class="border px-2 py-1 text-center w-20">${hm(rec.end) || ''}</td>
-                                            <td class="border px-2 py-1 text-center"></td>
+                                            <td class="border px-2 py-1 text-center">${placeText}</td>
                                         </tr>`;
                                 }).join('');
 
                                 const leftEnd = Math.min(16, daysInMonth);
                                 const rightStart = Math.min(17, daysInMonth+1);
                                 const rightHas = daysInMonth >= 17;
-                                const titleComm = (c?.shortName || c?.name || '');
-                                containerEl.innerHTML = `
+                                const attendanceDays = Object.keys(byDay).filter(k => (byDay[k]?.start || byDay[k]?.end)).length;
+                                const titleComm = (community?.shortName || community?.name || '');
+                                const html = `
                                     <div class="p-3">
-                                        <div class="text-center text-lg font-semibold mb-2">西北保全／西北公寓 ${titleComm ? titleComm+' ' : ''}${userName} 簽到表（${yyyy} 年 ${mm} 月）</div>
+                                        <div class="text-center text-lg font-semibold mb-2">西北保全/西北公寓 ${userName} 簽到表( ${yyyy} 年 ${mm} 月 )</div>
                                         <div class="grid grid-cols-2 gap-2">
                                             <table class="w-full border border-gray-300 text-sm">
                                                 <thead>
@@ -2466,9 +2483,118 @@
                                                 </tbody>
                                             </table>` : ''}
                                         </div>
-                                        <div class="mt-3 text-xs text-gray-500">備註：此表格先呈現上/下班時間，其他統計欄位後續補充。</div>
+                                        <div class="mt-2">
+                                            <table class="w-full border border-gray-300 text-sm">
+                                                <tbody>
+                                                    <tr>
+                                                        <td class="border px-2 py-1 text-center w-14">請假</td>
+                                                        <td class="border px-2 py-1 text-center w-16">事假</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">病假</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">喪假</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">婚假</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">產假</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">公假</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">公差</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">加班</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">夜班</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">缺勤</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">其他</td>
+                                                        <td class="border px-2 py-1 text-center w-12">日數</td>
+                                                        <td class="border px-2 py-1 text-center w-16">出勤</td>
+                                                        <td class="border px-2 py-1 text-center w-12">${attendanceDays}</td>
+                                                        <td class="border px-2 py-1 text-center">備註</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div class="mt-2">
+                                            <table class="w-full border border-gray-300 text-sm">
+                                                <tbody>
+                                                    <tr>
+                                                        <td class="border px-2 py-6 text-center">總經理</td>
+                                                        <td class="border px-2 py-6 text-center">經理</td>
+                                                        <td class="border px-2 py-6 text-center">主管</td>
+                                                        <td class="border px-2 py-6 text-center">入案</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>`;
+                                return html;
+                            }
+
+                            async function renderPropertyPayrollTable() {
+                                const containerEl = document.getElementById('payroll-table-container');
+                                if (!containerEl) return;
+                                const uid = state.navHRSelectedUserId || '';
+                                const ym = state.navHRMonth || defMonth;
+                                if (!uid) { containerEl.innerHTML = `<div class="p-4 text-gray-500">請先選擇人員</div>`; return; }
+                                const user = users.find(u => u.id === uid);
+                                const userName = (user?.name || user?.displayName || user?.email || '(未命名)') + '';
+                                if (labelEl) labelEl.textContent = `人員：${userName}`;
+                                const htmlOrPromise = buildPayrollTableHtmlForUser(uid, ym);
+                                if (htmlOrPromise && htmlOrPromise.then) {
+                                    const html = await htmlOrPromise;
+                                    containerEl.innerHTML = html;
+                                } else {
+                                    containerEl.innerHTML = htmlOrPromise;
+                                }
                                 try { lucide.createIcons(); } catch (_) {}
+                            }
+
+                            // 列印：開新視窗印出當前人員或全員
+                            const openPrintWindow = (html) => {
+                                const w = window.open('', '_blank');
+                                if (!w) { try { showToast('無法開啟列印視窗', true); } catch(_){} return; }
+                                w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8" /><title>簽到表列印</title><style>
+                                  body{margin:20px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;}
+                                  table{border-collapse:collapse; width:100%;}
+                                  th,td{border:1px solid #333; padding:4px; font-size:12px;}
+                                  .text-center{text-align:center;}
+                                  .text-lg{font-size:18px;}
+                                  .grid{display:block;}
+                                  .p-3{padding:12px;}
+                                  .mb-2{margin-bottom:8px;}
+                                  .mt-2{margin-top:8px;}
+                                </style></head><body>${html}</body></html>`);
+                                w.document.close();
+                                w.focus();
+                                try { w.print(); } catch(_) {}
+                            };
+
+                            const printUserBtn = document.getElementById('hr-print-user');
+                            const printAllBtn = document.getElementById('hr-print-all');
+                            if (printUserBtn) {
+                                printUserBtn.addEventListener('click', async ()=>{
+                                    const uid = state.navHRSelectedUserId || '';
+                                    const ym = state.navHRMonth || defMonth;
+                                    if (!uid) { showToast('請先選擇人員', true); return; }
+                                    const htmlOrPromise = buildPayrollTableHtmlForUser(uid, ym);
+                                    const html = htmlOrPromise && htmlOrPromise.then ? await htmlOrPromise : htmlOrPromise;
+                                    openPrintWindow(html);
+                                });
+                            }
+                            if (printAllBtn) {
+                                printAllBtn.addEventListener('click', async ()=>{
+                                    const ym = state.navHRMonth || defMonth;
+                                    const tasks = filtered.map(u => buildPayrollTableHtmlForUser(u.id, ym));
+                                    const parts = [];
+                                    for (const t of tasks) {
+                                        const html = t && t.then ? await t : t;
+                                        parts.push(html);
+                                    }
+                                    openPrintWindow(parts.join('<div style="page-break-after:always"></div>'));
+                                });
                             }
 
                             // 初次若已有選取人員則渲染表格
