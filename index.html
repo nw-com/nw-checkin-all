@@ -2559,13 +2559,39 @@
                                             </table>
                                         </div>
                                         <div class="mt-2">
-                                            <table class="w-full border border-gray-300 text-sm">
+                                            <table class="w-full text-sm" style="border-collapse:collapse;">
+                                                <colgroup>
+                                                    <col style="width:25%;">
+                                                    <col style="width:25%;">
+                                                    <col style="width:25%;">
+                                                    <col style="width:25%;">
+                                                </colgroup>
                                                 <tbody>
                                                     <tr>
-                                                        <td class="border px-2 py-6 text-center">總經理</td>
-                                                        <td class="border px-2 py-6 text-center">經理</td>
-                                                        <td class="border px-2 py-6 text-center">主管</td>
-                                                        <td class="border px-2 py-6 text-center">入案</td>
+                                                        <td class="no-border px-2 py-4">
+                                                            <div style="display:flex; align-items:flex-end; gap:8px;">
+                                                                <span>總經理</span>
+                                                                <div class="signature-line" style="flex:1;"></div>
+                                                            </div>
+                                                        </td>
+                                                        <td class="no-border px-2 py-4">
+                                                            <div style="display:flex; align-items:flex-end; gap:8px;">
+                                                                <span>經理</span>
+                                                                <div class="signature-line" style="flex:1;"></div>
+                                                            </div>
+                                                        </td>
+                                                        <td class="no-border px-2 py-4">
+                                                            <div style="display:flex; align-items:flex-end; gap:8px;">
+                                                                <span>主管</span>
+                                                                <div class="signature-line" style="flex:1;"></div>
+                                                            </div>
+                                                        </td>
+                                                        <td class="no-border px-2 py-4">
+                                                            <div style="display:flex; align-items:flex-end; gap:8px;">
+                                                                <span>人事</span>
+                                                                <div class="signature-line" style="flex:1;"></div>
+                                                            </div>
+                                                        </td>
                                                     </tr>
                                                 </tbody>
                                             </table>
@@ -2603,6 +2629,8 @@
                                   body{margin:20px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;}
                                   table{border-collapse:collapse; width:100%; table-layout:fixed;}
                                   th,td{border:1px solid #333; padding:3px; font-size:11px;}
+                                  .no-border{border:none !important;}
+                                  .signature-line{border-bottom:1px solid #333; height:0;}
                                   .text-center{text-align:center;}
                                   .text-lg{font-size:16px;}
                                   /* 讓左、右兩張表在列印視窗並排 */
