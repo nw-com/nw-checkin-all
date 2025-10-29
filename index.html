@@ -507,7 +507,7 @@
             } catch (_) {}
             
             const storage = getStorage(app);
-            const functions = getFunctions(app);
+            const functions = getFunctions(app, 'us-central1');
 
             // 暫掛到 window 供過渡期腳本（如 reset-points.js）使用
             window.__app = app;
