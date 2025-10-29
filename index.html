@@ -14318,6 +14318,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                  const modalId = `camera-modal-${Date.now()}`;
                 let videoStream;
     const capturedPhotos = []; // { blob, description }
+    let handleEsc;
 
     const stopCamera = () => {
         try {
@@ -14341,6 +14342,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
 
                 const close = () => {
                     stopCamera();
+                    try { if (handleEsc) document.removeEventListener('keydown', handleEsc); } catch(_) {}
                     document.getElementById(modalId)?.remove();
                 };
 
@@ -14378,6 +14380,13 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     </div>
                 `;
                 modalContainer.innerHTML = modalHTML;
+                // 允許點擊遮罩或按 ESC 關閉（並停止相機）
+                const backdrop = document.getElementById(modalId);
+                if (backdrop) {
+                    backdrop.addEventListener('click', (e) => { if (e.target && e.target.id === modalId) close(); });
+                }
+                handleEsc = (e) => { if (e.key === 'Escape') close(); };
+                try { document.addEventListener('keydown', handleEsc); } catch(_) {}
 
                 const video = document.getElementById('camera-video');
                 const canvas = document.getElementById('camera-canvas');
@@ -14387,6 +14396,14 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const descriptionInput = document.getElementById('photo-description');
                 const captureControls = document.getElementById('capture-controls');
                 const confirmControls = document.getElementById('confirm-controls');
+                // 調整快門為橢圓（加寬不加高）
+                try {
+                    const captureBtnEl = document.getElementById('capture-btn');
+                    if (captureBtnEl && captureBtnEl.classList) {
+                        captureBtnEl.classList.remove('w-24');
+                        captureBtnEl.classList.add('w-36');
+                    }
+                } catch(_) {}
 
                 // 強制使用前鏡頭（自拍）
                 let currentFacingMode = "user";
