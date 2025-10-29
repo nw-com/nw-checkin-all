@@ -2374,6 +2374,7 @@
                                 const defMonthLocal = ym || state.navHRMonth || defMonth;
                                 const user = users.find(u => u.id === uid);
                                 const userName = (user?.name || user?.displayName || user?.email || '(未命名)') + '';
+                                const roleTitle = resolveRole(user) || '';
                                 const [yearStr, monStr] = (defMonthLocal||'').split('-');
                                 const yyyy = parseInt(yearStr,10)||now.getFullYear();
                                 const mm = parseInt(monStr,10)||now.getMonth()+1;
@@ -2390,18 +2391,18 @@
                                         // await for snapshot
                                         return snapRec.then(s => {
                                             s.forEach(d=> records.push({ id: d.id, ...d.data() }));
-                                            return __buildPayrollHtmlFromRecords(records, { yyyy, mm, daysInMonth, userName, community: c });
+                                            return __buildPayrollHtmlFromRecords(records, { yyyy, mm, daysInMonth, userName, roleTitle, community: c });
                                         });
                                     }
                                 } catch (e) {
                                     console.warn('載入打卡紀錄失敗', e);
                                 }
                                 // 非 async 情境（理論上不會進到這裡），直接組 HTML
-                                return __buildPayrollHtmlFromRecords(records, { yyyy, mm, daysInMonth, userName, community: c });
+                                return __buildPayrollHtmlFromRecords(records, { yyyy, mm, daysInMonth, userName, roleTitle, community: c });
                             }
 
                             function __buildPayrollHtmlFromRecords(records, ctx) {
-                                const { yyyy, mm, daysInMonth, userName, community } = ctx;
+                                const { yyyy, mm, daysInMonth, userName, roleTitle, community } = ctx;
                                 const containerEl = document.getElementById('payroll-table-container');
                                 const byDay = {};
                                 const toDate = (t)=> (t?.toDate?.() ? t.toDate() : (t ? new Date(t) : null));
@@ -2450,8 +2451,8 @@
                                 const attendanceDays = Object.keys(byDay).filter(k => (byDay[k]?.start || byDay[k]?.end)).length;
                                 const titleComm = (community?.shortName || community?.name || '');
                                 const html = `
-                                    <div class="p-3">
-                                        <div class="text-center text-lg font-semibold mb-2">西北保全/西北公寓 ${userName} 簽到表( ${yyyy} 年 ${mm} 月 )</div>
+                                    <div class="p-3 a4-landscape" style="width:1123px; margin:0 auto;">
+                                        <div class="text-center text-lg font-semibold mb-2">西北保全/西北公寓 ${userName} ${roleTitle ? roleTitle : ''} 簽到表( ${yyyy} 年 ${mm} 月 ) <span class="ml-4">案場：${community?.name || ''}</span></div>
                                         <div class="grid grid-cols-2 gap-2">
                                             <table class="w-full border border-gray-300 text-sm">
                                                 <thead>
@@ -2557,6 +2558,8 @@
                                 const w = window.open('', '_blank');
                                 if (!w) { try { showToast('無法開啟列印視窗', true); } catch(_){} return; }
                                 w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8" /><title>簽到表列印</title><style>
+                                  @page { size: A4 landscape; margin: 12mm; }
+                                  @media print { body { margin: 0; } }
                                   body{margin:20px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;}
                                   table{border-collapse:collapse; width:100%;}
                                   th,td{border:1px solid #333; padding:4px; font-size:12px;}
@@ -2566,6 +2569,7 @@
                                   .p-3{padding:12px;}
                                   .mb-2{margin-bottom:8px;}
                                   .mt-2{margin-top:8px;}
+                                  .a4-landscape{width:100%;}
                                 </style></head><body>${html}</body></html>`);
                                 w.document.close();
                                 w.focus();
