@@ -2319,28 +2319,160 @@
                             const filtered = users.filter(u => allowed.has(resolveRole(u)) && userBelongsToCommunity(u));
                             // 依姓氏筆畫排序
                             filtered.sort(compareUsersBySurnameStroke);
+
+                            // 月份預設為本月（YYYY-MM）
+                            const now = new Date();
+                            const defMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+                            if (!state.navHRMonth) state.navHRMonth = defMonth;
+
                             content.innerHTML = `
                                 <div class="text-sm text-gray-500 mb-2">社區：${c?.name || '(未命名社區)'}；物業人員數：${filtered.length}</div>
-                                <div class="grid grid-cols-5 gap-2">
+                                <div class="grid grid-cols-5 gap-2 mb-3">
                                     ${filtered.map(u => {
                                         const rawName = (u.name || u.displayName || u.email || '(未命名)') + '';
                                         const cleaned = rawName.replace(/\s+/g,'');
                                         const title = rawName.replace(/"/g,'&quot;');
                                         const effRole = resolveRole(u) || '';
+                                        const activeCls = (state.navHRSelectedUserId === u.id) ? 'ring-2 ring-offset-1' : '';
                                         return `
-                                        <button class="hr-user-btn w-full px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" style="aspect-ratio: 1 / 1;" data-id="${u.id}" title="${title}">
+                                        <button class="hr-user-btn w-full px-3 py-2 rounded-md border bg-white hover:bg-blue-50 ${activeCls} text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" style="aspect-ratio: 1 / 1;" data-id="${u.id}" title="${title}">
                                             <span class="block leading-tight whitespace-nowrap text-center" style="font-size:13px;">${cleaned || '(未命名)'}</span>
                                             <span class="block leading-tight whitespace-nowrap text-center text-xs ${roleBadgeClass(effRole)}" style="font-size:11px;">${effRole || ''}</span>
                                         </button>`;
                                     }).join('')}
                                 </div>
-                                <div class="mt-3 text-xs text-gray-400">提示：點擊人員可檢視出勤，核薪流程將於後續補充。</div>`;
+                                <div class="flex items-center gap-2 mb-2">
+                                    <label class="text-sm text-gray-700">選擇月份</label>
+                                    <input id="hr-month-input" type="month" class="px-2 py-1 border rounded text-sm" value="${state.navHRMonth}" />
+                                    <div id="hr-selected-user-label" class="text-sm text-gray-600"></div>
+                                </div>
+                                <div id="payroll-table-container" class="bg-white border rounded"></div>
+                                <div class="mt-3 text-xs text-gray-400">提示：點人員後下方生成該員本月簽到表（上/下班時間）。</div>`;
+
+                            const monthInput = document.getElementById('hr-month-input');
+                            if (monthInput) {
+                                monthInput.addEventListener('change', () => {
+                                    state.navHRMonth = monthInput.value || defMonth;
+                                    renderPropertyPayrollTable();
+                                });
+                            }
+                            const labelEl = document.getElementById('hr-selected-user-label');
+
                             content.querySelectorAll('.hr-user-btn').forEach(btn => {
                                 btn.addEventListener('click', (e) => {
-                                    const id = e.currentTarget.getAttribute('data-id');
-                                    showPage('tracking', 'attendance', { selectedUserId: id });
+                                    state.navHRSelectedUserId = e.currentTarget.getAttribute('data-id');
+                                    // 更新選取樣式
+                                    content.querySelectorAll('.hr-user-btn').forEach(b=> b.classList.remove('ring-2','ring-offset-1'));
+                                    e.currentTarget.classList.add('ring-2','ring-offset-1');
+                                    renderPropertyPayrollTable();
                                 });
                             });
+
+                            async function renderPropertyPayrollTable() {
+                                const containerEl = document.getElementById('payroll-table-container');
+                                if (!containerEl) return;
+                                const uid = state.navHRSelectedUserId || '';
+                                const ym = state.navHRMonth || defMonth;
+                                if (!uid) { containerEl.innerHTML = `<div class="p-4 text-gray-500">請先選擇人員</div>`; return; }
+                                const user = users.find(u => u.id === uid);
+                                const userName = (user?.name || user?.displayName || user?.email || '(未命名)') + '';
+                                if (labelEl) labelEl.textContent = `人員：${userName}`;
+                                const [yearStr, monStr] = (ym||'').split('-');
+                                const yyyy = parseInt(yearStr,10)||now.getFullYear();
+                                const mm = parseInt(monStr,10)||now.getMonth()+1;
+                                const daysInMonth = new Date(yyyy, mm, 0).getDate();
+                                const startDt = new Date(`${yyyy}-${String(mm).padStart(2,'0')}-01T00:00:00`);
+                                const endDt = new Date(`${yyyy}-${String(mm).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}T23:59:59`);
+                                const { query, where, Timestamp } = fs;
+                                let records = [];
+                                try {
+                                    const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(startDt) : startDt;
+                                    const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(endDt) : endDt;
+                                    const snapRec = await getDocs(query(collection(db, 'clockInRecords'), where('userId','==', uid), where('timestamp','>=', tsStart), where('timestamp','<=', tsEnd)));
+                                    snapRec.forEach(d=> records.push({ id: d.id, ...d.data() }));
+                                } catch (e) {
+                                    console.warn('載入打卡紀錄失敗', e);
+                                }
+                                const byDay = {};
+                                const toDate = (t)=> (t?.toDate?.() ? t.toDate() : (t ? new Date(t) : null));
+                                const hm = (dt)=> dt ? `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}` : '';
+                                records.forEach(r=>{
+                                    const dt = toDate(r.timestamp);
+                                    if (!dt || isNaN(dt.getTime())) return;
+                                    const day = dt.getDate();
+                                    const key = day;
+                                    const type = r.type || '';
+                                    const cur = byDay[key] || { start:null, end:null };
+                                    if (type === '上班') {
+                                        if (!cur.start || dt < cur.start) cur.start = dt;
+                                    } else if (type === '下班') {
+                                        if (!cur.end || dt > cur.end) cur.end = dt;
+                                    }
+                                    byDay[key] = cur;
+                                });
+                                const weekdayLabel = (y,m,d)=>{
+                                    const wd = new Date(y, m-1, d).getDay();
+                                    return ['日','一','二','三','四','五','六'][wd];
+                                };
+                                const makeRows = (startDay, endDay)=> Array.from({length: endDay-startDay+1}, (_,i)=>{
+                                    const day = startDay + i;
+                                    const rec = byDay[day] || {};
+                                    const ws = weekdayLabel(yyyy, mm, day);
+                                    return `
+                                        <tr>
+                                            <td class="border px-2 py-1 text-center w-10">${day}</td>
+                                            <td class="border px-2 py-1 text-center w-10">${ws}</td>
+                                            <td class="border px-2 py-1 text-center w-20">${hm(rec.start) || ''}</td>
+                                            <td class="border px-2 py-1 text-center w-20">${hm(rec.end) || ''}</td>
+                                            <td class="border px-2 py-1 text-center"></td>
+                                        </tr>`;
+                                }).join('');
+
+                                const leftEnd = Math.min(16, daysInMonth);
+                                const rightStart = Math.min(17, daysInMonth+1);
+                                const rightHas = daysInMonth >= 17;
+                                const titleComm = (c?.shortName || c?.name || '');
+                                containerEl.innerHTML = `
+                                    <div class="p-3">
+                                        <div class="text-center text-lg font-semibold mb-2">西北保全／西北公寓 ${titleComm ? titleComm+' ' : ''}${userName} 簽到表（${yyyy} 年 ${mm} 月）</div>
+                                        <div class="grid grid-cols-2 gap-2">
+                                            <table class="w-full border border-gray-300 text-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th class="border px-2 py-1">日期</th>
+                                                        <th class="border px-2 py-1">星期</th>
+                                                        <th class="border px-2 py-1">上班時間</th>
+                                                        <th class="border px-2 py-1">下班時間</th>
+                                                        <th class="border px-2 py-1">簽到處</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${makeRows(1, leftEnd)}
+                                                </tbody>
+                                            </table>
+                                            ${rightHas ? `
+                                            <table class="w-full border border-gray-300 text-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th class="border px-2 py-1">日期</th>
+                                                        <th class="border px-2 py-1">星期</th>
+                                                        <th class="border px-2 py-1">上班時間</th>
+                                                        <th class="border px-2 py-1">下班時間</th>
+                                                        <th class="border px-2 py-1">簽到處</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${makeRows(rightStart, daysInMonth)}
+                                                </tbody>
+                                            </table>` : ''}
+                                        </div>
+                                        <div class="mt-3 text-xs text-gray-500">備註：此表格先呈現上/下班時間，其他統計欄位後續補充。</div>
+                                    </div>`;
+                                try { lucide.createIcons(); } catch (_) {}
+                            }
+
+                            // 初次若已有選取人員則渲染表格
+                            renderPropertyPayrollTable();
                         } else if (state.navHRSubPage === 'guard') {
                             // 依社區載入哨點列表
                             try {
