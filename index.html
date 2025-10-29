@@ -979,16 +979,20 @@
             // --- Authentication Logic ---
             const translateAuthError = (error) => {
                 const code = error?.code || '';
+                const message = error?.message || '';
                 if (code === 'auth/invalid-email') return '電子郵件格式不正確。';
                 if (code === 'auth/user-not-found') return '查無此帳號，請先由管理端建立或核准。';
                 if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') return '密碼錯誤，如忘記請使用「忘記密碼」。';
                 if (code === 'auth/too-many-requests') return '嘗試次數過多，已暫時封鎖，稍後再試。';
                 if (code === 'auth/operation-not-allowed') return '未啟用 Email/密碼登入，請聯繫系統管理員。';
                 if (code === 'auth/network-request-failed') return '網路異常，請檢查連線。';
+                // Callable Functions 與網路／CORS 錯誤
                 if (code === 'functions/not-found') return '查無此手機對應的帳號，請確認或改用 Email 登入。';
                 if (code === 'functions/failed-precondition') return '此手機帳號尚未設定電子郵件，請聯絡管理員。';
                 if (code === 'functions/invalid-argument') return '請輸入有效的手機號碼。';
-                if (code === 'functions/internal') return '服務暫時不可用，請稍後再試。';
+                if (code === 'functions/internal' || code === 'internal' || code === 'unavailable') return '服務暫時不可用，請稍後再試。';
+                // 常見 CORS/網路錯誤訊息關鍵字
+                if (/ERR_FAILED|CORS|Access-Control-Allow-Origin|Failed to fetch/i.test(message)) return '服務暫時不可用，請稍後再試。';
                 return '';
             };
 
@@ -1033,7 +1037,8 @@
                 } catch (error) {
                     console.error('login error', error);
                     const msg = translateAuthError(error);
-                    loginError.textContent = msg || '登入失敗，請檢查帳號密碼。';
+                    const fallback = isEmailAccount(account) ? '登入失敗，請檢查帳號密碼。' : '服務暫時不可用，請稍後再試。';
+                    loginError.textContent = msg || fallback;
                 } finally {
                     showLoading(false);
                 }
