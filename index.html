@@ -2421,7 +2421,8 @@
                                     }
                                     byDay[key] = cur;
                                 });
-                                const weekdayLabel = (y,m,d)=>{
+                                const weekdayLabel = (y,m,d,limit)=>{
+                                    if (d > limit) return '';
                                     const wd = new Date(y, m-1, d).getDay();
                                     return ['日','一','二','三','四','五','六'][wd];
                                 };
@@ -2433,7 +2434,7 @@
                                 const makeRows = (startDay, endDay)=> Array.from({length: endDay-startDay+1}, (_,i)=>{
                                     const day = startDay + i;
                                     const rec = byDay[day] || {};
-                                    const ws = weekdayLabel(yyyy, mm, day);
+                                    const ws = weekdayLabel(yyyy, mm, day, daysInMonth);
                                     const placeText = resolvePlace(rec.startRec) || resolvePlace(rec.endRec) || '';
                                     return `
                                         <tr>
@@ -2445,9 +2446,9 @@
                                         </tr>`;
                                 }).join('');
 
-                                const leftEnd = Math.min(16, daysInMonth);
-                                const rightStart = Math.min(17, daysInMonth+1);
-                                const rightHas = daysInMonth >= 17;
+                                const leftEnd = 16;
+                                const rightStart = 17;
+                                const rightHas = true;
                                 const attendanceDays = Object.keys(byDay).filter(k => (byDay[k]?.start || byDay[k]?.end)).length;
                                 const titleComm = (community?.shortName || community?.name || '');
                                 const html = `
@@ -2480,7 +2481,7 @@
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    ${makeRows(rightStart, daysInMonth)}
+                                                    ${makeRows(rightStart, 31)}
                                                 </tbody>
                                             </table>` : ''}
                                         </div>
