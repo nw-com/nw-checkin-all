@@ -1100,6 +1100,8 @@ function closeAllModals() {
 }
 
 // 自動下班打卡相關變數
+// 自動下班功能全域開關（設定為 false 以完全停用）
+const AUTO_CLOCK_OUT_ENABLED = false;
 let autoClockOutTimer = null;
 let autoClockOutSettings = {
     enabled: false,
@@ -1110,6 +1112,15 @@ let autoClockOutSettings = {
 // 載入自動下班打卡設定
 async function loadAutoClockOutSettings() {
     try {
+        // 全域停用：直接回傳已停用設定，並略過遠端讀取
+        if (!AUTO_CLOCK_OUT_ENABLED) {
+            autoClockOutSettings.enabled = false;
+            autoClockOutSettings.workHours = 8;
+            autoClockOutSettings.loaded = true;
+            console.log('自動下班已停用：略過設定載入');
+            return autoClockOutSettings;
+        }
+
         const user = window.__auth?.currentUser;
         // 未登入時不讀取遠端設定，使用預設值
         if (!user) {
@@ -1168,6 +1179,11 @@ function startAutoClockOutTimer() {
         clearTimeout(autoClockOutTimer);
         autoClockOutTimer = null;
     }
+    // 全域停用：不啟動計時器
+    if (!AUTO_CLOCK_OUT_ENABLED) {
+        console.log('自動下班已停用：不啟動計時器');
+        return;
+    }
     
     // 如果未啟用自動下班打卡，則不啟動計時器
     if (!autoClockOutSettings.enabled) {
@@ -1192,6 +1208,12 @@ function startAutoClockOutTimer() {
 // 執行自動下班打卡
 async function performAutoClockOut() {
     try {
+        // 全域停用：不建立自動下班紀錄
+        if (!AUTO_CLOCK_OUT_ENABLED) {
+            console.log('自動下班已停用：不建立自動下班紀錄');
+            return;
+        }
+
         const user = window.__auth?.currentUser;
         if (!user) {
             console.error('用戶未登入，無法執行自動下班打卡');
@@ -1276,6 +1298,11 @@ function stopAutoClockOutTimer() {
 // 檢查當前用戶是否已超時並需要自動下班打卡
 async function checkAndHandleOvertimeClockOut() {
     try {
+        // 全域停用：直接跳過檢查
+        if (!AUTO_CLOCK_OUT_ENABLED) {
+            return;
+        }
+
         const user = window.__auth?.currentUser;
         if (!user) {
             console.log('用戶未登入，無法檢查超時狀態');
@@ -1362,6 +1389,12 @@ async function checkAndHandleOvertimeClockOut() {
 // 檢查所有用戶的超時狀態（管理員功能）
 async function checkAllUsersOvertimeStatus() {
     try {
+        // 全域停用：跳過全員超時檢查
+        if (!AUTO_CLOCK_OUT_ENABLED) {
+            console.log('自動下班已停用：跳過全員超時檢查');
+            return [];
+        }
+
         // 載入自動下班打卡設定
         await loadAutoClockOutSettings();
         
@@ -1478,6 +1511,6 @@ window.checkAllUsersOvertimeStatus = checkAllUsersOvertimeStatus;
 // 添加事件監聽器
 document.addEventListener('DOMContentLoaded', function() {
     // 僅在定位打卡子頁面渲染後，由該頁面呼叫 initClockInButtonStatus。
-    // 保留設定載入，可供自動下班邏輯使用（例如上班打卡後啟動計時器）。
-    setTimeout(loadAutoClockOutSettings, 1000);
+    // 自動下班已停用：不載入相關設定
+    // setTimeout(loadAutoClockOutSettings, 1000);
 });

@@ -112,12 +112,12 @@ service cloud.firestore {
       request.resource.data.keys().hasOnly([
         'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','shiftId'
       ]) &&
-      request.resource.data.type in ['上班','下班','外出','返回','抵達','離開','自動下班'] &&
+      request.resource.data.type in ['上班','下班','外出','返回','抵達','離開'] &&
       request.resource.data.timestamp is timestamp &&
       request.resource.data.location is latlng &&
       request.resource.data.photoUrls is list &&
       request.resource.data.descriptions is list &&
-      (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic is bool) &&
+      (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic == false) &&
       request.resource.data.photoUrls.size() <= 3 &&
       request.resource.data.descriptions.size() == request.resource.data.photoUrls.size();
 
@@ -127,12 +127,18 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly([
           'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','shiftId','updatedBy','updatedAt'
         ]) &&
-        request.resource.data.type in ['上班','下班','外出','返回','抵達','離開','自動下班'] &&
+        (
+          (resource.data.type == '自動下班' && request.resource.data.type == resource.data.type) ||
+          (request.resource.data.type in ['上班','下班','外出','返回','抵達','離開'])
+        ) &&
         request.resource.data.timestamp is timestamp &&
         (request.resource.data.location == null || request.resource.data.location is latlng) &&
         (request.resource.data.photoUrls == null || request.resource.data.photoUrls is list) &&
         (request.resource.data.descriptions == null || request.resource.data.descriptions is list) &&
-        (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic is bool) &&
+        (
+          (resource.data.isAutomatic == true && request.resource.data.isAutomatic == resource.data.isAutomatic) ||
+          (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic == false)
+        ) &&
         (request.resource.data.updatedBy == null || request.resource.data.updatedBy is string) &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp) &&
         (request.resource.data.photoUrls == null || request.resource.data.photoUrls.size() <= 3) &&
@@ -473,8 +479,8 @@ service cloud.firestore {
           'name','phone','email','homeAddress','birthDate','idNumber','license','serviceCommunityCode','bloodType','emergencyName','emergencyRelation','emergencyPhone','applicationTitle','applyPassword','avatarUrl','status','createdAt'
         ]) &&
         request.resource.data.name is string &&
-        (request.resource.data.phone == null || request.resource.data.phone is string) &&
-        request.resource.data.email is string &&
+        request.resource.data.phone is string &&
+        (request.resource.data.email == null || request.resource.data.email is string) &&
         (request.resource.data.homeAddress == null || request.resource.data.homeAddress is string) &&
         (request.resource.data.birthDate == null || request.resource.data.birthDate is string) &&
         (request.resource.data.idNumber == null || request.resource.data.idNumber is string) &&

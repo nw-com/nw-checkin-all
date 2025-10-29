@@ -164,7 +164,7 @@
         <div class="text-center mb-8">
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-600"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
             <h1 class="text-2xl font-bold text-gray-800 mt-4">西北社區打卡系統</h1>
-            <p class="text-gray-500">社區網頁版V2.1.2</p>
+            <p class="text-gray-500">社區網頁版V3.1.1</p>
         </div>
         <form id="login-form">
             <div class="mb-4">
@@ -578,8 +578,8 @@
                                     <input type="text" id="apply-name" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
                                 <div>
-                                    <label for="apply-phone" class="block text-sm font-medium text-gray-700">手機號碼</label>
-                                    <input type="tel" id="apply-phone" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                    <label for="apply-phone" class="block text-sm font-medium text-gray-700">手機號碼（必填）</label>
+                                    <input type="tel" id="apply-phone" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
                                 <div>
                                     <label for="apply-title" class="block text-sm font-medium text-gray-700">申請職稱</label>
@@ -593,8 +593,8 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件 (必填)</label>
-                                    <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md" required>
+                                    <label for="apply-email" class="block text-sm font-medium text-gray-700">電子郵件（選填）</label>
+                                    <input type="email" id="apply-email" class="w-full mt-1 px-3 py-2 border rounded-md">
                                 </div>
                                 <div>
                                     <label for="apply-password" class="block text-sm font-medium text-gray-700">設定密碼 (至少6位)</label>
@@ -728,14 +728,14 @@
                         const serviceCommunityCode = document.getElementById('apply-service-code').value.trim();
                         const applicationTitle = document.getElementById('apply-title').value;
 
-                        if (!name || !email) throw new Error('請填寫姓名與電子郵件');
+                        if (!name || !phone) throw new Error('請填寫姓名與手機號碼');
                         if (password || confirmPassword) {
                             if (password.length < 6) throw new Error('密碼至少 6 位數');
                             if (password !== confirmPassword) throw new Error('兩次密碼不一致');
                         }
 
                         const data = {
-                            name, phone, email, homeAddress, birthDate, idNumber, license, serviceCommunityCode,
+                            name, phone, email: (email || null), homeAddress, birthDate, idNumber, license, serviceCommunityCode,
                             bloodType, emergencyName, emergencyRelation, emergencyPhone,
                             applicationTitle,
                             applyPassword: (password && password.length >= 6) ? password : null,
@@ -14135,13 +14135,12 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         // 更新本地狀態
                         state.clockInStatus = type;
                         
-                        // 如果是上班打卡，啟動自動下班打卡計時器
-                        if (type === '上班' && typeof startAutoClockOutTimer === 'function') {
-                            // 重新載入設定並啟動計時器
-                            loadAutoClockOutSettings().then(() => {
-                                startAutoClockOutTimer();
-                            });
-                        }
+                        // 已取消自動下班功能：不啟動自動下班計時器
+                        // if (type === '上班' && typeof startAutoClockOutTimer === 'function') {
+                        //     loadAutoClockOutSettings().then(() => {
+                        //         startAutoClockOutTimer();
+                        //     });
+                        // }
                         
                         // 如果是下班打卡，停止自動下班打卡計時器
                         if (type === '下班' && typeof stopAutoClockOutTimer === 'function') {
