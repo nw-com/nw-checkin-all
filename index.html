@@ -1986,6 +1986,40 @@
                             console.warn('套用社區異常標色失敗', e);
                         }
                     })();
+
+                    // 依社區顯示帳號申請待核准提示（淺紫色底，僅管理角色可見）
+                    (async () => {
+                        try {
+                            const role = state.currentUserData?.role || '';
+                            const canSeePending = ['admin','hr','manager','junior_manager'].includes(role);
+                            if (!canSeePending) return;
+                            const fs = window.__fs || {}; const db = window.__db;
+                            const { collection, getDocs, query, where } = fs;
+                            if (!db || !collection || !getDocs || !query || !where) return;
+                            // 取目前區域篩選後的社區列表與代號映射
+                            const currentList = selectedRegion ? [...list].sort(compareCommunitiesByCode).filter(c => (c?.region || '') === selectedRegion) : [...list].sort(compareCommunitiesByCode);
+                            const communitiesByCode = Object.fromEntries(currentList.map(c => [ (c.code||'').trim(), c.id ]));
+                            const appsSnap = await getDocs(query(collection(db, 'accountApplications'), where('status','==','pending')));
+                            const pendingCommIds = new Set();
+                            appsSnap.forEach(d => {
+                                const a = d.data() || {};
+                                const code = (a.serviceCommunityCode || '').trim();
+                                const cid = communitiesByCode[code];
+                                if (cid) pendingCommIds.add(cid);
+                            });
+                            // 套用紫色標示，若已被異常標紅則不覆蓋
+                            pendingCommIds.forEach(cid => {
+                                const btn = container.querySelector(`.enter-community[data-id="${cid}"]`);
+                                if (!btn) return;
+                                const isRed = btn.classList.contains('bg-red-50');
+                                if (isRed) return;
+                                btn.classList.remove('bg-white','hover:bg-red-50');
+                                btn.classList.add('bg-purple-100','border-violet-200','text-violet-800');
+                            });
+                        } catch (e) {
+                            console.warn('套用社區待核准標示失敗', e);
+                        }
+                    })();
                 };
                 renderList();
                 try { lucide.createIcons(); } catch (_) {}
@@ -2067,7 +2101,9 @@
                                         const rawName = (u.name || u.displayName || u.email || '(未命名)') + '';
                                         const cleaned = rawName.replace(/\s+/g,'');
                                         const nameLine = cleaned || '(未命名)';
-                                        const age = computeAge(u.birth || u.birthday || u.birthDate);
+                                        // 年齡顯示：優先使用資料欄位 u.age，其次由生日推算
+                                        const explicitAge = (typeof u.age === 'number') ? u.age : ((typeof u.age === 'string' && /^\d+$/.test(u.age)) ? parseInt(u.age, 10) : null);
+                                        const age = (explicitAge !== null && !isNaN(explicitAge)) ? explicitAge : computeAge(u.birth || u.birthday || u.birthDate);
                                         const ageText = (typeof age === 'number' && age >= 0) ? `(${age})` : '';
                                         const ageClass = (typeof age === 'number' && age >= 70) ? 'font-bold text-red-600' : '';
                                         const title = rawName.replace(/"/g,'&quot;');
