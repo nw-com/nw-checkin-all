@@ -202,6 +202,41 @@
         </form>
     </div>
 
+    <!-- Reset Password Page (Chinese UI) -->
+    <div id="reset-password-page" class="w-full max-w-sm p-8 bg-white rounded-2xl shadow-lg hide">
+        <div class="text-center mb-6">
+            <h2 class="text-2xl font-bold text-gray-800">重設您的密碼</h2>
+            <p id="reset-email" class="text-gray-500 mt-2"></p>
+        </div>
+        <form id="reset-password-form" class="space-y-4">
+            <div>
+                <label for="reset-new-password" class="block text-sm font-medium text-gray-700 mb-1">新密碼</label>
+                <div class="relative">
+                    <input type="password" id="reset-new-password" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 pr-10" required>
+                    <button type="button" id="toggle-reset-new" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500">
+                        <i data-lucide="eye-off" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+            <div>
+                <label for="reset-confirm-password" class="block text-sm font-medium text-gray-700 mb-1">再次確認新密碼</label>
+                <div class="relative">
+                    <input type="password" id="reset-confirm-password" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 pr-10" required>
+                    <button type="button" id="toggle-reset-confirm" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500">
+                        <i data-lucide="eye-off" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+            <p id="reset-error" class="text-red-500 text-sm"></p>
+            <button type="submit" class="w-full bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition duration-150">
+                儲存
+            </button>
+            <button type="button" id="reset-back-login" class="w-full mt-2 bg-white border border-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-50 focus:outline-none">
+                返回登入
+            </button>
+        </form>
+    </div>
+
     <!-- Main App Container -->
     <div id="app-container" class="main-container bg-white flex flex-col hide">
         <!-- Header -->
@@ -286,7 +321,8 @@
         import { 
             getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut,
             createUserWithEmailAndPassword, updatePassword, reauthenticateWithCredential,
-            EmailAuthProvider, sendPasswordResetEmail
+            EmailAuthProvider, sendPasswordResetEmail,
+            verifyPasswordResetCode, confirmPasswordReset
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { 
             getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot,
@@ -515,6 +551,7 @@
 
             const loginPage = document.getElementById('login-page');
             const appContainer = document.getElementById('app-container');
+            const resetPasswordPage = document.getElementById('reset-password-page');
             const mainContent = document.getElementById('main-content');
             const mainNav = document.getElementById('main-nav');
             // 保存容器頁尾（全域底部導覽）的預設內容，便於導覽頁切換時復原
@@ -538,7 +575,73 @@
                 state.appMode = params.get('mode') || 'default';
                 state.communityIdFromQuery = params.get('communityId') || null;
                 state.gotoPage = params.get('goto') || null; // e.g., 'navigation'
+                // 密碼重設（Firebase 透過 email 連結帶入）
+                state.inPasswordResetMode = (params.get('mode') === 'resetPassword' && !!params.get('oobCode'));
+                state.passwordResetOobCode = params.get('oobCode') || null;
             } catch (_) {}
+
+            // 渲染中文密碼重設頁面
+            async function renderResetPasswordPage(oobCode) {
+                try {
+                    const email = await verifyPasswordResetCode(auth, oobCode);
+                    const el = document.getElementById('reset-email');
+                    if (el) el.textContent = `帳號：${email}`;
+                } catch (e) {
+                    const errEl = document.getElementById('reset-error');
+                    if (errEl) errEl.textContent = '連結已失效或無效，請重新寄送重設密碼信。';
+                }
+
+                // 顯示控制
+                loginPage.classList.add('hide');
+                appContainer.classList.add('hide');
+                resetPasswordPage.classList.remove('hide');
+                bodyEl.classList.remove('bg-gray-100');
+                bodyEl.classList.add('bg-red-600');
+
+                // 事件綁定
+                const form = document.getElementById('reset-password-form');
+                const errorEl = document.getElementById('reset-error');
+                const newPwdInput = document.getElementById('reset-new-password');
+                const confirmPwdInput = document.getElementById('reset-confirm-password');
+                const toggleNew = document.getElementById('toggle-reset-new');
+                const toggleConfirm = document.getElementById('toggle-reset-confirm');
+                const backBtn = document.getElementById('reset-back-login');
+
+                toggleNew?.addEventListener('click', () => {
+                    const icon = toggleNew.querySelector('i');
+                    if (newPwdInput.type === 'password') { newPwdInput.type = 'text'; icon.outerHTML = '<i data-lucide="eye" class="w-5 h-5"></i>'; }
+                    else { newPwdInput.type = 'password'; icon.outerHTML = '<i data-lucide="eye-off" class="w-5 h-5"></i>'; }
+                });
+                toggleConfirm?.addEventListener('click', () => {
+                    const icon = toggleConfirm.querySelector('i');
+                    if (confirmPwdInput.type === 'password') { confirmPwdInput.type = 'text'; icon.outerHTML = '<i data-lucide="eye" class="w-5 h-5"></i>'; }
+                    else { confirmPwdInput.type = 'password'; icon.outerHTML = '<i data-lucide="eye-off" class="w-5 h-5"></i>'; }
+                });
+                backBtn?.addEventListener('click', () => {
+                    const base = window.location.origin + window.location.pathname;
+                    window.location.href = base; // 返回登入頁
+                });
+                form?.addEventListener('submit', async (ev) => {
+                    ev.preventDefault();
+                    errorEl.textContent = '';
+                    const newPwd = (newPwdInput?.value || '').trim();
+                    const confirmPwd = (confirmPwdInput?.value || '').trim();
+                    if (!newPwd || newPwd.length < 6) { errorEl.textContent = '新密碼長度至少需要 6 位數。'; return; }
+                    if (newPwd !== confirmPwd) { errorEl.textContent = '兩次輸入的新密碼不一致。'; return; }
+                    showLoading(true);
+                    try {
+                        await confirmPasswordReset(auth, oobCode, newPwd);
+                        showToast('密碼已更新，請以新密碼登入');
+                        const base = window.location.origin + window.location.pathname;
+                        window.location.href = base;
+                    } catch (err) {
+                        console.error('confirmPasswordReset 失敗', err);
+                        errorEl.textContent = '重設密碼失敗，請重新寄送重設密碼信後再試。';
+                    } finally {
+                        showLoading(false);
+                    }
+                });
+            }
 
             // ---- 距離與異常判定輔助（供多處渲染共用）----
             function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
@@ -1101,7 +1204,11 @@
                     showLoading(true);
                     try {
                         const emailForReset = await resolveEmailFromIdentifier(identifier);
-                        await sendPasswordResetEmail(auth, emailForReset);
+                        const actionCodeSettings = {
+                            url: `${window.location.origin}${window.location.pathname}?mode=resetPassword`,
+                            handleCodeInApp: true
+                        };
+                        await sendPasswordResetEmail(auth, emailForReset, actionCodeSettings);
                         showToast('已寄出重設密碼通知信');
                     } catch (error) {
                         console.error('reset password error', error);
@@ -1115,6 +1222,11 @@
             
             onAuthStateChanged(auth, (user) => {
                 cleanupListeners();
+                // 若為密碼重設模式，強制顯示中文重設頁
+                if (state.inPasswordResetMode && state.passwordResetOobCode) {
+                    renderResetPasswordPage(state.passwordResetOobCode);
+                    return;
+                }
                 if (user) {
                     bodyEl.classList.remove('bg-red-600');
                     bodyEl.classList.add('bg-gray-100');
@@ -1144,8 +1256,13 @@
                     bodyEl.classList.add('bg-red-600');
                     state.currentUser = null;
                     state.currentUserData = null;
-                    loginPage.classList.remove('hide');
-                    appContainer.classList.add('hide');
+                    // 非登入狀態顯示控制
+                    if (state.inPasswordResetMode && state.passwordResetOobCode) {
+                        renderResetPasswordPage(state.passwordResetOobCode);
+                    } else {
+                        loginPage.classList.remove('hide');
+                        appContainer.classList.add('hide');
+                    }
                     showLoading(false);
                 }
             });
@@ -2903,6 +3020,10 @@
                 if (isManagerial) {
                     try { renderManagerAnomalies(); } catch (e) { console.warn('渲染異常通知失敗', e); }
                 }
+                // 非管理角色：渲染個人今日異常通知
+                if (!isManagerial) {
+                    try { renderPersonalAnomalies(); } catch (e) { console.warn('渲染個人異常通知失敗', e); }
+                }
                 
                 // 檢查是否顯示員工狀態
                 // 定義默認設置
@@ -3165,6 +3286,139 @@
                     try { lucide.createIcons(); } catch (_) {}
                 } catch (e) {
                     console.warn('載入管理者異常通知失敗', e);
+                }
+            }
+
+            // 個人異常通知（今日：定位異常、雙重打卡、待審假單）
+            async function renderPersonalAnomalies() {
+                try {
+                    const fs = window.__fs || {}; const db = window.__db;
+                    const user = window.__auth?.currentUser;
+                    const listEl = document.getElementById('dashboard-duty-list');
+                    if (!db || !user || !listEl) return;
+
+                    const { collection, query, where, getDocs, doc, getDoc, Timestamp } = fs;
+                    const start = new Date(); start.setHours(0,0,0,0);
+                    const end = new Date(); end.setHours(23,59,59,999);
+                    const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
+                    const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
+                    const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+
+                    // 讀取使用者文件以取得服務社區
+                    let udoc = state.currentUserData || null;
+                    if (!udoc || !udoc.id) {
+                        try {
+                            const usnap = await getDoc(doc(db, 'users', user.uid));
+                            if (usnap.exists()) udoc = { id: user.uid, ...usnap.data() };
+                        } catch (_) {}
+                    }
+                    if (!udoc) return;
+
+                    // 準備社區映射
+                    try { await ensureCommunitiesCache(); } catch (_) {}
+                    const communitiesById = state.communitiesById || {};
+                    const resolveCommunityIdByCode = (code) => {
+                        const trimmed = (code || '').trim();
+                        if (!trimmed) return null;
+                        const target = Object.values(communitiesById).find(c => (c.code || '').trim() === trimmed);
+                        return target ? target.id : null;
+                    };
+
+                    let svcIds = Array.isArray(udoc.serviceCommunities) ? udoc.serviceCommunities.slice() : [];
+                    if ((!svcIds || svcIds.length === 0) && udoc.serviceCommunityCode) {
+                        const mapped = resolveCommunityIdByCode(udoc.serviceCommunityCode);
+                        if (mapped) svcIds = [mapped];
+                    }
+
+                    // 今日打卡紀錄（僅本人）
+                    const recs = [];
+                    try {
+                        const q = query(collection(db, 'clockInRecords'), where('userId','==', user.uid), where('timestamp','>=', tsStart), where('timestamp','<=', tsEnd));
+                        const snap = await getDocs(q);
+                        snap.forEach(d => recs.push({ id: d.id, ...d.data() }));
+                        recs.sort((a,b)=>{
+                            const ta = a.timestamp?.toDate?.() ? a.timestamp.toDate() : (a.timestamp ? new Date(a.timestamp) : new Date(0));
+                            const tb = b.timestamp?.toDate?.() ? b.timestamp.toDate() : (b.timestamp ? new Date(b.timestamp) : new Date(0));
+                            return ta - tb;
+                        });
+                    } catch (_) {}
+
+                    // 今日待審假單（僅本人）
+                    let pendingLeaves = [];
+                    try {
+                        const lq = query(collection(db, 'leaves'), where('userId','==', user.uid), where('status','==','pending'), where('targetTime','>=', tsStart), where('targetTime','<=', tsEnd));
+                        const lsnap = await getDocs(lq);
+                        lsnap.forEach(d => pendingLeaves.push({ id: d.id, ...d.data() }));
+                    } catch (_) {}
+
+                    // 計算異常
+                    const anomalies = [];
+                    // 雙重打卡
+                    {
+                        let startCount = 0, endCount = 0;
+                        for (const r of recs) {
+                            const dt = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : null);
+                            if (!dt) continue;
+                            const y = dt.getFullYear(), m = dt.getMonth()+1, d = dt.getDate();
+                            const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                            if (ymd !== ymdToday) continue;
+                            if (r.type === '上班') startCount++;
+                            if (r.type === '下班') endCount++;
+                            if (startCount >= 2 || endCount >= 2) break;
+                        }
+                        if (startCount >= 2 || endCount >= 2) {
+                            anomalies.push({ type: '雙重打卡', detail: '今日存在重複上班或重複下班打卡' });
+                        }
+                    }
+                    // 待審假單
+                    if (pendingLeaves.length > 0) {
+                        anomalies.push({ type: '待審假單', detail: '今日有未審核的請假申請' });
+                    }
+                    // 定位異常
+                    if (Array.isArray(svcIds) && svcIds.length > 0) {
+                        for (const r of recs) {
+                            const abnormal = computeRecordAbnormal(r, svcIds);
+                            if (abnormal && abnormal.isAbnormal) {
+                                anomalies.push({ type: '打卡定位異常', detail: abnormal.detail || '' });
+                                break;
+                            }
+                        }
+                    }
+
+                    // 呈現：建立或更新個人異常卡片
+                    const iconFor = (t) => t === '打卡定位異常' ? 'map-pin' : 'alert-triangle';
+                    const html = anomalies.length ? `
+                        <div id="personal-anomalies-card" class="p-3 bg-red-50 border border-red-200 rounded-md">
+                          <div class="flex items-center">
+                            <i data-lucide="bell" class="w-4 h-4 mr-2 text-red-700"></i>
+                            <span class="font-medium text-gray-800">今日異常</span>
+                          </div>
+                          <div class="mt-2 space-y-2">
+                            ${anomalies.map(a => `
+                              <div class="flex items-start gap-2">
+                                <i data-lucide="${iconFor(a.type)}" class="w-4 h-4 mt-0.5 text-red-700"></i>
+                                <div>
+                                  <div class="text-sm font-medium text-gray-800">${a.type}</div>
+                                  ${a.detail ? `<div class="text-xs text-gray-600">${a.detail}</div>` : ''}
+                                </div>
+                              </div>
+                            `).join('')}
+                          </div>
+                        </div>` : '';
+
+                    const existing = document.getElementById('personal-anomalies-card');
+                    if (html) {
+                        if (existing) {
+                            existing.outerHTML = html;
+                        } else {
+                            listEl.insertAdjacentHTML('afterbegin', html);
+                        }
+                        try { lucide.createIcons(); } catch (_) {}
+                    } else if (existing) {
+                        existing.remove();
+                    }
+                } catch (e) {
+                    console.warn('載入個人異常通知失敗', e);
                 }
             }
 
@@ -11420,18 +11674,30 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const { collection: fsCollection, query: fsQuery, orderBy: fsOrderBy, onSnapshot: fsOnSnapshot, doc: fsDoc, getDoc: fsGetDoc, setDoc: fsSetDoc, updateDoc: fsUpdateDoc, where: fsWhere, getDocs: fsGetDocs, serverTimestamp: fsServerTimestamp } = window.__fs || {};
                 const appsCol = fsCollection(db, 'accountApplications');
                 const q = fsQuery(appsCol, fsOrderBy('createdAt', 'desc'));
-                async function fetchApplications() {
-                    try {
-                        const snap = await fsGetDocs(q);
+                // 即時監聽申請清單變更，使核准後列表立即更新
+                try {
+                    const unsubscribe = fsOnSnapshot(q, (snap) => {
                         allApps = [];
                         snap.forEach(ds => allApps.push({ id: ds.id, ...ds.data() }));
                         renderList();
-                    } catch (e) {
-                        console.error('讀取帳號申請失敗', e);
-                        listEl.innerHTML = '<p class="text-center text-red-500 p-4">無法載入帳號申請</p>';
-                    }
+                    }, (error) => {
+                        console.error('即時監聽帳號申請失敗', error);
+                    });
+                    if (Array.isArray(state.activeListeners)) state.activeListeners.push(unsubscribe);
+                } catch (e) {
+                    // 回退：無法建立監聽時，改為一次性載入
+                    (async () => {
+                        try {
+                            const snap = await fsGetDocs(q);
+                            allApps = [];
+                            snap.forEach(ds => allApps.push({ id: ds.id, ...ds.data() }));
+                            renderList();
+                        } catch (err) {
+                            console.error('讀取帳號申請失敗', err);
+                            listEl.innerHTML = '<p class="text-center text-red-500 p-4">無法載入帳號申請</p>';
+                        }
+                    })();
                 }
-                fetchApplications();
 
                 function renderList() {
                     listEl.innerHTML = '';
@@ -11478,10 +11744,13 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                     ${app.status && app.status !== 'pending' ? `<p class="text-xs mt-1 ${app.status==='approved' ? 'text-green-600' : 'text-red-600'}">狀態：${app.status === 'approved' ? '已核准' : '已拒絕'}</p>` : ''}
                                 </div>
                             </div>
-                            <div class="flex space-x-2">
+                            <div class="flex space-x-3 items-center">
                                 ${app.status === 'pending' ? `
-                                <button data-id="${app.id}" class="approve-btn p-2 text-gray-500 hover:text-green-600"><i data-lucide="check" class="w-4 h-4"></i></button>
-                                <button data-id="${app.id}" class="reject-btn p-2 text-gray-500 hover:text-red-600"><i data-lucide="x" class="w-4 h-4"></i></button>
+                                <label class="inline-flex items-center space-x-1 text-sm text-gray-600">
+                                  <input type="checkbox" class="approve-check w-4 h-4" data-id="${app.id}">
+                                  <span>核准</span>
+                                </label>
+                                <button data-id="${app.id}" class="reject-btn p-2 text-gray-500 hover:text-red-600" title="拒絕"><i data-lucide="x" class="w-4 h-4"></i></button>
                                 ` : ''}
                             </div>`;
                         listEl.appendChild(el);
@@ -11489,6 +11758,16 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
                         lucide.createIcons();
                     }
+                    // 勾選即核准
+                    container.querySelectorAll('.approve-check').forEach(chk => {
+                        chk.addEventListener('change', (e) => {
+                            if (e.target.checked) {
+                                e.target.disabled = true; // 避免重複點擊
+                                handleApprove(e.target.dataset.id);
+                            }
+                        });
+                    });
+                    // 保留既有按鈕行為（若仍存在）
                     container.querySelectorAll('.approve-btn').forEach(btn => btn.addEventListener('click', () => handleApprove(btn.dataset.id)));
                     container.querySelectorAll('.reject-btn').forEach(btn => btn.addEventListener('click', () => handleReject(btn.dataset.id)));
                 }
@@ -11597,7 +11876,15 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         if (targetUserId) updates.convertedUserId = targetUserId;
                         await fsUpdateDoc(appRef, updates);
 
-                        if (!usedAppPassword) { try { await sendPasswordResetEmail(auth, email); } catch (_) {} }
+                if (!usedAppPassword) { 
+                    try { 
+                        const actionCodeSettings = {
+                            url: `${window.location.origin}${window.location.pathname}?mode=resetPassword`,
+                            handleCodeInApp: true
+                        };
+                        await sendPasswordResetEmail(auth, email, actionCodeSettings); 
+                    } catch (_) {} 
+                }
                         showToast(usedAppPassword ? '已核准，請用申請密碼登入' : '已核准並建立帳號（已寄出重設密碼通知）');
                     } catch (err) {
                         console.error('approve application error', err);
@@ -13808,7 +14095,13 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     sendResetBtn.addEventListener('click', async () => {
                         try {
                             showLoading(true);
-                            await sendPasswordResetEmail(auth, user.email);
+            {
+                const actionCodeSettings = {
+                    url: `${window.location.origin}${window.location.pathname}?mode=resetPassword`,
+                    handleCodeInApp: true
+                };
+                await sendPasswordResetEmail(auth, user.email, actionCodeSettings);
+            }
                             showToast('已寄出重設密碼通知信');
                         } catch (err) {
                             console.error('寄送重設密碼信失敗', err);
