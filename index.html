@@ -648,8 +648,8 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="apply-service-code" class="block text-sm font-medium text-gray-700">服務社區代號 (手動輸入)</label>
-                                    <input type="text" id="apply-service-code" class="w-full mt-1 px-3 py-2 border rounded-md">
+                                    <label for="apply-service-code" class="block text-sm font-medium text-gray-700">服務社區代號（必填，4位英數）</label>
+                                    <input type="text" id="apply-service-code" class="w-full mt-1 px-3 py-2 border rounded-md" required>
                                 </div>
 
                                 <p id="apply-form-error" class="text-red-500 text-sm text-center"></p>
@@ -727,40 +727,32 @@
                         const applicationTitle = document.getElementById('apply-title').value;
 
                         if (!name || !phone) throw new Error('請填寫姓名與手機號碼');
+                        if (!serviceCommunityCode) throw new Error('請填寫服務社區代號');
+                        if (!/^[A-Za-z0-9]{4}$/.test(serviceCommunityCode)) throw new Error('服務社區代號需 4 位英數');
                         if (password || confirmPassword) {
                             if (password.length < 6) throw new Error('密碼至少 6 位數');
                             if (password !== confirmPassword) throw new Error('兩次密碼不一致');
                         }
 
-                        // 檢查是否已有待審核申請（以 email／手機為主）
-                        const phoneKey = typeof normalizePhone === 'function' ? normalizePhone(phone) : (phone || '').replace(/[^0-9+]/g, '');
+                        // 檢查是否已有重複申請（手機／電子郵件／身分證號）
                         const { collection, query, where, getDocs, limit, addDoc } = window.__fs || {};
-                        let hasPending = false;
+                        let hasApplied = false;
                         try {
-                            // 以 Email 檢查（若填寫）
-                            if (!hasPending && email) {
-                                const qs = await getDocs(query(collection(window.__db, 'accountApplications'), where('email', '==', email), limit(5)));
-                                qs.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasPending = true; });
+                            if (email && !hasApplied) {
+                                const qsEmail = await getDocs(query(collection(window.__db, 'accountApplications'), where('email', '==', email), limit(1)));
+                                qsEmail.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasApplied = true; });
                             }
-                            // 以原始手機字串檢查
-                            if (!hasPending && phone) {
-                                const qsRaw = await getDocs(query(collection(window.__db, 'accountApplications'), where('phone', '==', phone), limit(5)));
-                                qsRaw.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasPending = true; });
+                            if (phone && !hasApplied) {
+                                const qsPhone = await getDocs(query(collection(window.__db, 'accountApplications'), where('phone', '==', phone), limit(1)));
+                                qsPhone.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasApplied = true; });
                             }
-                            // 廣域抓取 pending，再以標準化手機比對（避免格式差異）
-                            if (!hasPending) {
-                                const qsPend = await getDocs(query(collection(window.__db, 'accountApplications'), where('status', '==', 'pending')));
-                                qsPend.forEach(d => {
-                                    const data = d.data() || {};
-                                    const p2 = typeof normalizePhone === 'function' ? normalizePhone(data.phone || '') : (data.phone || '').replace(/[^0-9+]/g, '');
-                                    const e2 = (data.email || '').trim();
-                                    if (p2 && p2 === phoneKey) hasPending = true;
-                                    if (!hasPending && email && e2 && e2 === email) hasPending = true;
-                                });
+                            if (idNumber && !hasApplied) {
+                                const qsId = await getDocs(query(collection(window.__db, 'accountApplications'), where('idNumber', '==', idNumber), limit(1)));
+                                qsId.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasApplied = true; });
                             }
                         } catch (_) { /* 忽略檢查錯誤，避免阻斷送出 */ }
 
-                        if (hasPending) {
+                        if (hasApplied) {
                             errorEl.textContent = '已申請待審核';
                             try { showToast('已申請待審核'); } catch (_) {}
                             showLoading(false);
@@ -1814,7 +1806,7 @@
                             const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
 
                             // 載入異常標色配置
-                            let markLocation = true, markShiftOverdue = true, markPatrolOverdueStart = true, markPatrolNotExecuted = true, markNoScheduleCommunity = true;
+                            let markLocation = true, markShiftOverdue = true, markNoScheduleCommunity = true;
                             try {
                                 const locSnap = await getDoc(doc(db, 'settings', 'location'));
                                 if (locSnap?.exists()) {
@@ -1825,8 +1817,6 @@
                                 if (genSnap?.exists()) {
                                     const gen = genSnap.data() || {};
                                     if (typeof gen.markShiftOverdueNotStarted === 'boolean') markShiftOverdue = gen.markShiftOverdueNotStarted;
-                                    if (typeof gen.markPatrolOverdueStart === 'boolean') markPatrolOverdueStart = gen.markPatrolOverdueStart;
-                                    if (typeof gen.markPatrolNotExecuted === 'boolean') markPatrolNotExecuted = gen.markPatrolNotExecuted;
                                     if (typeof gen.markNoScheduleCommunity === 'boolean') markNoScheduleCommunity = gen.markNoScheduleCommunity;
                                 }
                             } catch (_) {}
@@ -1884,21 +1874,7 @@
                                 });
                             } catch (_) {}
 
-                            // 今日巡邏任務並行抓取（每社區一次），完成後再統一計算
-                            const tasksByCommunityId = {};
-                            try {
-                                const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
-                                const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
-                                await Promise.all(currentList.map(async c => {
-                                    try {
-                                        const tSnap = await getDocs(query(collection(db, 'communities', c.id, 'patrolTasks'), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2)));
-                                        const arr = []; tSnap.forEach(d => arr.push({ id: d.id, ...d.data() }));
-                                        tasksByCommunityId[c.id] = arr;
-                                    } catch (_) {
-                                        tasksByCommunityId[c.id] = [];
-                                    }
-                                }));
-                            } catch (_) {}
+                            // 巡邏任務相關邏輯已移除
 
                             // 今日待審假單（依使用者分組）
                             const pendingLeavesByUserId = {};
@@ -1919,7 +1895,6 @@
 
                             for (const c of currentList) {
                                 let hasAbnormalLocation = false;
-                                let hasPatrolOverdueStart = false;
                                 let hasPendingLeave = false;
                                 let hasDoublePunch = false;
 
@@ -1940,16 +1915,7 @@
                                     if ((pendingLeavesByUserId[u.id] || []).length > 0) { hasPendingLeave = true; break; }
                                 }
 
-                                // 巡邏逾時未開始
-                                if (markPatrolOverdueStart) {
-                                    const tasks = tasksByCommunityId[c.id] || [];
-                                    for (const t of tasks) {
-                                        const sHM = (t.expectedStartHM || '').trim();
-                                        const sDt = sHM ? parseHM(ymdToday, sHM) : null;
-                                        const started = !!t.actualStartTS;
-                                        if (!started && sDt && now > sDt) { hasPatrolOverdueStart = true; break; }
-                                    }
-                                }
+                                // 巡邏逾時未開始邏輯已移除
 
                                 // 異常：今日存在重複上班或重複下班打卡
                                 outerDouble: for (const u of communityUsers) {
@@ -1967,7 +1933,7 @@
                                     }
                                 }
 
-                                results[c.id] = { hasAbnormalLocation, hasPatrolOverdueStart, hasPendingLeave, hasDoublePunch };
+                                results[c.id] = { hasAbnormalLocation, hasPendingLeave, hasDoublePunch };
                             }
 
                             // 一次性套用樣式（紅>橙>黃）
@@ -1977,7 +1943,7 @@
                                 const r = results[c.id] || {};
                                 const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
                                 const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
-                                if (r.hasPendingLeave || r.hasDoublePunch || r.hasPatrolOverdueStart || r.hasAbnormalLocation) {
+                                if (r.hasPendingLeave || r.hasDoublePunch || r.hasAbnormalLocation) {
                                     remove(['bg-white','hover:bg-red-50']); add(['bg-red-50','border-red-300','text-red-800']);
                                 }
                             }
@@ -2195,7 +2161,7 @@
                                 const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
 
                                 // 異常開關（settings/location + settings/general）
-                                let markLocation = true, markShiftOverdue = true, markPatrolOverdueStart = true, markPatrolNotExecuted = true, markNoScheduleCommunity = true;
+                                let markLocation = true, markShiftOverdue = true, markNoScheduleCommunity = true;
                                 try {
                                     const locSnap = await getDoc(doc(db, 'settings', 'location'));
                                     if (locSnap?.exists()) {
@@ -2206,8 +2172,6 @@
                                     if (genSnap?.exists()) {
                                         const gen = genSnap.data() || {};
                                         if (typeof gen.markShiftOverdueNotStarted === 'boolean') markShiftOverdue = gen.markShiftOverdueNotStarted;
-                                        if (typeof gen.markPatrolOverdueStart === 'boolean') markPatrolOverdueStart = gen.markPatrolOverdueStart;
-                                        if (typeof gen.markPatrolNotExecuted === 'boolean') markPatrolNotExecuted = gen.markPatrolNotExecuted;
                                         if (typeof gen.markNoScheduleCommunity === 'boolean') markNoScheduleCommunity = gen.markNoScheduleCommunity;
                                     }
                                 } catch (_) {}
@@ -2255,7 +2219,6 @@
 
                                 const results = await Promise.all(filtered.map(async (u) => {
                                     let hasAbnormalLocation = false;
-                                    let hasPatrolOverdueStart = false;
                                     let hasPendingLeave = false;
                                     let hasDoublePunch = false;
 
@@ -2293,25 +2256,9 @@
                                         if (startCount >= 2 || endCount >= 2) hasDoublePunch = true;
                                     }
 
-                                    // 巡邏：並行抓取每服務社區的今日任務（逾時未開始）
-                                    if (markPatrolOverdueStart) {
-                                        try {
-                                            const now = new Date();
-                                            const tsStart2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T00:00:00`)) : new Date(`${ymdToday}T00:00:00`);
-                                            const tsEnd2 = Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${ymdToday}T23:59:59`)) : new Date(`${ymdToday}T23:59:59`);
-                                            const tSnaps = await Promise.all(svcIds.map(commId => getDocs(query(collection(db, 'communities', commId, 'patrolTasks'), where('assignedUserId','==', u.id), where('dateTS','>=', tsStart2), where('dateTS','<=', tsEnd2)))));
-                                            const tasks = [];
-                                            tSnaps.forEach(tSnap => tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() })));
-                                            for (const t of tasks) {
-                                                const sHM = (t.expectedStartHM || '').trim();
-                                                const sDt = sHM ? parseHM(ymdToday, sHM) : null;
-                                                const started = !!t.actualStartTS;
-                                                if (!started && sDt && now > sDt) { hasPatrolOverdueStart = true; break; }
-                                            }
-                                        } catch (_) {}
-                                    }
+                                    // 巡邏逾時未開始邏輯已移除
 
-                                    return { userId: u.id, hasAbnormalLocation, hasPatrolOverdueStart, hasPendingLeave, hasDoublePunch };
+                                    return { userId: u.id, hasAbnormalLocation, hasPendingLeave, hasDoublePunch };
                                 }));
 
                                 // 一次性套用樣式（紅>橙>黃）
@@ -2320,7 +2267,7 @@
                                     if (!btn) continue;
                                     const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
                                     const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
-                                    if (r.hasPendingLeave || r.hasDoublePunch || r.hasPatrolOverdueStart || r.hasAbnormalLocation) {
+                                    if (r.hasPendingLeave || r.hasDoublePunch || r.hasAbnormalLocation) {
                                         remove(['bg-white','hover:bg-blue-50']); add(['bg-red-50','border-red-300','text-red-800']);
                                     }
                                 }
@@ -3189,24 +3136,7 @@
                             }
                         }
 
-                        // 巡邏逾時未開始
-                        try {
-                            const tSnaps = await Promise.all((svcIds || []).map(commId => getDocs(query(collection(db, 'communities', commId, 'patrolTasks'), where('assignedUserId','==', u.id), where('dateTS','>=', tsStart), where('dateTS','<=', tsEnd)))));
-                            const tasks = [];
-                            tSnaps.forEach(tSnap => tSnap.forEach(d => tasks.push({ id: d.id, ...d.data() })));
-                            for (const t of tasks) {
-                                const sHM = (t.expectedStartHM || '').trim();
-                                const sDt = sHM ? new Date(`${ymdToday}T00:00:00`) : null;
-                                if (sDt && sHM) {
-                                    const [hh, mm] = sHM.split(':'); sDt.setHours(parseInt(hh,10)||0, parseInt(mm,10)||0, 0, 0);
-                                }
-                                const started = !!t.actualStartTS;
-                                if (!started && sDt && now > sDt) {
-                                    anomalies.push({ type: '巡邏逾時未開始', user: u, detail: `任務 ${t.title || t.id} 已逾時未開始` });
-                                    break;
-                                }
-                            }
-                        } catch (_) {}
+                        // 巡邏逾時未開始邏輯已移除
                     }
 
                     // 顯示通知
@@ -6730,24 +6660,15 @@
 
             // 群組分頁：人員地圖、出勤紀錄（僅顯示指定成員）
             function renderGroup(subPage) {
-                const role = state.currentUserData?.role || '';
-                const isManagement = new Set(['admin','hr','manager','junior_manager']).has(role);
-                const firstLabel = isManagement ? '巡邏任務' : '開始巡邏';
-                const secondLabel = '巡邏紀錄';
+                // 群組分頁與巡邏功能已停用
                 mainContent.innerHTML = `
-                    <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
-                        <button data-subtab="map" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'map' || !subPage ? 'active' : ''}">${firstLabel}</button>
-                        <button data-subtab="attendance" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'attendance' ? 'active' : ''}">${secondLabel}</button>
-                    </div>
-                    <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
-
-                const subPageContent = document.getElementById('sub-page-content');
-                if (subPage === 'attendance') {
-                    renderGroupPatrolRecords(subPageContent);
-                } else {
-                    renderGroupPatrolList(subPageContent);
-                }
-                mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('group', btn.dataset.subtab)));
+                    <div class="p-8 flex items-center justify-center h-full">
+                        <div class="text-center text-gray-500">
+                            <i data-lucide="alert-triangle" class="w-8 h-8 mx-auto mb-3"></i>
+                            <div>此分頁已停用</div>
+                        </div>
+                    </div>`;
+                try { lucide.createIcons(); } catch (_) {}
             }
 
             function renderShifts(subPage) {
@@ -8098,7 +8019,11 @@
                 init();
             }
 
-            function renderGroupPatrolList(container) {
+function renderGroupPatrolList(container) {
+    // 此功能已停用（保留函式介面避免外部引用觸發錯誤）
+    container.innerHTML = `<div class="p-4 text-gray-500">此功能已停用</div>`;
+    try { lucide.createIcons(); } catch (_) {}
+    return;
                 const db = window.__db;
                 const fs = window.__fs || {};
                 const { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp, serverTimestamp } = fs;
@@ -9132,7 +9057,11 @@
                 renderAll();
             }
 
-            function renderGroupPatrolRecords(container) {
+function renderGroupPatrolRecords(container) {
+    // 此功能已停用（保留函式介面避免外部引用觸發錯誤）
+    container.innerHTML = `<div class="p-4 text-gray-500">此功能已停用</div>`;
+    try { lucide.createIcons(); } catch (_) {}
+    return;
                 const db = window.__db;
                 const fs = window.__fs || {};
                 const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
@@ -11721,20 +11650,6 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                     </label>
                                 </div>
                                 <div class="flex items-center justify-between">
-                                    <label for="mark-patrol-overdue-start" class="text-gray-700">巡邏逾時未開始（橙）</label>
-                                    <label class="switch">
-                                        <input type="checkbox" id="mark-patrol-overdue-start" checked>
-                                        <span class="slider round"></span>
-                                    </label>
-                                </div>
-                                <div class="flex items-center justify-between">
-                                    <label for="mark-patrol-not-executed" class="text-gray-700">巡邏未執行（紅）</label>
-                                    <label class="switch">
-                                        <input type="checkbox" id="mark-patrol-not-executed" checked>
-                                        <span class="slider round"></span>
-                                    </label>
-                                </div>
-                                <div class="flex items-center justify-between">
                                     <label for="mark-no-schedule-community" class="text-gray-700">社區尚未排班（橙）</label>
                                     <label class="switch">
                                         <input type="checkbox" id="mark-no-schedule-community" checked>
@@ -11979,8 +11894,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         const settings = docSnap.data();
                         document.getElementById('show-employee-status').checked = settings.showEmployeeStatus !== false;
                         const el1 = document.getElementById('mark-shift-overdue'); if (el1) el1.checked = settings.markShiftOverdueNotStarted !== false;
-                        const el2 = document.getElementById('mark-patrol-overdue-start'); if (el2) el2.checked = settings.markPatrolOverdueStart !== false;
-                        const el3 = document.getElementById('mark-patrol-not-executed'); if (el3) el3.checked = settings.markPatrolNotExecuted !== false;
+                        // 巡邏相關設定已移除
                         const el4 = document.getElementById('mark-no-schedule-community'); if (el4) el4.checked = settings.markNoScheduleCommunity !== false;
                         
                         // 載入使用者顯示設定
@@ -12099,8 +12013,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         await setDoc(doc(db, "settings", "general"), {
                             showEmployeeStatus,
                             markShiftOverdueNotStarted: document.getElementById('mark-shift-overdue')?.checked ?? true,
-                            markPatrolOverdueStart: document.getElementById('mark-patrol-overdue-start')?.checked ?? true,
-                            markPatrolNotExecuted: document.getElementById('mark-patrol-not-executed')?.checked ?? true,
+                            // 巡邏相關設定已移除
                             markNoScheduleCommunity: document.getElementById('mark-no-schedule-community')?.checked ?? true,
                             visibleUsers,
                             updatedAt: serverTimestamp()
@@ -14615,7 +14528,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             return;
                         }
 
-                        // 勤務時間檢查：開始前禁止打卡，結束後標記超時巡邏
+  // 勤務時間檢查：開始前禁止打卡，結束後標記逾時
                         const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
                         const dutyStart = toDate(state.currentUserData?.dutyStartTime);
                         const dutyEnd = toDate(state.currentUserData?.dutyEndTime);
@@ -14712,10 +14625,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             deviceId: state.deviceId || 'unknown-device',
                             isAutomatic: false
                         };
-                        // 勤務項目與超時巡邏標記：避免 undefined 寫入
-                        if (isOvertime) {
-                            recordData.dutyType = '超時巡邏';
-                        } else if (type === '外出' && state.dutyType) {
+                        // 勤務項目：避免 undefined 寫入
+                        if (type === '外出' && state.dutyType) {
                             recordData.dutyType = state.dutyType;
                         }
                         
@@ -14784,10 +14695,8 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                 userUpdateData.outboundLocation = locName2.slice(0, 100);
                             }
                         }
-                        // 超時巡邏標記或外出同步勤務項目（若有）
-                        if (isOvertime) {
-                            userUpdateData.dutyType = '超時巡邏';
-                        } else if (type === '外出' && state.dutyType) {
+                        // 外出同步勤務項目（若有）
+                        if (type === '外出' && state.dutyType) {
                             userUpdateData.dutyType = state.dutyType;
                         }
                         

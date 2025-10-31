@@ -34,10 +34,6 @@ function calculateWorkingTime(status, clockInTime) {
  * @returns {string} 格式化的狀態文本
  */
 function getStatusDisplayText(status, location, dutyType) {
-    // 超時巡邏優先顯示為獨立狀態
-    if (dutyType === '超時巡邏') {
-        return location ? `超時巡邏-${location}` : '超時巡邏';
-    }
     switch(status) {
         case '上班': return '上班';
         case '下班': return '下班';
@@ -79,7 +75,6 @@ function getStatusDisplayText(status, location, dutyType) {
  */
 function getStatusColor(status) {
     if (status.includes('上班')) return 'text-green-600';
-    if (status.includes('超時巡邏')) return 'text-red-600';
     if (status.includes('已下班-未打卡')) return 'text-yellow-600';
     if (status.includes('下班')) return 'text-red-600';
     if (status.includes('外出') || status.includes('抵達') || status.includes('離開')) return 'text-blue-600';
