@@ -2117,6 +2117,20 @@
                                 results[c.id] = { hasAbnormalLocation, hasPendingLeave, hasDoublePunch };
                             }
 
+                            // 取近三日持久化異常（未抑制且未過期），按社區聚合
+                            const hasActiveAnomaliesByCommunity = {};
+                            try {
+                                const nowZ = new Date();
+                                const tsNowZ = Timestamp?.fromDate ? Timestamp.fromDate(nowZ) : nowZ;
+                                const aSnap = await getDocs(query(collection(db, 'anomalies'), where('expiresAt','>=', tsNowZ)));
+                                aSnap.forEach(d => {
+                                    const data = d.data() || {};
+                                    const cid = data.communityId;
+                                    if (data.suppressed === true) return;
+                                    if (cid) hasActiveAnomaliesByCommunity[cid] = true;
+                                });
+                            } catch (_) {}
+
                             // 一次性套用樣式（紅>橙>黃）
                             for (const c of currentList) {
                                 const btn = container.querySelector(`.enter-community[data-id="${c.id}"]`);
@@ -2124,7 +2138,7 @@
                                 const r = results[c.id] || {};
                                 const add = (cls) => cls.forEach(cn => btn.classList.add(cn));
                                 const remove = (cls) => cls.forEach(cn => btn.classList.remove(cn));
-                                if (r.hasPendingLeave || r.hasDoublePunch || r.hasAbnormalLocation) {
+                                if (hasActiveAnomaliesByCommunity[c.id] || r.hasPendingLeave || r.hasDoublePunch || r.hasAbnormalLocation) {
                                     remove(['bg-white','hover:bg-red-50']); add(['bg-red-50','border-red-300','text-red-800']);
                                 }
                             }
@@ -3308,16 +3322,29 @@
                         if (!db || !Array.isArray(events) || events.length === 0) return;
                         const now = new Date();
                         const tsNow = Timestamp?.fromDate ? Timestamp.fromDate(now) : now;
+                        const buildDocId = (a) => {
+                            const userId = a?.user?.id || a?.userId || 'unknown';
+                            const type = a?.type || '未知異常';
+                            const dt = a?.time instanceof Date ? a.time : (a?.time?.toDate ? a.time.toDate() : new Date());
+                            const y = dt.getFullYear(), m = String(dt.getMonth()+1).padStart(2,'0'), d = String(dt.getDate()).padStart(2,'0');
+                            const ymd = `${y}-${m}-${d}`;
+                            const timeKey = Math.floor(dt.getTime()/1000);
+                            return `${userId}_${type}_${ymd}_${timeKey}`;
+                        };
                         for (const a of events) {
                             try {
                                 const userId = a?.user?.id || a?.userId || 'unknown';
                                 const type = a?.type || '未知異常';
                                 const dt = a?.time instanceof Date ? a.time : (a?.time?.toDate ? a.time.toDate() : new Date());
-                                const y = dt.getFullYear(), m = String(dt.getMonth()+1).padStart(2,'0'), d = String(dt.getDate()).padStart(2,'0');
-                                const ymd = `${y}-${m}-${d}`;
-                                const timeKey = Math.floor(dt.getTime()/1000);
-                                const docId = `${userId}_${type}_${ymd}_${timeKey}`;
+                                const docId = buildDocId(a);
                                 const expires = new Date(dt.getTime() + 3*24*60*60*1000);
+                                // 若已標記 suppressed，略過持久化（避免重新覆寫）
+                                try {
+                                    const existSnap = await getDoc(doc(db, 'anomalies', docId));
+                                    if (existSnap.exists() && existSnap.data()?.suppressed === true) {
+                                        continue;
+                                    }
+                                } catch (_) {}
                                 const payload = {
                                     userId,
                                     type,
@@ -3631,10 +3658,35 @@
                         // 巡邏逾時未開始邏輯已移除
                     }
 
-                    // 過濾：超過三日的異常不顯示（保險，雖然查詢已限制）
+                    // 讀取已抑制（suppressed）的異常 DocId 集合，避免重新顯示
+                    let suppressedIds = new Set();
+                    try {
+                        const nowX = new Date();
+                        const tsNowX = Timestamp?.fromDate ? Timestamp.fromDate(nowX) : nowX;
+                        let qSup = query(collection(db, 'anomalies'), where('expiresAt','>=', tsNowX), where('suppressed','==', true));
+                        if (targetCommunityId) {
+                            qSup = query(collection(db, 'anomalies'), where('communityId','==', targetCommunityId), where('expiresAt','>=', tsNowX), where('suppressed','==', true));
+                        }
+                        const snapSup = await getDocs(qSup);
+                        snapSup.forEach(d => suppressedIds.add(d.id));
+                    } catch (_) {}
+
+                    // 過濾：超過三日的異常不顯示（保險，雖然查詢已限制）+ 排除已抑制
+                    const buildDocId = (a) => {
+                        const userId = a?.user?.id || a?.userId || 'unknown';
+                        const type = a?.type || '未知異常';
+                        const dt = a?.time instanceof Date ? a.time : (a?.time?.toDate ? a.time.toDate() : new Date());
+                        const y = dt.getFullYear(), m = String(dt.getMonth()+1).padStart(2,'0'), d = String(dt.getDate()).padStart(2,'0');
+                        const ymd = `${y}-${m}-${d}`;
+                        const timeKey = Math.floor(dt.getTime()/1000);
+                        return `${userId}_${type}_${ymd}_${timeKey}`;
+                    };
                     const filtered = anomalies.filter(a => {
                         const t = a.time || new Date();
-                        return t >= rangeStart && t <= rangeEnd;
+                        if (!(t >= rangeStart && t <= rangeEnd)) return false;
+                        const idKey = buildDocId(a);
+                        if (suppressedIds.has(idKey)) return false;
+                        return true;
                     });
                     // 依時間新→舊排序
                     filtered.sort((a,b)=>{
@@ -3647,17 +3699,21 @@
                         await persistAnomalies(filtered, targetCommunityId);
                         await cleanupOldAnomalies(targetCommunityId);
                     } catch (_) {}
-                    // 顯示通知
+                    // 顯示通知（含刪除鍵，僅 reviewer 角色可見）
                     let html = '';
+                    const role = state.currentUserData?.role || '';
+                    const canDelete = ['admin','hr','manager'].includes(role);
                     filtered.forEach(a => {
                         const name = a.user.name || a.user.displayName || '未命名';
                         const icon = (a.type === '打卡定位異常') ? 'map-pin' : 'alert-triangle';
                         const timeStr = a.time ? a.time.toLocaleString('zh-TW', { hour12:false }) : '';
+                        const idKey = buildDocId(a);
                         html += `
                             <div class="p-3 bg-red-50 border border-red-200 rounded-md">
-                                <div class="flex items-center">
+                                <div class="flex items-center justify-between">
                                     <i data-lucide="${icon}" class="w-4 h-4 mr-2 text-red-700"></i>
                                     <span class="font-medium text-gray-800">${a.type}</span>
+                                    ${canDelete ? `<button class="delete-anomaly-btn px-2 py-1 text-gray-600 hover:text-red-600" data-id="${idKey}" title="刪除"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
                                 </div>
                                 <div class="mt-1 text-sm text-gray-700">${name}</div>
                                 ${a.detail ? `<div class="mt-1 text-xs text-gray-500">${a.detail}</div>` : ''}
@@ -3666,6 +3722,26 @@
                     });
                     listEl.innerHTML = html || '<div class="text-gray-500">暫無異常通知</div>';
                     try { lucide.createIcons(); } catch (_) {}
+
+                    // 綁定刪除事件：標記 suppressed=true，並移除卡片
+                    if (canDelete) {
+                        listEl.querySelectorAll('.delete-anomaly-btn').forEach(btn => {
+                            btn.addEventListener('click', async (e) => {
+                                const id = e.currentTarget.getAttribute('data-id');
+                                if (!id) return;
+                                try {
+                                    const nowY = new Date();
+                                    const tsNowY = Timestamp?.fromDate ? Timestamp.fromDate(nowY) : nowY;
+                                    await setDoc(doc(db, 'anomalies', id), { suppressed: true, updatedAt: tsNowY }, { merge: true });
+                                    // 立即從 UI 移除卡片
+                                    const card = e.currentTarget.closest('.p-3');
+                                    if (card && card.parentNode) card.parentNode.removeChild(card);
+                                } catch (err) {
+                                    console.warn('刪除異常事件失敗', err);
+                                }
+                            });
+                        });
+                    }
                 } catch (e) {
                     console.warn('載入管理者異常通知失敗', e);
                 }

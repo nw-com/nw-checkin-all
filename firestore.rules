@@ -254,7 +254,7 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if isReviewer() &&
         request.resource.data.keys().hasOnly([
-          'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source'
+          'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source','suppressed'
         ]) &&
         request.resource.data.userId is string &&
         request.resource.data.type is string &&
@@ -264,10 +264,11 @@ service cloud.firestore {
         request.resource.data.createdAt is timestamp &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp) &&
         (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp) &&
-        (request.resource.data.source == null || request.resource.data.source is string);
+        (request.resource.data.source == null || request.resource.data.source is string) &&
+        (request.resource.data.suppressed == null || request.resource.data.suppressed is bool);
       allow update: if isReviewer() &&
         request.resource.data.keys().hasOnly([
-          'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source'
+          'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source','suppressed'
         ]) &&
         request.resource.data.userId is string &&
         request.resource.data.type is string &&
@@ -276,7 +277,8 @@ service cloud.firestore {
         request.resource.data.time is timestamp &&
         (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp) &&
         (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp) &&
-        (request.resource.data.source == null || request.resource.data.source is string);
+        (request.resource.data.source == null || request.resource.data.source is string) &&
+        (request.resource.data.suppressed == null || request.resource.data.suppressed is bool);
       allow delete: if isReviewer();
     }
 
