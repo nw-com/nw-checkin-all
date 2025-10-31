@@ -2301,10 +2301,12 @@
                                 if (c) {
                                     state.currentCommunity = c;
                                     updateHeaderCommunity();
-                                    // 導向社區主頁的「追蹤」分頁（預設為人員地圖）
-                                    showPage('tracking', 'map');
+                                    // 導向社區的追蹤分頁出勤，並預選該人員
+                                    showPage('tracking', 'attendance', { selectedUserId: id });
                                 } else {
-                                    showToast('找不到該員所屬社區', true);
+                                    // 找不到社區時，仍導向出勤分頁並預選人員
+                                    showToast('找不到該員所屬社區，改為直接顯示出勤', true);
+                                    showPage('tracking', 'attendance', { selectedUserId: id });
                                 }
                             });
                         });
@@ -11118,7 +11120,11 @@ function renderTrackingLeave(container) {
 
             async function listenForUserLocations() {
                 const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-                const usersRef = collection(db, "users");
+                // 統一從 window.__fs / window.__db 取得 Firestore 函式與 db 參考，避免遮蔽造成 TDZ 錯誤
+                const fs = window.__fs || {};
+                const { collection, query, where, orderBy, limit, getDocs } = fs;
+                const dbRef = window.__db || null;
+                const usersRef = collection(dbRef, "users");
                 const q = query(usersRef, orderBy("name"));
                 try {
                     const querySnapshot = await getDocs(q);
@@ -11160,18 +11166,16 @@ function renderTrackingLeave(container) {
                         return;
                     }
 
-                    // 讀取每位使用者最新打卡紀錄，並以此顯示與排序
-                    const { collection: fsCollection, query: fsQuery, where, orderBy: fsOrderBy, limit, getDocs } = window.__fs || {};
-                    const dbRef = window.__db || null;
+                    // 讀取每位使用者最新打卡紀錄，並以此顯示與排序（沿用前述統一取得之函式/參考）
 
                     const augmentedPromises = baseList.map(async (user) => {
                         let latestRecord = null;
                         try {
-                            if (fsCollection && fsQuery && where && fsOrderBy && limit && getDocs && dbRef) {
-                                const recQ = fsQuery(
-                                    fsCollection(dbRef, 'clockInRecords'),
+                            if (collection && query && where && orderBy && limit && getDocs && dbRef) {
+                                const recQ = query(
+                                    collection(dbRef, 'clockInRecords'),
                                     where('userId', '==', user.id),
-                                    fsOrderBy('timestamp', 'desc'),
+                                    orderBy('timestamp', 'desc'),
                                     limit(1)
                                 );
                                 const snap = await getDocs(recQ);
