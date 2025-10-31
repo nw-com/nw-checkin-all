@@ -10478,8 +10478,20 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
   const ensureUsersOptions = async () => {
     const { collection, getDocs } = window.__fs || {};
     const db = window.__db;
+    // 依目前選定社區判斷成員歸屬
+    const selectedCommunityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
+    const selectedCommunityCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+    const userInCurrentCommunity = (u) => {
+      const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+      const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+      const codeOne = (u.serviceCommunityCode || '').trim();
+      const byIdMatch = selectedCommunityId ? ids.includes(selectedCommunityId) : false;
+      const byCodeMatch = selectedCommunityCode ? (codesArr.includes(selectedCommunityCode) || codeOne === selectedCommunityCode) : false;
+      return byIdMatch || byCodeMatch;
+    };
     // 優先使用 pageState 已載入的社區使用者
     if (Array.isArray(window.pageState?.communityUsers) && window.pageState.communityUsers.length) {
+      // 頁面已載入的社區人員名單（已是社區帳號清單）
       scheduleUsers = window.pageState.communityUsers.slice();
     } else if (db && collection && getDocs) {
       // 後援：從 users 直接載入
@@ -10493,6 +10505,11 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
       } catch (e) {
         console.warn('載入使用者失敗', e);
       }
+    }
+
+    // 若是後援載入，需過濾為「僅此社區帳號清單」
+    if (!Array.isArray(window.pageState?.communityUsers) || !window.pageState.communityUsers.length) {
+      scheduleUsers = scheduleUsers.filter(userInCurrentCommunity);
     }
 
     // 僅保留「總幹事、秘書、保全、清潔、機電」
@@ -10827,6 +10844,37 @@ function renderTrackingLeave(container) {
                 const db = window.__db; 
                 const { collection, query, where, orderBy, getDocs, doc, getDoc, updateDoc, serverTimestamp } = window.__fs;
 
+                // 目前選定社區（用於過濾成員）
+                const selectedCommunityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
+                const selectedCommunityCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                let communityUserIds = new Set();
+
+                // 取得僅屬於目前社區的帳號清單（ID 集合）
+                async function ensureCommunityUserIds() {
+                    try {
+                        if (Array.isArray(window.pageState?.communityUsers) && window.pageState.communityUsers.length) {
+                            communityUserIds = new Set(window.pageState.communityUsers.map(u => u.id));
+                            return;
+                        }
+                        if (!db || !collection || !getDocs) { communityUserIds = new Set(); return; }
+                        const snap = await getDocs(collection(db, 'users'));
+                        const ids = [];
+                        snap.forEach(d => {
+                            const data = d.data();
+                            const svcIds = Array.isArray(data.serviceCommunities) ? data.serviceCommunities : [];
+                            const svcCodes = Array.isArray(data.serviceCommunityCodes) ? data.serviceCommunityCodes : [];
+                            const oneCode = (data.serviceCommunityCode || '').trim();
+                            const byId = selectedCommunityId ? svcIds.includes(selectedCommunityId) : false;
+                            const byCode = selectedCommunityCode ? (svcCodes.includes(selectedCommunityCode) || oneCode === selectedCommunityCode) : false;
+                            if (byId || byCode) ids.push(d.id);
+                        });
+                        communityUserIds = new Set(ids);
+                    } catch (err) {
+                        console.warn('載入社區帳號清單失敗', err);
+                        communityUserIds = new Set();
+                    }
+                }
+
                 // 讀取當前使用者是否為管理員
                 let isAdmin = false;
                 (async () => {
@@ -10841,10 +10889,10 @@ function renderTrackingLeave(container) {
                         }
                     } catch (err) {
                         console.warn('讀取使用者角色失敗', err);
-                    } finally {
-                        // 初始加載數據
-                        loadLeaveRecords();
                     }
+                    // 初始加載：先取得社區帳號清單，再載入請假記錄
+                    await ensureCommunityUserIds();
+                    loadLeaveRecords();
                 })();
                 
                 // 添加搜尋按鈕事件
@@ -10914,6 +10962,12 @@ function renderTrackingLeave(container) {
                             const leave = docSnap.data();
                             const leaveId = docSnap.id;
                             const isDeleted = !!leave.deleted;
+
+                            // 僅顯示屬於目前社區帳號清單的使用者
+                            if (communityUserIds && communityUserIds.size > 0) {
+                                const uid = leave.userId || leave.userID || leave.uid;
+                                if (!communityUserIds.has(uid)) return;
+                            }
                             
                             // 若未勾選顯示已刪除，則過濾掉 deleted 記錄
                             if (!showDeletedChk.checked && isDeleted) {
