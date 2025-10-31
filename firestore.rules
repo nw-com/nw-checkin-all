@@ -114,12 +114,20 @@ service cloud.firestore {
       request.resource.data.keys().hasOnly([
         'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','shiftId'
       ]) &&
-      request.resource.data.type in ['上班','下班','外出','返回','抵達','離開'] &&
+      (
+        (
+          request.resource.data.type in ['上班','下班','外出','返回','抵達','離開'] &&
+          (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic == false)
+        ) || (
+          request.resource.data.type == '自動下班' &&
+          request.resource.data.isAutomatic == true &&
+          request.auth.uid == request.resource.data.userId
+        )
+      ) &&
       request.resource.data.timestamp is timestamp &&
       request.resource.data.location is latlng &&
       request.resource.data.photoUrls is list &&
       request.resource.data.descriptions is list &&
-      (request.resource.data.isAutomatic == null || request.resource.data.isAutomatic == false) &&
       request.resource.data.photoUrls.size() <= 3 &&
       request.resource.data.descriptions.size() == request.resource.data.photoUrls.size();
 

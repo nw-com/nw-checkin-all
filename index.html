@@ -3262,7 +3262,7 @@
                 }
             }
 
-            // 管理者異常通知（未打卡、定位異常、提早下班）
+            // 管理者異常通知（未打卡、定位異常、提早下班、雙重打卡、待審假單）
             async function renderManagerAnomalies() {
                 try {
                     const listEl = document.getElementById('dashboard-anomalies-list');
@@ -3309,24 +3309,74 @@
                         });
                     });
 
-                    // 讀取今日預期上下班時間（全域+個人覆蓋）
+                    // 讀取今日預期上下班時間（支援個人班表）
                     const ymKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}`;
                     const { doc, getDoc } = fs;
-                    let daysMap = {};
+                    let globalDays = {};
                     try {
                         const sSnap = await getDoc(doc(db, 'settings', `workdays_${ymKey}`));
-                        if (sSnap.exists()) { const sd = sSnap.data(); daysMap = sd?.days || {}; }
+                        if (sSnap.exists()) { const sd = sSnap.data(); globalDays = sd?.days || {}; }
                     } catch (_) {}
-                    // 簡化：個人覆蓋僅在有資料時讀取
-                    await Promise.all(users.map(async (u) => {
+                    const resolveDayHM = (obj) => {
+                        if (!obj || typeof obj !== 'object') return { start: '', end: '' };
+                        const isHM = (v) => typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v.trim());
+                        let s = '', e = '';
+                        const candidatesStart = ['start','startHM','startTime','startTimeDefault','expectedStart','scheduleStart','workStart'];
+                        const candidatesEnd   = ['end','endHM','endTime','endTimeDefault','expectedEnd','scheduleEnd','workEnd'];
+                        for (const k of candidatesStart) { if (isHM(obj[k])) { s = obj[k]; break; } }
+                        for (const k of candidatesEnd)   { if (isHM(obj[k])) { e = obj[k]; break; } }
+                        if (!s || !e) {
+                            const nested = obj.shiftHours || obj.schedule || obj.workHours || obj.hm || {};
+                            if (isHM(nested.start)) s = s || nested.start;
+                            if (isHM(nested.end))   e = e || nested.end;
+                            if (!s || !e) {
+                                const rangeStr = (obj.shift || obj.workShift || obj.range || obj.shiftHM || obj.defaultShift || '').toString();
+                                const m = rangeStr.match(/(\d{1,2}:\d{2})\s*[-~～至到]\s*(\d{1,2}:\d{2})/);
+                                if (m) { s = s || m[1]; e = e || m[2]; }
+                            }
+                        }
+                        const isOff = obj.isOff === true || obj.workday === false || obj.isWorkday === false || obj.off === true;
+                        if (isOff) return { start: '', end: '' };
+                        return { start: s, end: e };
+                    };
+                    const fetchUserDayObjForUser = async (uid, date) => {
+                        const y = date.getFullYear();
+                        const m = String(date.getMonth() + 1).padStart(2, '0');
+                        const d = String(date.getDate()).padStart(2, '0');
+                        const ym = `${y}-${m}`;
+                        const ymd = `${y}-${m}-${d}`;
+                        // 先看個人 workdays/calendar
                         try {
-                            const uSnap = await getDoc(doc(db, 'users', u.id, 'workdays', ymKey));
+                            const uSnap = await getDoc(doc(db, 'users', uid, 'workdays', ym));
                             if (uSnap.exists()) {
-                                const ud = uSnap.data();
-                                daysMap = { ...daysMap, ...(ud?.days || {}) };
+                                const ud = uSnap.data() || {};
+                                const obj = (ud.days && typeof ud.days === 'object' && ud.days[ymd])
+                                    || (ud.workdays && typeof ud.workdays === 'object' && ud.workdays[ymd])
+                                    || (Array.isArray(ud.days) ? ud.days.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                    || (Array.isArray(ud.workdays) ? ud.workdays.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                    || (ud.map && typeof ud.map === 'object' ? ud.map[ymd] : null);
+                                if (obj) return obj;
                             }
                         } catch (_) {}
-                    }));
+                        try { const s1 = await getDoc(doc(db, 'users', uid, 'workdays', ym, 'days', ymd)); if (s1.exists()) return s1.data(); } catch (_) {}
+                        try { const s2 = await getDoc(doc(db, 'users', uid, 'workdays', ym, ymd)); if (s2.exists()) return s2.data(); } catch (_) {}
+                        try {
+                            const c1 = await getDoc(doc(db, 'users', uid, 'calendar', ym));
+                            if (c1.exists()) {
+                                const cd = c1.data() || {};
+                                const obj = (cd.days && typeof cd.days === 'object' && cd.days[ymd])
+                                    || (cd.workdays && typeof cd.workdays === 'object' && cd.workdays[ymd])
+                                    || (Array.isArray(cd.days) ? cd.days.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                    || (Array.isArray(cd.workdays) ? cd.workdays.find(it => (it?.dateIso || it?.date || it?.ymd) === ymd) : null)
+                                    || (cd.map && typeof cd.map === 'object' ? cd.map[ymd] : null);
+                                if (obj) return obj;
+                            }
+                        } catch (_) {}
+                        try { const c2 = await getDoc(doc(db, 'users', uid, 'calendar', ym, 'days', ymd)); if (c2.exists()) return c2.data(); } catch (_) {}
+                        try { const c3 = await getDoc(doc(db, 'users', uid, 'calendar', ym, ymd)); if (c3.exists()) return c3.data(); } catch (_) {}
+                        // 回退：使用全域設定（不含個人差異）
+                        return globalDays?.[ymd] || null;
+                    };
 
                     // 今日日期字串
                     const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
@@ -3376,6 +3426,60 @@
                                 break;
                             }
                         }
+
+                        // 未打卡與提早下班（依班表）
+                        try {
+                            const obj = await fetchUserDayObjForUser(u.id, start);
+                            const hm = resolveDayHM(obj);
+                            const toDateFromHM = (hmStr) => {
+                                if (!hmStr) return null;
+                                const base = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
+                                const [hh, mm] = hmStr.split(':').map(x=>parseInt(x,10)||0);
+                                base.setHours(hh, mm, 0, 0);
+                                return isNaN(base.getTime()) ? null : base;
+                            };
+                            const expStart = toDateFromHM(hm.start);
+                            const expEnd = toDateFromHM(hm.end);
+                            const nowLocal = new Date();
+                            const getActualStart = () => {
+                                const r = recs.find(x => x.type === '上班') || recs.find(x => x.type === '外出') || recs.find(x => x.type === '抵達');
+                                const dt = r?.timestamp?.toDate?.() ? r.timestamp.toDate() : (r?.timestamp ? new Date(r.timestamp) : null);
+                                return dt || null;
+                            };
+                            const getActualEnd = () => {
+                                for (let i = recs.length - 1; i >= 0; i--) {
+                                    const x = recs[i];
+                                    if (x.type === '下班' || x.type === '自動下班') {
+                                        const dt = x.timestamp?.toDate?.() ? x.timestamp.toDate() : (x.timestamp ? new Date(x.timestamp) : null);
+                                        if (dt) return dt;
+                                    }
+                                }
+                                return null;
+                            };
+                            // 假別：若使用者今日為核准請假，則跳過未打卡/提早下班
+                            let isApprovedLeaveToday = false;
+                            try {
+                                const leaveSt = u.leaveStatus || '';
+                                const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
+                                if (leaveSt === 'approved' && u.leaveStartTime && u.leaveEndTime) {
+                                    const ls = toDate(u.leaveStartTime); const le = toDate(u.leaveEndTime);
+                                    if (ls && le && ls <= end && le >= start) { isApprovedLeaveToday = true; }
+                                }
+                            } catch (_) {}
+                            const actualStart = getActualStart();
+                            const actualEnd = getActualEnd();
+                            const thirtyMin = 30 * 60 * 1000;
+                            if (!isApprovedLeaveToday && expStart && nowLocal.getTime() >= expStart.getTime() + thirtyMin && !actualStart) {
+                                anomalies.push({ type: '未打卡', user: u, detail: '未上班（超過表定30分鐘）' });
+                            }
+                            if (!isApprovedLeaveToday && expEnd) {
+                                if (actualEnd && actualEnd.getTime() <= expEnd.getTime() - thirtyMin) {
+                                    anomalies.push({ type: '提早下班', user: u, detail: '下班早於表定30分鐘以上' });
+                                } else if (nowLocal.getTime() >= expEnd.getTime() + thirtyMin && !actualEnd) {
+                                    anomalies.push({ type: '未打卡', user: u, detail: '未下班（超過表定30分鐘）' });
+                                }
+                            }
+                        } catch (_) {}
 
                         // 巡邏逾時未開始邏輯已移除
                     }
@@ -11245,6 +11349,7 @@ function renderTrackingLeave(container) {
                 const fs = window.__fs || {};
                 const { collection, query, where, orderBy, limit, getDocs } = fs;
                 const dbRef = window.__db || null;
+                try { await ensureCommunitiesCache(); } catch (_) {}
                 const usersRef = collection(dbRef, "users");
                 const q = query(usersRef, orderBy("name"));
                 try {
@@ -11330,12 +11435,26 @@ function renderTrackingLeave(container) {
                         }
 
                         const ts = latestRecord?.timestamp && latestRecord.timestamp.toDate ? latestRecord.timestamp.toDate() : (latestRecord?.timestamp ? new Date(latestRecord.timestamp) : (user.lastClockInTime?.toDate ? user.lastClockInTime.toDate() : null));
+                        // 定位異常標記（以服務社區半徑判斷）
+                        let abnormalText = '';
+                        try {
+                            const svcIds = Array.isArray(user.serviceCommunities) ? user.serviceCommunities.slice() : [];
+                            if ((!svcIds || svcIds.length === 0) && user.serviceCommunityCode && state.communitiesById) {
+                                const mapped = Object.values(state.communitiesById).find(c => (c.code || '').trim() === (user.serviceCommunityCode || '').trim());
+                                if (mapped) svcIds.push(mapped.id);
+                            }
+                            if (latestRecord && svcIds.length > 0) {
+                                const ab = computeRecordAbnormal(latestRecord, svcIds);
+                                if (ab && ab.isAbnormal) abnormalText = '定位異常';
+                            }
+                        } catch (_) {}
 
                         return {
                             ...user,
                             __statusText: statusText,
                             __lastStatusTime: ts,
-                            __latestRecord: latestRecord || null
+                            __latestRecord: latestRecord || null,
+                            __abnormalText: abnormalText
                         };
                     });
 
@@ -11422,7 +11541,7 @@ function renderTrackingLeave(container) {
                                     <img src="${user.avatarUrl || `https://placehold.co/32x32/EFEFEF/333333?text=${(user.name || 'U').charAt(0)}`}" class="w-8 h-8 rounded-full mr-3 object-cover">
                                     <div>
                                         <p class="font-medium text-sm text-gray-800">${user.name || '未知用戶'}</p>
-                                        <p class="text-xs font-semibold ${statusColorClass}">${user.__statusText || '未打卡'}</p>
+                                        <p class="text-xs font-semibold ${statusColorClass}">${user.__statusText || '未打卡'}${user.__abnormalText ? ' · ⚠ ' + user.__abnormalText : ''}</p>
                                         ${distanceText ? `<p class=\"text-xs text-gray-500\">${distanceText}${rangeText}</p>` : ''}
                                     </div>
                                 </div>
