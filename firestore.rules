@@ -8,7 +8,7 @@ service cloud.firestore {
     // 社區維護角色：允許管理員、人事、主管、初階主管、社區管理員
     function isCommunityEditor() {
       return (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager','community_admin','社區管理員']
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager','community_admin','社區管理員','總幹事']
       );
     }
     // 補打申請審核角色：管理員、人事、高階主管
