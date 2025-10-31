@@ -8311,12 +8311,12 @@
                                 </tr>`);
                         });
                     }
-                    // 建立哨點篩選連結（所有分頁皆顯示；在單一哨點分頁點擊時會自動切到全部並套用篩選）
+                    // 建立哨點篩選連結（僅在全部分頁）
                     const filterLinks = (() => {
-                        const currentFilter = pageState.postFilterId || ALL_POSTS_ID;
-                        const links = [`<a href="#" data-post-filter="${ALL_POSTS_ID}" class="${(currentFilter===ALL_POSTS_ID)?'font-semibold underline text-blue-600':'text-blue-600 hover:underline'}">全部</a>`];
+                        if (!isAgg) return '';
+                        const links = [`<a href="#" data-post-filter="${ALL_POSTS_ID}" class="${(!postFilterId || postFilterId===ALL_POSTS_ID)?'font-semibold underline text-blue-600':'text-blue-600 hover:underline'}">全部</a>`];
                         (pageState.posts || []).forEach(p => {
-                            const active = currentFilter === p.id;
+                            const active = postFilterId === p.id;
                             links.push(`<a href="#" data-post-filter="${p.id}" class="${active?'font-semibold underline text-blue-600':'text-blue-600 hover:underline'}">${p.name||'未命名哨點'}</a>`);
                         });
                         return `<div class="mt-1 flex flex-wrap gap-2 text-xs">${links.join('<span class=\"text-gray-400\">｜</span>')}</div>`;
@@ -8347,21 +8347,14 @@
                             <tbody>${rows.join('') || `<tr><td colspan="12" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
-                    // 綁定哨點篩選連結事件（所有分頁皆可用；若目前非全部分頁則自動切換）
+                    // 綁定哨點篩選連結事件（僅在全部分頁）
                     el.querySelectorAll('[data-post-filter]').forEach(a => {
                         a.addEventListener('click', (evt) => {
                             evt.preventDefault();
                             const pid = a.getAttribute('data-post-filter');
                             pageState.postFilterId = pid;
-                            if (pageState.selectedPostId !== ALL_POSTS_ID) {
-                                pageState.selectedPostId = ALL_POSTS_ID;
-                                renderTabs();
-                                renderPostTitle();
-                                loadMonth().then(()=>{ renderCalendar(); renderMonthlyList(); });
-                            } else {
-                                renderCalendar();
-                                renderMonthlyList();
-                            }
+                            renderCalendar();
+                            renderMonthlyList();
                         });
                     });
                     const addBtn = document.getElementById('open-add-schedule');
