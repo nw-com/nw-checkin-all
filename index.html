@@ -3288,7 +3288,7 @@
                             }
                         }
 
-                        // 週五當天監聽打卡紀錄以清除提醒
+                        // 週五當天讀取打卡紀錄以清除提醒（改用一次性查詢，避免 Firestore Listen 400）
                         if (day === 5 && names.length > 0 && !cleared) {
                             const start = new Date(friday.getFullYear(), friday.getMonth(), friday.getDate());
                             const end = new Date(friday.getFullYear(), friday.getMonth(), friday.getDate(), 23, 59, 59, 999);
@@ -3300,7 +3300,8 @@
                                 where('timestamp', '>=', tsStart),
                                 where('timestamp', '<=', tsEnd)
                             );
-                            const unsubDuty = onSnapshot(q, (snap) => {
+                            try {
+                                const snap = await getDocs(q);
                                 let clearedNow = false;
                                 snap.forEach(d => {
                                     const r = d.data();
@@ -3316,8 +3317,9 @@
                                         listEl.innerHTML = '<div class="text-gray-500">暫無提醒</div>';
                                     }
                                 }
-                            });
-                            state.activeListeners.push(unsubDuty);
+                            } catch (e) {
+                                console.warn('讀取週五打卡紀錄失敗', e);
+                            }
                         }
                     }
 
@@ -5458,7 +5460,8 @@
                         where("timestamp", "<=", endTS)
                     );
 
-                    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                    try {
+                        const querySnapshot = await getDocs(q);
                         const recordsListEl = document.getElementById('records-list');
                         if (!recordsListEl) return;
                         
@@ -5678,7 +5681,7 @@
                                 openPhotoModal(photos, descriptions);
                             });
                         });
-                    }, (error) => {
+                    } catch (error) {
                         const recordsListEl = document.getElementById('records-list');
                         const expectedCodes = ['permission-denied','failed-precondition','invalid-argument'];
                         if (expectedCodes.includes(error?.code)) {
@@ -5900,9 +5903,7 @@
                                 }
                             })();
                         }
-                    });
-
-                    state.activeListeners.push(unsubscribe);
+                    }
                 };
 
                 monthInput.addEventListener('change', loadRecords);
@@ -9422,7 +9423,8 @@
                 const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
                 const usersRef = collection(db, "users");
                 const q = query(usersRef, orderBy("name"));
-                const unsubscribe = onSnapshot(q, async (querySnapshot) => {
+                try {
+                    const querySnapshot = await getDocs(q);
                     const listEl = document.getElementById('group-user-list');
                     if (!listEl) return;
                     listEl.innerHTML = '';
@@ -9527,8 +9529,10 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                             state.groupMarkers.push(marker);
                         }
                     });
-                });
-                state.activeListeners.push(unsubscribe);
+                } catch (error) {
+                    console.error('讀取群組人員清單失敗', error);
+                    showToast('讀取群組人員失敗', true);
+                }
             }
 
             function renderGroupAttendance(container) {
@@ -10855,8 +10859,8 @@ function renderTrackingLeave(container) {
                 const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
                 const usersRef = collection(db, "users");
                 const q = query(usersRef, orderBy("name"));
-
-                const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                try {
+                    const querySnapshot = await getDocs(q);
                     state.trackingMarkers.forEach(marker => marker.map = null);
                     state.trackingMarkers = [];
 
@@ -11085,8 +11089,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             }
                         });
                     });
-                });
-                state.activeListeners.push(unsubscribe);
+                } catch (error) {
+                    console.error('讀取人員位置清單失敗', error);
+                    showToast('讀取追蹤人員失敗', true);
+                }
             }
 
 
@@ -11451,12 +11457,18 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const { collection: fsCollection, query: fsQuery, orderBy: fsOrderBy, onSnapshot: fsOnSnapshot, doc: fsDoc, getDoc: fsGetDoc, setDoc: fsSetDoc, updateDoc: fsUpdateDoc, where: fsWhere, getDocs: fsGetDocs, serverTimestamp: fsServerTimestamp } = window.__fs || {};
                 const appsCol = fsCollection(db, 'accountApplications');
                 const q = fsQuery(appsCol, fsOrderBy('createdAt', 'desc'));
-                const unsubscribe = fsOnSnapshot(q, (snap) => {
-                    allApps = [];
-                    snap.forEach(ds => allApps.push({ id: ds.id, ...ds.data() }));
-                    renderList();
-                });
-                state.activeListeners.push(unsubscribe);
+                async function fetchApplications() {
+                    try {
+                        const snap = await fsGetDocs(q);
+                        allApps = [];
+                        snap.forEach(ds => allApps.push({ id: ds.id, ...ds.data() }));
+                        renderList();
+                    } catch (e) {
+                        console.error('讀取帳號申請失敗', e);
+                        listEl.innerHTML = '<p class="text-center text-red-500 p-4">無法載入帳號申請</p>';
+                    }
+                }
+                fetchApplications();
 
                 function renderList() {
                     listEl.innerHTML = '';
