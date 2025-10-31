@@ -1992,6 +1992,41 @@
                             console.warn('套用社區待核准標示失敗', e);
                         }
                     })();
+
+                    // 依社區顯示「尚無人員帳號」為灰色底（不覆蓋紅/橙/黃/紫）
+                    (async () => {
+                        try {
+                            const fs = window.__fs || {}; const db = window.__db;
+                            const { collection, getDocs } = fs;
+                            if (!db || !collection || !getDocs) return;
+                            const currentList = selectedRegion ? [...list].sort(compareCommunitiesByCode).filter(c => (c?.region || '') === selectedRegion) : [...list].sort(compareCommunitiesByCode);
+                            const communitiesByCode = Object.fromEntries(currentList.map(c => [ (c.code||'').trim(), c.id ]));
+                            const usnap = await getDocs(collection(db, 'users'));
+                            const counts = Object.fromEntries(currentList.map(c => [c.id, 0]));
+                            usnap.forEach(d => {
+                                const u = d.data() || {};
+                                const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                                const code = (u.serviceCommunityCode || '').trim();
+                                const mapped = code ? communitiesByCode[code] : null;
+                                const memSet = new Set();
+                                ids.forEach(cid => { if (counts.hasOwnProperty(cid)) memSet.add(cid); });
+                                if (mapped && counts.hasOwnProperty(mapped)) memSet.add(mapped);
+                                memSet.forEach(cid => { counts[cid] = (counts[cid] || 0) + 1; });
+                            });
+                            Object.keys(counts).forEach(cid => {
+                                if ((counts[cid] || 0) === 0) {
+                                    const btn = container.querySelector(`.enter-community[data-id="${cid}"]`);
+                                    if (!btn) return;
+                                    const hasAlert = btn.classList.contains('bg-red-50') || btn.classList.contains('bg-orange-50') || btn.classList.contains('bg-yellow-50') || btn.classList.contains('bg-purple-100');
+                                    if (hasAlert) return;
+                                    btn.classList.remove('bg-white','hover:bg-red-50','text-gray-800');
+                                    btn.classList.add('bg-gray-100','text-gray-600','border-gray-300');
+                                }
+                            });
+                        } catch (e) {
+                            console.warn('套用社區灰底（無人員）標示失敗', e);
+                        }
+                    })();
                 };
                 renderList();
                 try { lucide.createIcons(); } catch (_) {}
