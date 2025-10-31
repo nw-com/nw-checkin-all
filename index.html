@@ -7605,10 +7605,13 @@
                     }
                 };
 
+                const ALL_POSTS_ID = '__ALL__';
                 const renderTabs = () => {
                     const tabsEl = document.getElementById('posts-tabs');
                     if (!tabsEl) return;
                     tabsEl.innerHTML = [
+                        // 聚合分頁（所有哨點）
+                        `<button class="px-3 py-1 rounded-md text-sm font-medium ${pageState.selectedPostId===ALL_POSTS_ID? 'bg-red-600 text-white':'bg-white text-gray-700 border'}" data-post="${ALL_POSTS_ID}" title="所有哨點">全部</button>`,
                         ...pageState.posts.map((p,i)=>`
                             <button class="px-3 py-1 rounded-md text-sm font-medium ${pageState.selectedPostId===p.id? 'bg-red-600 text-white':'bg-white text-gray-700 border'}" data-post="${p.id}" title="${p.name||'未命名哨點'}">
                                 <span class="text-gray-500 mr-1">${i+1}</span>
@@ -7629,7 +7632,7 @@
                         // 直覺式重命名（雙擊）
                         btn.addEventListener('dblclick', ()=>{
                             const postId = btn.getAttribute('data-post');
-                            startRenameTab(btn, postId);
+                            if (postId !== ALL_POSTS_ID) startRenameTab(btn, postId);
                         });
                         // 刪除哨點
                         const del = btn.querySelector('.delete-post');
@@ -7725,12 +7728,16 @@
                 const renderPostTitle = () => {
                     const el = document.getElementById('post-title');
                     if (!el) return;
-                    const current = pageState.posts.find(p=>p.id===pageState.selectedPostId) || pageState.posts[0] || null;
-                    const name = current?.name || '未命名哨點';
-                    el.innerHTML = `<span id="post-title-text" class="cursor-pointer">${name}</span>`;
-                    const span = document.getElementById('post-title-text');
-                    if (span) {
-                        span.addEventListener('dblclick', ()=> startRenameTitle(el, current?.id));
+                    if (pageState.selectedPostId === '__ALL__') {
+                        el.innerHTML = `<span id="post-title-text">所有哨點（聚合）</span>`;
+                    } else {
+                        const current = pageState.posts.find(p=>p.id===pageState.selectedPostId) || pageState.posts[0] || null;
+                        const name = current?.name || '未命名哨點';
+                        el.innerHTML = `<span id="post-title-text" class="cursor-pointer">${name}</span>`;
+                        const span = document.getElementById('post-title-text');
+                        if (span) {
+                            span.addEventListener('dblclick', ()=> startRenameTitle(el, current?.id));
+                        }
                     }
                 };
 
@@ -7817,16 +7824,33 @@
 
                 const loadMonth = async () => {
                     pageState.monthDocsMap = {};
-                    if (!pageState.selectedPostId) return;
                     try {
-                        const q = query(collection(db,'communities', communityId, 'postSchedules'), where('postId','==', pageState.selectedPostId));
-                        const snap = await getDocs(q);
+                        const coll = collection(db,'communities', communityId, 'postSchedules');
                         const y = pageState.monthDate.getFullYear();
                         const m = pageState.monthDate.getMonth()+1; const ymStr = `${y}-${m.toString().padStart(2,'0')}-`;
+                        let snap;
+                        if (pageState.selectedPostId && pageState.selectedPostId !== '__ALL__') {
+                            snap = await getDocs(query(coll, where('postId','==', pageState.selectedPostId)));
+                        } else {
+                            snap = await getDocs(coll);
+                        }
+                        const nameMap = {};
+                        (pageState.posts || []).forEach(p => { nameMap[p.id] = p.name || '未命名哨點'; });
                         snap.forEach(d=>{
-                            const data = d.data();
+                            const data = d.data() || {};
                             const iso = (data.dateIso || '').toString();
-                            if (iso.startsWith(ymStr)) pageState.monthDocsMap[iso] = { id: d.id, ...data };
+                            if (!iso.startsWith(ymStr)) return;
+                            if (pageState.selectedPostId === '__ALL__') {
+                                const target = pageState.monthDocsMap[iso] || { shifts: [], isScheduledDay: false };
+                                const shifts = Array.isArray(data.shifts) ? data.shifts : [];
+                                shifts.forEach((s, idx) => {
+                                    target.shifts.push({ ...s, __postId: data.postId, __docId: d.id, __origIndex: idx, __postName: nameMap[data.postId] || '未命名哨點' });
+                                });
+                                target.isScheduledDay = target.isScheduledDay || !!data.isScheduledDay;
+                                pageState.monthDocsMap[iso] = target;
+                            } else {
+                                pageState.monthDocsMap[iso] = { id: d.id, ...data };
+                            }
                         });
                     } catch (e) { console.warn('載入班表失敗', e); }
                 };
@@ -7954,15 +7978,25 @@
                     const iso = pageState.selectedDayIso || fmtYMD(new Date());
                     const { Timestamp } = window.__fs || {};
                     pageState.selectedDayIso = iso;
-                    const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
+                    const isAgg = (pageState.selectedPostId === ALL_POSTS_ID);
                     let docData = null;
-                    try {
-                        const dref = doc(db,'communities', communityId, 'postSchedules', id);
-                        const dsnap = await getDoc(dref);
-                        if (dsnap.exists()) docData = dsnap.data();
-                    } catch (e) { console.warn('讀取當日班表失敗', e); }
-                    const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                    const isScheduledDay = !!docData?.isScheduledDay;
+                    let shifts = [];
+                    let isScheduledDay = false;
+                    if (isAgg) {
+                        const agg = pageState.monthDocsMap[iso] || { shifts: [], isScheduledDay: false };
+                        docData = agg;
+                        shifts = Array.isArray(agg.shifts) ? agg.shifts : [];
+                        isScheduledDay = !!agg.isScheduledDay;
+                    } else {
+                        const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
+                        try {
+                            const dref = doc(db,'communities', communityId, 'postSchedules', id);
+                            const dsnap = await getDoc(dref);
+                            if (dsnap.exists()) docData = dsnap.data();
+                        } catch (e) { console.warn('讀取當日班表失敗', e); }
+                        shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                        isScheduledDay = !!docData?.isScheduledDay;
+                    }
 
                     // 角色過濾：保留原始索引，事件仍指向原陣列索引
                     const roleFilter = pageState.roleFilter || null;
@@ -7974,11 +8008,11 @@
                     const userOptions = pageState.userOptionsHTML && pageState.userOptionsHTML.length ? pageState.userOptionsHTML : '<option value="" disabled>請先建立或指派人員</option>';
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
-                            <div class="font-semibold">${iso} 的哨點班表</div>
+                            <div class="font-semibold">${iso} 的${isAgg ? '所有哨點' : '哨點'}班表</div>
                         </div>
                         <div class="flex items-center gap-4 mb-3">
-                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-scheduled" ${isScheduledDay?'checked':''}/> 排班日</label>
-                            <button id="save-day-rules" class="ml-auto px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">儲存設定</button>
+                            <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-scheduled" ${isScheduledDay?'checked':''} ${isAgg ? 'disabled' : ''}/> 排班日${isAgg ? '（聚合模式不可編輯）' : ''}</label>
+                            <button id="save-day-rules" class="ml-auto px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50" ${isAgg ? 'disabled title="聚合模式不支援此操作"' : ''}>儲存設定</button>
                         </div>
                         <div>
                             ${(filteredList.length===0) ? `<div class=\"text-gray-500 text-sm\">尚未排班${roleFilter? '（或被角色過濾）' : ''}</div>` : ''}
@@ -7988,6 +8022,7 @@
                                         <div class="text-sm w-48">
                                             <span data-time-label="${idx}">${s.start || '—'} ~ ${s.end || '—'}</span>
                                             <span class="ml-1 text-[10px] px-1 rounded bg-gray-100">${s.role || '保全'}</span>
+                                            ${s.__postName ? `<span class="ml-1 text-[10px] px-1 rounded bg-blue-100 text-blue-700">${s.__postName}</span>` : ''}
                                             <div class="mt-1 space-x-1">
                                                 <button class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50" data-edit="${idx}">編輯</button>
                                                 <span class="inline-flex items-center gap-1 hidden" data-edit-area="${idx}">
@@ -8014,7 +8049,7 @@
                                 <span>~</span>
                                 <input id="new-end" type="time" class="px-2 py-1 border rounded text-sm" />
                                 <select id="new-assignees" class="px-2 py-1 border rounded text-sm min-w-[220px]">${userOptions}</select>
-                                <button id="add-shift" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50">新增班表</button>
+                                <button id="add-shift" class="px-3 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50" ${isAgg ? 'disabled title="聚合模式請至個別哨點新增"' : ''}>新增班表</button>
                             </div>
                         </div>`;
 
@@ -8022,6 +8057,7 @@
 
                     const saveBtn = document.getElementById('save-day-rules');
                     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
+                        if (isAgg) { showToast('聚合模式不支援此操作', true); return; }
                         try {
                             const data = {
                                 communityId,
@@ -8044,17 +8080,18 @@
                     panel.querySelectorAll('[data-del]').forEach(btn=>{
                         btn.addEventListener('click', async ()=>{
                             const idx = parseInt(btn.getAttribute('data-del'),10);
-                            const newShifts = shifts.filter((_,i)=>i!==idx);
                             try {
-                                const base = (!docData || !docData.communityId || !docData.postId || !docData.dateIso || !docData.dateTS) ? {
-                                    communityId,
-                                    postId: pageState.selectedPostId,
-                                    dateIso: iso,
-                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
-                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                                } : {};
-                                const payloadDel = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadDel);
+                                let targetPostId = pageState.selectedPostId;
+                                let realIdx = idx;
+                                const s = shifts[idx];
+                                if (isAgg && s) { targetPostId = s.__postId || targetPostId; realIdx = (s.__origIndex !== undefined) ? s.__origIndex : idx; }
+                                const docId = `${communityId}__${targetPostId}__${iso}`;
+                                const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', docId));
+                                const docData2 = dsnap.exists() ? dsnap.data() : null;
+                                const baseShifts = Array.isArray(docData2?.shifts) ? docData2.shifts : [];
+                                const newShifts = baseShifts.filter((_,i)=> i !== realIdx);
+                                const payloadDel = { communityId, postId: targetPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay: !!docData2?.isScheduledDay, shifts: newShifts, createdAt: docData2?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', docId), payloadDel);
                                 showToast('已刪除班表');
                                 await loadMonth();
                                 renderCalendar();
@@ -8068,17 +8105,18 @@
                             const idx = parseInt(btn.getAttribute('data-assign-save'),10);
                             const sel = panel.querySelector(`[data-assign="${idx}"]`);
                             const assVal = sel?.value || '';
-                            const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, assignees: assVal ? [assVal] : [] } : sh);
                             try {
-                                const base = (!docData || !docData.communityId || !docData.postId || !docData.dateIso || !docData.dateTS) ? {
-                                    communityId,
-                                    postId: pageState.selectedPostId,
-                                    dateIso: iso,
-                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
-                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                                } : {};
-                                const payloadAssign = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadAssign);
+                                let targetPostId = pageState.selectedPostId;
+                                let realIdx = idx;
+                                const s = shifts[idx];
+                                if (isAgg && s) { targetPostId = s.__postId || targetPostId; realIdx = (s.__origIndex !== undefined) ? s.__origIndex : idx; }
+                                const docId = `${communityId}__${targetPostId}__${iso}`;
+                                const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', docId));
+                                const docData2 = dsnap.exists() ? dsnap.data() : null;
+                                const baseShifts = Array.isArray(docData2?.shifts) ? docData2.shifts : [];
+                                const newShifts = baseShifts.map((sh,i)=> i===realIdx ? { ...sh, assignees: assVal ? [assVal] : [] } : sh);
+                                const payloadAssign = { communityId, postId: targetPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay: !!docData2?.isScheduledDay, shifts: newShifts, createdAt: docData2?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', docId), payloadAssign);
                                 showToast('已更新指派');
                                 await loadMonth();
                                 renderCalendar();
@@ -8102,21 +8140,22 @@
                     panel.querySelectorAll('[data-edit-save]').forEach(btn=>{
                         btn.addEventListener('click', async ()=>{
                             const idx = parseInt(btn.getAttribute('data-edit-save'),10);
-                            const s = document.getElementById(`edit-start-${idx}`)?.value || '';
-                            const e = document.getElementById(`edit-end-${idx}`)?.value || '';
-                            if (!s || !e) return showToast('請輸入完整時間', true);
-                            if (parseHM(e) <= parseHM(s)) return showToast('結束時間需晚於開始時間', true);
-                            const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, start: s, end: e } : sh);
+                            const sHM = document.getElementById(`edit-start-${idx}`)?.value || '';
+                            const eHM = document.getElementById(`edit-end-${idx}`)?.value || '';
+                            if (!sHM || !eHM) return showToast('請輸入完整時間', true);
+                            if (parseHM(eHM) <= parseHM(sHM)) return showToast('結束時間需晚於開始時間', true);
                             try {
-                                const base = (!docData || !docData.communityId || !docData.postId || !docData.dateIso || !docData.dateTS) ? {
-                                    communityId,
-                                    postId: pageState.selectedPostId,
-                                    dateIso: iso,
-                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
-                                    createdAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
-                                } : {};
-                                const payloadEdit = { communityId, postId: pageState.selectedPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay, shifts: newShifts, createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), };
-                                await setDoc(doc(db,'communities', communityId, 'postSchedules', id), payloadEdit);
+                                let targetPostId = pageState.selectedPostId;
+                                let realIdx = idx;
+                                const sObj = shifts[idx];
+                                if (isAgg && sObj) { targetPostId = sObj.__postId || targetPostId; realIdx = (sObj.__origIndex !== undefined) ? sObj.__origIndex : idx; }
+                                const docId = `${communityId}__${targetPostId}__${iso}`;
+                                const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', docId));
+                                const docData2 = dsnap.exists() ? dsnap.data() : null;
+                                const baseShifts = Array.isArray(docData2?.shifts) ? docData2.shifts : [];
+                                const newShifts = baseShifts.map((sh,i)=> i===realIdx ? { ...sh, start: sHM, end: eHM } : sh);
+                                const payloadEdit = { communityId, postId: targetPostId, dateIso: iso, dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)), isScheduledDay: !!docData2?.isScheduledDay, shifts: newShifts, createdAt: docData2?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()), updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()) };
+                                await setDoc(doc(db,'communities', communityId, 'postSchedules', docId), payloadEdit);
                                 showToast('已更新班表時間');
                                 await loadMonth();
                                 renderCalendar();
@@ -8127,6 +8166,7 @@
 
                     const addBtn = document.getElementById('add-shift');
                     if (addBtn) addBtn.addEventListener('click', async ()=>{
+                        if (isAgg) { showToast('聚合模式請至個別哨點新增', true); return; }
                         const s = document.getElementById('new-start')?.value || '';
                         const e = document.getElementById('new-end')?.value || '';
                         if (!s || !e) return showToast('請輸入完整時間', true);
@@ -8226,7 +8266,7 @@
                             const role = s.role || '保全';
                             const endIso = s.endDateIso || iso;
                             const endDow = dayOfWeekShort(endIso);
-                            const displayPost = role === '保全' ? postName : '無';
+                            const displayPost = role === '保全' ? (s.__postName || postName) : '無';
                             rows.push(`
                                 <tr>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${role}</td>
@@ -8336,7 +8376,7 @@
                                 const role = s2.role || '保全';
                                 const endIso = s2.endDateIso || iso2;
                                 const endDow = dayOfWeekShort(endIso);
-                                const displayPost = role === '保全' ? postName2 : '無';
+                                const displayPost = role === '保全' ? (s2.__postName || postName2) : '無';
                                 const row = [role, assName, displayPost, iso2, start, endIso, end].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
                                 lines.push(row);
                             });
@@ -8484,16 +8524,20 @@
                         btn.addEventListener('click', async ()=>{
                             const [iso, idxStr] = btn.getAttribute('data-del-month').split('__');
                             const idx = parseInt(idxStr,10);
-                            const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
+                            const d = pageState.monthDocsMap[iso];
+                            const s = Array.isArray(d?.shifts) ? d.shifts[idx] : null;
+                            const postId = s?.__postId || pageState.selectedPostId;
+                            const realIdx = (s?.__origIndex !== undefined) ? s.__origIndex : idx;
+                            const id = `${communityId}__${postId}__${iso}`;
                             try {
                                 const { Timestamp } = window.__fs || {};
                                 const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', id));
                                 const docData = dsnap.exists() ? dsnap.data() : null;
                                 const isScheduledDay = !!docData?.isScheduledDay;
                                 const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                                const newShifts = shifts.filter((_,i)=>i!==idx);
+                                const newShifts = shifts.filter((_,i)=>i!==realIdx);
                                 const payload = {
-                                    communityId, postId: pageState.selectedPostId, dateIso: iso,
+                                    communityId, postId, dateIso: iso,
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     isScheduledDay, shifts: newShifts,
                                     createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
@@ -8523,7 +8567,7 @@
                             const role = s.role || '保全';
                             const endIso = s.endDateIso || iso;
                             const endDow = dayOfWeekLabel(endIso);
-                            const displayPost = role === '保全' ? postName : '無';
+                            const displayPost = role === '保全' ? (s.__postName || postName) : '無';
                             const content = `職稱：${role}\n哨點：${displayPost}\n上班日期：${iso} ${dow}\n上班時間：${start}\n下班日期：${endIso} ${endDow}\n下班時間：${end}\n指派人員：${assName}`;
                             try {
                                 if (navigator.share) {
@@ -8534,13 +8578,15 @@
                                 }
                                 // 分享後標記為現金班
                                 const { Timestamp } = window.__fs || {};
-                                const id = `${communityId}__${pageState.selectedPostId}__${iso}`;
+                                const postId = s?.__postId || pageState.selectedPostId;
+                                const realIdx = (s?.__origIndex !== undefined) ? s.__origIndex : idx;
+                                const id = `${communityId}__${postId}__${iso}`;
                                 const dsnap = await getDoc(doc(db,'communities', communityId, 'postSchedules', id));
                                 const docData = dsnap.exists() ? dsnap.data() : null;
                                 const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                                const newShifts = shifts.map((sh,i)=> i===idx ? { ...sh, cashShift: true } : sh);
+                                const newShifts = shifts.map((sh,i)=> i===realIdx ? { ...sh, cashShift: true } : sh);
                                 const payload = {
-                                    communityId, postId: pageState.selectedPostId, dateIso: iso,
+                                    communityId, postId, dateIso: iso,
                                     dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
                                     isScheduledDay: !!docData?.isScheduledDay, shifts: newShifts,
                                     createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
@@ -8565,7 +8611,7 @@
                             const role = s.role || '保全';
                             const endIso = s.endDateIso || iso;
                             const endDow = dayOfWeekLabel(endIso);
-                            const displayPost = role === '保全' ? postName : '無';
+                            const displayPost = role === '保全' ? (s.__postName || postName) : '無';
                             const content = `職稱：${role}\n哨點：${displayPost}\n上班日期：${iso} ${dow}\n上班時間：${start}\n下班日期：${endIso} ${endDow}\n下班時間：${end}\n指派人員：${assName}`;
                             try {
                                 await navigator.clipboard.writeText(content);
@@ -8582,8 +8628,9 @@
                     const defaultEndDateIso = edit?.shift?.endDateIso || defaultDateIso;
                     const defaultRole = edit?.shift?.role || '保全';
                     const defaultAss = Array.isArray(edit?.shift?.assignees) ? edit.shift.assignees[0] || '' : '';
-                    const currentPostId = pageState.selectedPostId;
-                    const currentPostName = (pageState.posts.find(p => p.id===currentPostId)?.name) || '';
+                    const isAgg = (pageState.selectedPostId === ALL_POSTS_ID);
+                    const currentPostId = edit?.shift?.__postId || pageState.selectedPostId;
+                    const currentPostName = (isAgg && edit?.shift?.__postName) ? (edit.shift.__postName || '') : ((pageState.posts.find(p => p.id===currentPostId)?.name) || '');
                     const postsOptionsDatalist = pageState.posts.map(p => `<option value="${p.name||'未命名哨點'}"></option>`).join('');
                     const usersOptions = (pageState.userOptionsHTML && pageState.userOptionsHTML.length) ? pageState.userOptionsHTML : '<option value="" disabled>請先建立或指派人員</option>';
                     const startDow = dayOfWeekLabel(defaultDateIso);
@@ -8788,7 +8835,11 @@
                     const saveBtn = document.getElementById('new-schedule-save');
                     if (saveBtn) saveBtn.addEventListener('click', async ()=>{
                         const roleVal = roleSel?.value || '保全';
-                        let postId = pageState.selectedPostId || null;
+                        if (!edit && (pageState.selectedPostId === ALL_POSTS_ID) && roleVal !== '保全') {
+                            showToast('聚合模式新增僅支援「保全」且需指定哨點', true);
+                            return;
+                        }
+                        let postId = edit?.shift?.__postId || (pageState.selectedPostId === ALL_POSTS_ID ? null : pageState.selectedPostId) || null;
                         let nameVal = '';
                         if (roleVal === '保全') {
                             nameVal = document.getElementById('new-post-input')?.value.trim() || '';
@@ -8819,7 +8870,7 @@
                         if (!isMulti && endIso === iso && parseHM(end) <= parseHM(start)) return showToast('結束時間需晚於開始時間', true);
                         try {
                             const { Timestamp } = window.__fs || {};
-                            const effPostId = postId || pageState.selectedPostId;
+                            const effPostId = (postId && postId !== ALL_POSTS_ID) ? postId : (edit?.shift?.__postId || pageState.selectedPostId);
                             const saveSingle = async () => {
                                 const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${effPostId}__${iso}`);
                                 const dsnap = await getDoc(dref);
@@ -8827,7 +8878,8 @@
                                 const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
                                 let newShifts = [];
                                 if (edit && typeof edit.index === 'number') {
-                                    newShifts = shifts.map((sh,i)=> i===edit.index ? { ...sh, start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso } : sh);
+                                    const editRealIdx = (edit.shift?.__origIndex !== undefined) ? edit.shift.__origIndex : edit.index;
+                                    newShifts = shifts.map((sh,i)=> i===editRealIdx ? { ...sh, start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso } : sh);
                                 } else {
                                     newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso }];
                                 }
@@ -8878,7 +8930,9 @@
                                 showToast(edit ? '已更新排班' : '已新增排班');
                             }
                             modal.classList.add('hide');
-                            pageState.selectedPostId = effPostId;
+                            if (pageState.selectedPostId !== ALL_POSTS_ID) {
+                                pageState.selectedPostId = effPostId;
+                            }
                             await loadMonth();
                             renderTabs();
                             renderPostTitle();
