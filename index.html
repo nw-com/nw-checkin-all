@@ -7928,9 +7928,18 @@
                         const todayIso = fmtYMD(new Date());
                         const docData = pageState.monthDocsMap[iso];
                         let shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                        // 在「全部」分頁且選了特定哨點篩選時，只取該哨點的保全班表
-                        if (pageState.selectedPostId === ALL_POSTS_ID && pageState.postFilterId && pageState.postFilterId !== ALL_POSTS_ID) {
-                            shifts = shifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === pageState.postFilterId);
+                        // 在「全部」分頁且選了哨點篩選時：
+                        // - 全部：保留所有班表
+                        // - 無：僅顯示非保全角色
+                        // - 指定哨點：僅顯示該哨點保全班表
+                        if (pageState.selectedPostId === ALL_POSTS_ID && pageState.postFilterId) {
+                            if (pageState.postFilterId === ALL_POSTS_ID) {
+                                // 全部，不變更
+                            } else if (pageState.postFilterId === '__NONE__') {
+                                shifts = shifts.filter(s => ((s.role || '保全') !== '保全'));
+                            } else {
+                                shifts = shifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === pageState.postFilterId);
+                            }
                         }
                         // 狀態：異常（未打卡/未上哨）、已完成、有排班
                         const statuses = shifts.map(s => computeShiftStatus(iso, s));
@@ -8261,9 +8270,12 @@
                     // 顯示目前哨點篩選狀態於標題（僅在全部分頁）
                     const isAgg = (pageState.selectedPostId === ALL_POSTS_ID);
                     const postFilterId = pageState.postFilterId || (isAgg ? ALL_POSTS_ID : null);
-                    const postFilterName = (postFilterId && postFilterId !== ALL_POSTS_ID)
-                        ? ((pageState.posts.find(p=>p.id===postFilterId)?.name) || '未命名哨點')
-                        : (isAgg ? '全部' : '');
+                    let postFilterName = '';
+                    if (isAgg) {
+                        if (!postFilterId || postFilterId === ALL_POSTS_ID) postFilterName = '全部';
+                        else if (postFilterId === '__NONE__') postFilterName = '無';
+                        else postFilterName = (pageState.posts.find(p=>p.id===postFilterId)?.name) || '未命名哨點';
+                    }
                     if (titleEl) titleEl.textContent = `${filterIso ? '當日' : '每月'}班表列表${roleFilter ? `（角色：${roleFilter}）` : ''}${isAgg ? `（哨點：${postFilterName}）` : ''}`;
                     const entries = Object.entries(pageState.monthDocsMap).sort(([a],[b]) => a.localeCompare(b));
                     const rows = [];
@@ -8273,9 +8285,16 @@
                         if (filterIso && iso !== filterIso) continue;
                         const allShifts = Array.isArray(doc.shifts) ? doc.shifts : [];
                         // 依哨點篩選（僅在全部分頁且選了特定哨點時）
-                        const shifts = (isAgg && postFilterId && postFilterId !== ALL_POSTS_ID)
-                            ? allShifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId)
-                            : allShifts;
+                        let shifts = allShifts;
+                        if (isAgg && postFilterId) {
+                            if (postFilterId === ALL_POSTS_ID) {
+                                // 全部：不過濾
+                            } else if (postFilterId === '__NONE__') {
+                                shifts = shifts.filter(s => ((s.role || '保全') !== '保全'));
+                            } else {
+                                shifts = shifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId);
+                            }
+                        }
                         shifts.forEach((s, idx) => {
                             if (roleFilter && ((s.role || '保全') !== roleFilter)) return;
                             const start = s.start || '07:00';
@@ -8311,18 +8330,38 @@
                                 </tr>`);
                         });
                     }
-                    // 建立哨點篩選連結（僅在全部分頁）
-                    const filterLinks = (() => {
+                    // 計算本月實際出現之哨點（僅聚合分頁），以及是否有非保全班表（顯示「無」）
+                    let presentPostIds = new Set();
+                    let hasNonGuardRole = false;
+                    if (isAgg) {
+                        for (const [isoX, docX] of entries) {
+                            const shiftsX = Array.isArray(docX.shifts) ? docX.shifts : [];
+                            shiftsX.forEach(sx => {
+                                const r = sx.role || '保全';
+                                if (r === '保全' && sx.__postId) presentPostIds.add(sx.__postId);
+                                else if (r !== '保全') hasNonGuardRole = true;
+                            });
+                        }
+                    }
+
+                    // 建立哨點篩選按鈕（僅在全部分頁，且放在列表上方）
+                    const filterButtonsHTML = (() => {
                         if (!isAgg) return '';
-                        const links = [`<a href="#" data-post-filter="${ALL_POSTS_ID}" class="${(!postFilterId || postFilterId===ALL_POSTS_ID)?'font-semibold underline text-blue-600':'text-blue-600 hover:underline'}">全部</a>`];
+                        const activeCls = 'bg-red-600 text-white';
+                        const baseCls = 'px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50';
+                        const btn = (label, val, active) => `<button data-post-filter="${val}" class="${baseCls} ${active?activeCls:''}">${label}</button>`;
+                        const pid = postFilterId || ALL_POSTS_ID;
+                        const parts = [btn('全部', ALL_POSTS_ID, pid===ALL_POSTS_ID)];
+                        if (hasNonGuardRole) parts.push(btn('無', '__NONE__', pid==='__NONE__'));
                         (pageState.posts || []).forEach(p => {
-                            const active = postFilterId === p.id;
-                            links.push(`<a href="#" data-post-filter="${p.id}" class="${active?'font-semibold underline text-blue-600':'text-blue-600 hover:underline'}">${p.name||'未命名哨點'}</a>`);
+                            if (!presentPostIds.has(p.id)) return; // 非本月班表內的哨點不顯示
+                            parts.push(btn(p.name||'未命名哨點', p.id, pid===p.id));
                         });
-                        return `<div class="mt-1 flex flex-wrap gap-2 text-xs">${links.join('<span class=\"text-gray-400\">｜</span>')}</div>`;
+                        return `<div class="my-2 flex items-center gap-2"><span class="text-xs text-gray-600">哨點：</span>${parts.join('')}</div>`;
                     })();
 
                     el.innerHTML = `
+                        ${filterButtonsHTML}
                         <div class="overflow-x-auto">
                           <table class="text-sm" style="min-width: max-content; border-collapse: collapse;">
                             <thead>
@@ -8330,10 +8369,7 @@
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">角色</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">指派人員</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">職稱</th>
-                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">
-                                  <div>哨點</div>
-                                  ${filterLinks}
-                                </th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">哨點</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班日期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">星期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班時間</th>
@@ -8347,7 +8383,7 @@
                             <tbody>${rows.join('') || `<tr><td colspan="12" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
-                    // 綁定哨點篩選連結事件（僅在全部分頁）
+                    // 綁定哨點篩選按鈕事件（僅在全部分頁）
                     el.querySelectorAll('[data-post-filter]').forEach(a => {
                         a.addEventListener('click', (evt) => {
                             evt.preventDefault();
@@ -8410,8 +8446,16 @@
                         for (const [iso2, doc2] of entries2) {
                             if (filterIso && iso2 !== filterIso) continue;
                             let shifts2 = Array.isArray(doc2.shifts) ? doc2.shifts : [];
-                            if (isAgg && postFilterId && postFilterId !== ALL_POSTS_ID) {
-                                shifts2 = shifts2.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId);
+                            if (isAgg && postFilterId) {
+                                if (postFilterId === ALL_POSTS_ID) {
+                                    // 全部
+                                } else if (postFilterId === '__NONE__') {
+                                    // 僅非保全角色
+                                    shifts2 = shifts2.filter(s => ((s.role || '保全') !== '保全'));
+                                } else {
+                                    // 指定哨點的保全
+                                    shifts2 = shifts2.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId);
+                                }
                             }
                             shifts2.forEach((s2) => {
                                 if (roleFilter && ((s2.role || '保全') !== roleFilter)) return;
