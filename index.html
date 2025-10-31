@@ -2234,8 +2234,23 @@
                         return null;
                     };
                     let baseUsers = users.filter(u => resolveRole(u));
-                    // 人員依姓氏筆畫少→多（先排序再篩選顯示）
-                    baseUsers.sort(compareUsersBySurnameStroke);
+                    // 人員依年齡多→少排序（若年齡相同或未知，備援姓氏筆畫）
+                    // 優先使用 u.age，其次由生日推算
+                    const ageOf = (u) => {
+                        const explicitAge = (typeof u.age === 'number') ? u.age : ((typeof u.age === 'string' && /^\d+$/.test(u.age)) ? parseInt(u.age, 10) : null);
+                        const computed = (explicitAge !== null && !isNaN(explicitAge)) ? explicitAge : computeAge(u.birth || u.birthday || u.birthDate);
+                        return (typeof computed === 'number' && computed >= 0) ? computed : null;
+                    };
+                    baseUsers.sort((a, b) => {
+                        const aa = ageOf(a);
+                        const bb = ageOf(b);
+                        if (aa !== null && bb !== null) {
+                            if (aa !== bb) return bb - aa; // 年齡由大至小
+                        }
+                        if (aa !== null && bb === null) return -1; // 有年齡者優先
+                        if (aa === null && bb !== null) return 1;
+                        return compareUsersBySurnameStroke(a, b);
+                    });
 
                     let selectedRole = null; // '總幹事' | '秘書' | '保全' | '清潔' | '機電' | null
 
