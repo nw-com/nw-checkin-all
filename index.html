@@ -2275,9 +2275,37 @@
                             </div>`;
 
                         container.querySelectorAll('.view-att').forEach(btn => {
-                            btn.addEventListener('click', (e) => {
+                            btn.addEventListener('click', async (e) => {
                                 const id = e.currentTarget.getAttribute('data-id');
-                                showPage('tracking', 'attendance', { selectedUserId: id });
+                                // 找到對應的人員物件
+                                const user = (selectedRole ? baseUsers.filter(u => resolveRole(u) === selectedRole) : baseUsers).find(u => u.id === id);
+                                // 確保社區快取已載入
+                                try { await ensureCommunitiesCache(); } catch (_) {}
+                                const byId = state.communitiesById || {};
+
+                                // 解析該員的社區ID：優先使用 serviceCommunities，其次使用 serviceCommunityCode 對應
+                                const resolveCommIdFromUser = (u) => {
+                                    if (!u) return null;
+                                    const svc = Array.isArray(u.serviceCommunities) ? u.serviceCommunities.filter(Boolean) : [];
+                                    if (svc.length > 0) return svc[0];
+                                    const code = (u.serviceCommunityCode || '').trim();
+                                    if (code) {
+                                        const target = Object.values(byId).find(c => (c.code || '').trim() === code);
+                                        return target ? target.id : null;
+                                    }
+                                    return null;
+                                };
+
+                                const commId = resolveCommIdFromUser(user);
+                                const c = commId ? (byId[commId] || (state.availableCommunities || []).find(x => x.id === commId)) : null;
+                                if (c) {
+                                    state.currentCommunity = c;
+                                    updateHeaderCommunity();
+                                    // 導向社區主頁的「追蹤」分頁（預設為人員地圖）
+                                    showPage('tracking', 'map');
+                                } else {
+                                    showToast('找不到該員所屬社區', true);
+                                }
                             });
                         });
                         container.querySelectorAll('.role-btn').forEach(btn => {
