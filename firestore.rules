@@ -479,7 +479,8 @@ service cloud.firestore {
         (request.resource.data.applyPassword == null || request.resource.data.applyPassword is string);
 
       // 禁止刪除申請（保留審核紀錄）
-      allow delete: if false;
+      // 允許審核者刪除未核准之申請（pending/rejected），用於自動清理重複申請
+      allow delete: if isReviewer() && resource.data.status != 'approved';
     }
   }
 }

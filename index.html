@@ -12536,7 +12536,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     renderList();
                 }));
 
-                const { collection: fsCollection, query: fsQuery, orderBy: fsOrderBy, onSnapshot: fsOnSnapshot, doc: fsDoc, getDoc: fsGetDoc, setDoc: fsSetDoc, updateDoc: fsUpdateDoc, where: fsWhere, getDocs: fsGetDocs, serverTimestamp: fsServerTimestamp } = window.__fs || {};
+                const { collection: fsCollection, query: fsQuery, orderBy: fsOrderBy, onSnapshot: fsOnSnapshot, doc: fsDoc, getDoc: fsGetDoc, setDoc: fsSetDoc, updateDoc: fsUpdateDoc, deleteDoc: fsDeleteDoc, where: fsWhere, getDocs: fsGetDocs, serverTimestamp: fsServerTimestamp } = window.__fs || {};
                 const appsCol = fsCollection(db, 'accountApplications');
                 const q = fsQuery(appsCol, fsOrderBy('createdAt', 'desc'));
                 // 即時監聽申請清單變更，使核准後列表立即更新
@@ -12544,7 +12544,14 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     const unsubscribe = fsOnSnapshot(q, async (snap) => {
                         allApps = [];
                         snap.forEach(ds => allApps.push({ id: ds.id, ...ds.data() }));
-                        try { await autoCleanupDuplicates(); } catch (_) {}
+                        // 僅在審核角色下執行自動清理，避免權限不足錯誤
+                        let canCleanup = false;
+                        if (typeof window.checkReviewerStatus === 'function') {
+                            try { canCleanup = await window.checkReviewerStatus(); } catch (_) {}
+                        }
+                        if (canCleanup) {
+                            try { await autoCleanupDuplicates(); } catch (_) {}
+                        }
                         renderList();
                     }, (error) => {
                         console.error('即時監聽帳號申請失敗', error);
@@ -12791,7 +12798,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     }
                 }
 
-                // 自動清理：同名重複申請（pending），保留最新；若已有核准，則自動拒絕所有同名未核准申請
+                // 自動清理：同名重複申請（pending），保留最新；若已有核准，則自動刪除所有同名未核准申請
                 async function autoCleanupDuplicates() {
                     try {
                         const currentCommCode = state.currentCommunity?.code || null;
@@ -12805,28 +12812,22 @@ const roleBorderClass = roleColorMap[titleKey] || null;
 
                         for (const [nameKey, apps] of Object.entries(byName)) {
                             const hasApproved = allApps.some(a => ((a.name || '').trim() === nameKey) && (a.status === 'approved'));
-                            let toReject = [];
+                            let toDelete = [];
                             if (hasApproved) {
-                                toReject = apps; // 有已核准者：拒絕所有同名未核准申請
+                                toDelete = apps; // 有已核准者：刪除所有同名未核准申請
                             } else if (apps.length > 1) {
                                 const sorted = apps.slice().sort((a,b) => {
                                     const ta = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
                                     const tb = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
                                     return tb - ta; // 由新到舊
                                 });
-                                toReject = sorted.slice(1); // 保留最新，其餘拒絕
+                                toDelete = sorted.slice(1); // 保留最新，其餘刪除
                             }
-                            for (const app of toReject) {
+                            for (const app of toDelete) {
                                 try {
-                                    await fsUpdateDoc(fsDoc(db, 'accountApplications', app.id), {
-                                        status: 'rejected',
-                                        reviewerId: auth.currentUser?.uid || '',
-                                        reviewedAt: fsServerTimestamp(),
-                                        reviewNotes: hasApproved ? '系統自動拒絕：重複於已核准申請' : '系統自動拒絕：重複申請（保留最新）',
-                                        applyPassword: null
-                                    });
+                                    await fsDeleteDoc(fsDoc(db, 'accountApplications', app.id));
                                 } catch (e) {
-                                    console.warn('自動拒絕重複申請失敗', e);
+                                    console.warn('自動刪除重複申請失敗', e);
                                 }
                             }
                         }
