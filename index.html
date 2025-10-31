@@ -510,6 +510,7 @@
         function initializeAppLogic() {
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
+            try { auth.languageCode = 'zh-TW'; } catch (_) {}
             const db = getFirestore(app);
 
             // 啟用 Firestore 離線持久化與線上/離線提示
@@ -1118,6 +1119,25 @@
                 return '';
             };
 
+            // 寄送重設密碼信（自動 fallback 至 Firebase 預設頁）
+            async function sendResetEmailWithFallback(email) {
+                const actionCodeSettings = {
+                    url: `${window.location.origin}${window.location.pathname}?mode=resetPassword`,
+                    handleCodeInApp: true
+                };
+                try {
+                    await sendPasswordResetEmail(auth, email, actionCodeSettings);
+                } catch (err) {
+                    if (err?.code === 'auth/unauthorized-continue-uri') {
+                        // 目標網域未加入 Firebase Authorized domains，改用預設頁
+                        await sendPasswordResetEmail(auth, email);
+                        showToast('已寄出重設密碼通知信（使用預設頁）');
+                        return;
+                    }
+                    throw err;
+                }
+            }
+
             // 輔助：判斷是否為看起來像手機的字串（簡化版）
             function looksLikePhone(input) {
                 const s = (input || '').trim();
@@ -1204,11 +1224,7 @@
                     showLoading(true);
                     try {
                         const emailForReset = await resolveEmailFromIdentifier(identifier);
-                        const actionCodeSettings = {
-                            url: `${window.location.origin}${window.location.pathname}?mode=resetPassword`,
-                            handleCodeInApp: true
-                        };
-                        await sendPasswordResetEmail(auth, emailForReset, actionCodeSettings);
+                        await sendResetEmailWithFallback(emailForReset);
                         showToast('已寄出重設密碼通知信');
                     } catch (error) {
                         console.error('reset password error', error);
