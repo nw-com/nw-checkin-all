@@ -3132,6 +3132,14 @@
                 // 管理階層：渲染異常通知（社區列表顯示已移除）
                 if (isManagerial) {
                     try { renderManagerAnomalies(); } catch (e) { console.warn('渲染異常通知失敗', e); }
+                    // 每 60 秒自動刷新一次通知
+                    try {
+                        if (state.__anomaliesRefreshIntervalId) { clearInterval(state.__anomaliesRefreshIntervalId); }
+                        state.__anomaliesRefreshIntervalId = setInterval(() => {
+                            try { renderManagerAnomalies(); } catch (_) {}
+                        }, 60 * 1000);
+                        state.activeListeners.push(() => { try { clearInterval(state.__anomaliesRefreshIntervalId); } catch (_) {} });
+                    } catch (_) {}
                 }
                 // 非管理角色：渲染個人今日異常通知
                 if (!isManagerial) {
@@ -3269,6 +3277,9 @@
                     if (!listEl) return;
                     const fs = window.__fs || {}; const db = window.__db;
                     const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                    // 需載入定位設定與社區快取，供定位異常判斷
+                    try { await ensureAbnormalMarkingConfig(); } catch (_) {}
+                    try { await ensureCommunitiesCache(); } catch (_) {}
                     // 取得所有使用者（套用可見性設定）
                     const usersSnap = await getDocs(collection(db, 'users'));
                     let users = [];
@@ -3280,10 +3291,26 @@
                     } catch (_) {}
                     users = users.filter(u => visibleUsers[u.id] !== false);
 
-                    // 依當前社區過濾（若有）
-                    const currentCode = state.currentCommunity?.code || state.currentCommunity?.id || null;
-                    if (currentCode) {
-                        users = users.filter(u => Array.isArray(u.serviceCommunities) ? u.serviceCommunities.includes(currentCode) : (u.serviceCommunityCode === currentCode));
+                    // 依當前社區過濾（若有，支援 code/id 映射）
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                    const communitiesById = state.communitiesById || {};
+                    const resolveCommunityIdByCode = (code) => {
+                        const trimmed = (code || '').trim();
+                        if (!trimmed) return null;
+                        const target = Object.values(communitiesById).find(c => (c.code || '').trim() === trimmed);
+                        return target ? target.id : null;
+                    };
+                    const resolvedIdFromCode = currentCommCode ? resolveCommunityIdByCode(currentCommCode) : null;
+                    if (currentCommId || currentCommCode) {
+                        users = users.filter(u => {
+                            const idsArr = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                            const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                            const codeSingle = u.serviceCommunityCode || null;
+                            const matchById = currentCommId ? idsArr.includes(currentCommId) || (resolvedIdFromCode && idsArr.includes(resolvedIdFromCode)) : false;
+                            const matchByCode = currentCommCode ? (codesArr.includes(currentCommCode) || codeSingle === currentCommCode) : false;
+                            return matchById || matchByCode;
+                        });
                     }
 
                     // 今日範圍
@@ -3381,14 +3408,19 @@
                     // 今日日期字串
                     const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
 
-                    // 今日待審假單（依使用者分組）
+                    // 今日待審假單（依使用者分組）— 以 startTime 查詢、endTime 客端過濾
                     const pendingLeavesByUserId = {};
                     try {
-                        const lSnap = await getDocs(query(collection(db, 'leaves'), where('status','==','pending'), where('targetTime','>=', tsStart), where('targetTime','<=', tsEnd)));
+                        const lSnap = await getDocs(query(collection(db, 'leaves'), where('status','==','pending'), where('startTime','<=', tsEnd)));
                         lSnap.forEach(d => {
                             const data = d.data() || {};
                             const uid = data.userId;
-                            if (uid) (pendingLeavesByUserId[uid] ||= []).push({ id: d.id, ...data });
+                            // 客端過濾：endTime >= 今日起
+                            const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
+                            const endT = toDate(data.endTime);
+                            if (uid && (!endT || endT >= start)) {
+                                (pendingLeavesByUserId[uid] ||= []).push({ id: d.id, ...data });
+                            }
                         });
                     } catch (_) {}
 
