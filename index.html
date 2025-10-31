@@ -8563,11 +8563,11 @@
                               </div>
                             </div>
 
-                            <div class="col-span-2 text-sm text-gray-600">上班日期</div>
-                            <div class="col-span-6"><input type="date" id="new-date" value="${defaultDateIso}" class="px-2 py-1 border rounded w-full"/></div>
+                            <div class="col-span-2 text-sm text-gray-600 single-only">上班日期</div>
+                            <div class="col-span-6 single-only"><input type="date" id="new-date" value="${defaultDateIso}" class="px-2 py-1 border rounded w-full"/></div>
 
-                            <div class="col-span-2 text-sm text-gray-600">星期</div>
-                            <div class="col-span-6"><input id="new-dow" class="px-2 py-1 border rounded w-full" value="${startDow}" readonly/></div>
+                            <div class="col-span-2 text-sm text-gray-600 single-only">星期</div>
+                            <div class="col-span-6 single-only"><input id="new-dow" class="px-2 py-1 border rounded w-full" value="${startDow}" readonly/></div>
 
                             <div class="col-span-2 text-sm text-gray-600">上班時間</div>
                             <div class="col-span-6"><input type="time" id="new-start-time" value="${defaultStart}" class="px-2 py-1 border rounded w-full"/></div>
@@ -8580,11 +8580,29 @@
                               </div>
                             </div>
 
-                            <div class="col-span-2 text-sm text-gray-600">下班日期</div>
-                            <div class="col-span-6"><input type="date" id="new-end-date" value="${defaultEndDateIso}" class="px-2 py-1 border rounded w-full"/></div>
+                            <!-- 多日模式切換 -->
+                            <div class="col-span-2 text-sm text-gray-600">日期選擇</div>
+                            <div class="col-span-6">
+                              <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" id="multi-date-toggle"/> 多日模式（一次勾選多個日期）</label>
+                            </div>
 
-                            <div class="col-span-2 text-sm text-gray-600">星期</div>
-                            <div class="col-span-6"><input id="new-end-dow" class="px-2 py-1 border rounded w-full" value="${endDow}" readonly/></div>
+                            <!-- 多日選擇器（僅新增使用） -->
+                            <div class="col-span-2 text-sm text-gray-600 multi-only hidden">上班日期（多選）</div>
+                            <div class="col-span-6 multi-only hidden">
+                              <div class="flex items-center gap-2 mb-2">
+                                <button id="multi-prev-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50" title="上一月">〈</button>
+                                <span id="multi-month-label" class="text-sm font-medium"></span>
+                                <button id="multi-next-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50" title="下一月">〉</button>
+                              </div>
+                              <div id="multi-date-grid" class="grid grid-cols-7 gap-1"></div>
+                              <div class="text-xs text-gray-600 mt-1">已選 <span id="multi-selected-count">0</span> 天</div>
+                            </div>
+
+                            <div class="col-span-2 text-sm text-gray-600 single-only">下班日期</div>
+                            <div class="col-span-6 single-only"><input type="date" id="new-end-date" value="${defaultEndDateIso}" class="px-2 py-1 border rounded w-full"/></div>
+
+                            <div class="col-span-2 text-sm text-gray-600 single-only">星期</div>
+                            <div class="col-span-6 single-only"><input id="new-end-dow" class="px-2 py-1 border rounded w-full" value="${endDow}" readonly/></div>
 
                             <div class="col-span-2 text-sm text-gray-600">下班時間</div>
                             <div class="col-span-6"><input type="time" id="new-end-time" value="${defaultEnd}" class="px-2 py-1 border rounded w-full"/></div>
@@ -8607,6 +8625,11 @@
                     const endDowInput = document.getElementById('new-end-dow');
                     const startTimeInput = document.getElementById('new-start-time');
                     const endTimeInput = document.getElementById('new-end-time');
+                    const multiToggle = document.getElementById('multi-date-toggle');
+                    const singleRows = Array.from(modal.querySelectorAll('.single-only'));
+                    const multiRows = Array.from(modal.querySelectorAll('.multi-only'));
+                    let viewMonthDate = new Date(`${defaultDateIso}T00:00:00`);
+                    let selectedDates = new Set();
 
                     const togglePostRow = () => {
                         if (!roleSel || !postRow) return;
@@ -8659,6 +8682,56 @@
                     if (btn9) btn9.addEventListener('click', ()=> addHours(9));
                     if (btn12) btn12.addEventListener('click', ()=> addHours(12));
 
+                    // 多日選擇渲染
+                    const renderMultiGrid = () => {
+                        const grid = document.getElementById('multi-date-grid');
+                        const label = document.getElementById('multi-month-label');
+                        if (!grid || !label) return;
+                        const ym = `${viewMonthDate.getFullYear()}-${String(viewMonthDate.getMonth()+1).padStart(2,'0')}`;
+                        label.textContent = ym;
+                        const first = new Date(viewMonthDate.getFullYear(), viewMonthDate.getMonth(), 1);
+                        const last = new Date(viewMonthDate.getFullYear(), viewMonthDate.getMonth()+1, 0);
+                        const days = last.getDate();
+                        const startDowIdx = first.getDay();
+                        const cells = [];
+                        for (let i=0;i<startDowIdx;i++) cells.push('<div class="h-8"></div>');
+                        for (let d=1; d<=days; d++) {
+                            const iso = fmtYMD(new Date(viewMonthDate.getFullYear(), viewMonthDate.getMonth(), d));
+                            const active = selectedDates.has(iso);
+                            cells.push(`<button class="h-8 rounded text-sm ${active? 'bg-blue-600 text-white':'bg-white text-gray-700 border'}" data-iso="${iso}">${d}</button>`);
+                        }
+                        grid.innerHTML = cells.join('');
+                        const countEl = document.getElementById('multi-selected-count');
+                        if (countEl) countEl.textContent = String(selectedDates.size);
+                        grid.querySelectorAll('button[data-iso]').forEach(btn => {
+                            btn.addEventListener('click', () => {
+                                const iso = btn.getAttribute('data-iso');
+                                if (!iso) return;
+                                if (selectedDates.has(iso)) selectedDates.delete(iso); else selectedDates.add(iso);
+                                renderMultiGrid();
+                            });
+                        });
+                    };
+                    const prevM = document.getElementById('multi-prev-month');
+                    const nextM = document.getElementById('multi-next-month');
+                    if (prevM) prevM.addEventListener('click', ()=>{ viewMonthDate.setMonth(viewMonthDate.getMonth()-1); renderMultiGrid(); });
+                    if (nextM) nextM.addEventListener('click', ()=>{ viewMonthDate.setMonth(viewMonthDate.getMonth()+1); renderMultiGrid(); });
+
+                    // 切換多日模式顯示/隱藏對應欄位
+                    if (multiToggle) {
+                        multiToggle.addEventListener('change', ()=>{
+                            const on = multiToggle.checked;
+                            singleRows.forEach(el => el.classList.toggle('hidden', on));
+                            multiRows.forEach(el => el.classList.toggle('hidden', !on));
+                            if (on) {
+                                const initIso = dateInput?.value || defaultDateIso;
+                                selectedDates = new Set(initIso ? [initIso] : []);
+                                viewMonthDate = new Date(`${initIso}T00:00:00`);
+                                renderMultiGrid();
+                            }
+                        });
+                    }
+
                     const cancelBtn = document.getElementById('new-schedule-cancel');
                     if (cancelBtn) cancelBtn.addEventListener('click', ()=> { modal.classList.add('hide'); });
 
@@ -8689,32 +8762,71 @@
                         const start = startTimeInput?.value || '07:00';
                         const end = endTimeInput?.value || '19:00';
                         const assId = document.getElementById('new-assignee')?.value || '';
-                        if (!iso || !start || !end) return showToast('請完整填寫排班資訊', true);
+                        if (!start || !end) return showToast('請完整填寫排班資訊', true);
                         if (roleVal === '保全' && !postId) return showToast('請輸入哨點名稱', true);
-                        if (endIso === iso && parseHM(end) <= parseHM(start)) return showToast('結束時間需晚於開始時間', true);
+                        const isMulti = !!multiToggle?.checked;
+                        if (!isMulti && (!iso)) return showToast('請選擇上班日期', true);
+                        if (!isMulti && endIso === iso && parseHM(end) <= parseHM(start)) return showToast('結束時間需晚於開始時間', true);
                         try {
                             const { Timestamp } = window.__fs || {};
                             const effPostId = postId || pageState.selectedPostId;
-                            const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${effPostId}__${iso}`);
-                            const dsnap = await getDoc(dref);
-                            const docData = dsnap.exists() ? dsnap.data() : null;
-                            const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
-                            let newShifts = [];
-                            if (edit && typeof edit.index === 'number') {
-                                newShifts = shifts.map((sh,i)=> i===edit.index ? { ...sh, start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso } : sh);
-                            } else {
-                                newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso }];
-                            }
-                            const payload = {
-                                communityId, postId: effPostId, dateIso: iso,
-                                dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
-                                isScheduledDay: !!docData?.isScheduledDay,
-                                shifts: newShifts,
-                                createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
-                                updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                            const saveSingle = async () => {
+                                const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${effPostId}__${iso}`);
+                                const dsnap = await getDoc(dref);
+                                const docData = dsnap.exists() ? dsnap.data() : null;
+                                const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                                let newShifts = [];
+                                if (edit && typeof edit.index === 'number') {
+                                    newShifts = shifts.map((sh,i)=> i===edit.index ? { ...sh, start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso } : sh);
+                                } else {
+                                    newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIso }];
+                                }
+                                const payload = {
+                                    communityId, postId: effPostId, dateIso: iso,
+                                    dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${iso}T00:00:00`)) : new Date(`${iso}T00:00:00`)),
+                                    isScheduledDay: !!docData?.isScheduledDay,
+                                    shifts: newShifts,
+                                    createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                    updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                };
+                                await setDoc(dref, payload);
                             };
-                            await setDoc(dref, payload);
-                            showToast(edit ? '已更新排班' : '已新增排班');
+
+                            const saveMulti = async () => {
+                                if (selectedDates.size === 0) return showToast('請勾選至少一個日期', true);
+                                const tasks = [];
+                                for (const isoSel of Array.from(selectedDates)) {
+                                    let endIsoCalc = isoSel;
+                                    if (parseHM(end) <= parseHM(start)) {
+                                        const d0 = new Date(`${isoSel}T00:00:00`);
+                                        d0.setDate(d0.getDate()+1);
+                                        endIsoCalc = fmtYMD(d0);
+                                    }
+                                    const dref = doc(db,'communities', communityId, 'postSchedules', `${communityId}__${effPostId}__${isoSel}`);
+                                    const dsnap = await getDoc(dref);
+                                    const docData = dsnap.exists() ? dsnap.data() : null;
+                                    const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                                    const newShifts = [...shifts, { start, end, assignees: assId ? [assId] : [], role: roleVal, endDateIso: endIsoCalc }];
+                                    const payload = {
+                                        communityId, postId: effPostId, dateIso: isoSel,
+                                        dateTS: (Timestamp?.fromDate ? Timestamp.fromDate(new Date(`${isoSel}T00:00:00`)) : new Date(`${isoSel}T00:00:00`)),
+                                        isScheduledDay: !!docData?.isScheduledDay,
+                                        shifts: newShifts,
+                                        createdAt: docData?.createdAt || (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date()),
+                                        updatedAt: (Timestamp?.fromDate ? Timestamp.fromDate(new Date()) : new Date())
+                                    };
+                                    tasks.push(setDoc(dref, payload));
+                                }
+                                await Promise.all(tasks);
+                                showToast(`已新增 ${selectedDates.size} 筆排班`);
+                            };
+
+                            if (isMulti && !edit) {
+                                await saveMulti();
+                            } else {
+                                await saveSingle();
+                                showToast(edit ? '已更新排班' : '已新增排班');
+                            }
                             modal.classList.add('hide');
                             pageState.selectedPostId = effPostId;
                             await loadMonth();
