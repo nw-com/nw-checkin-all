@@ -7625,6 +7625,12 @@
                     tabsEl.querySelectorAll('button[data-post]').forEach(btn=>{
                         btn.addEventListener('click', ()=>{
                             pageState.selectedPostId = btn.getAttribute('data-post');
+                            // 初始化哨點篩選狀態：切到「全部」時預設顯示全部，其它分頁取消篩選
+                            if (pageState.selectedPostId === ALL_POSTS_ID) {
+                                pageState.postFilterId = ALL_POSTS_ID;
+                            } else {
+                                pageState.postFilterId = null;
+                            }
                             renderTabs();
                             renderPostTitle();
                             loadMonth().then(()=> { renderCalendar(); });
@@ -7921,10 +7927,16 @@
                         const iso = fmtYMD(cell.date);
                         const todayIso = fmtYMD(new Date());
                         const docData = pageState.monthDocsMap[iso];
-                        const shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                        let shifts = Array.isArray(docData?.shifts) ? docData.shifts : [];
+                        // 在「全部」分頁且選了特定哨點篩選時，只取該哨點的保全班表
+                        if (pageState.selectedPostId === ALL_POSTS_ID && pageState.postFilterId && pageState.postFilterId !== ALL_POSTS_ID) {
+                            shifts = shifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === pageState.postFilterId);
+                        }
                         // 狀態：異常（未打卡/未上哨）、已完成、有排班
                         const statuses = shifts.map(s => computeShiftStatus(iso, s));
-                        const hasShifts = (shifts.length > 0) || !!docData?.isScheduledDay;
+                        // 只有在顯示全部哨點時，才採用聚合的 isScheduledDay 作為有排班標記
+                        const aggFlag = (pageState.selectedPostId === ALL_POSTS_ID && (!pageState.postFilterId || pageState.postFilterId === ALL_POSTS_ID)) ? !!docData?.isScheduledDay : false;
+                        const hasShifts = (shifts.length > 0) || aggFlag;
                         const anyAbnormal = statuses.some(st => st === '未上哨');
                         const allCompleted = hasShifts && statuses.length > 0 && statuses.every(st => st === '已完成');
                         // 斷續標章
@@ -8246,14 +8258,24 @@
                     const filterIso = pageState.selectedDayIso || null;
                     const roleFilter = pageState.roleFilter || null;
                     const titleEl = document.getElementById('shift-list-title');
-                    if (titleEl) titleEl.textContent = `${filterIso ? '當日' : '每月'}班表列表${roleFilter ? `（角色：${roleFilter}）` : ''}`;
+                    // 顯示目前哨點篩選狀態於標題（僅在全部分頁）
+                    const isAgg = (pageState.selectedPostId === ALL_POSTS_ID);
+                    const postFilterId = pageState.postFilterId || (isAgg ? ALL_POSTS_ID : null);
+                    const postFilterName = (postFilterId && postFilterId !== ALL_POSTS_ID)
+                        ? ((pageState.posts.find(p=>p.id===postFilterId)?.name) || '未命名哨點')
+                        : (isAgg ? '全部' : '');
+                    if (titleEl) titleEl.textContent = `${filterIso ? '當日' : '每月'}班表列表${roleFilter ? `（角色：${roleFilter}）` : ''}${isAgg ? `（哨點：${postFilterName}）` : ''}`;
                     const entries = Object.entries(pageState.monthDocsMap).sort(([a],[b]) => a.localeCompare(b));
                     const rows = [];
                     const currentPost = pageState.posts.find(p=>p.id===pageState.selectedPostId);
                     const postName = currentPost?.name || '未命名哨點';
                     for (const [iso, doc] of entries) {
                         if (filterIso && iso !== filterIso) continue;
-                        const shifts = Array.isArray(doc.shifts) ? doc.shifts : [];
+                        const allShifts = Array.isArray(doc.shifts) ? doc.shifts : [];
+                        // 依哨點篩選（僅在全部分頁且選了特定哨點時）
+                        const shifts = (isAgg && postFilterId && postFilterId !== ALL_POSTS_ID)
+                            ? allShifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId)
+                            : allShifts;
                         shifts.forEach((s, idx) => {
                             if (roleFilter && ((s.role || '保全') !== roleFilter)) return;
                             const start = s.start || '07:00';
@@ -8289,6 +8311,17 @@
                                 </tr>`);
                         });
                     }
+                    // 建立哨點篩選連結（僅在全部分頁）
+                    const filterLinks = (() => {
+                        if (!isAgg) return '';
+                        const links = [`<a href="#" data-post-filter="${ALL_POSTS_ID}" class="${(!postFilterId || postFilterId===ALL_POSTS_ID)?'font-semibold underline text-blue-600':'text-blue-600 hover:underline'}">全部</a>`];
+                        (pageState.posts || []).forEach(p => {
+                            const active = postFilterId === p.id;
+                            links.push(`<a href="#" data-post-filter="${p.id}" class="${active?'font-semibold underline text-blue-600':'text-blue-600 hover:underline'}">${p.name||'未命名哨點'}</a>`);
+                        });
+                        return `<div class="mt-1 flex flex-wrap gap-2 text-xs">${links.join('<span class=\"text-gray-400\">｜</span>')}</div>`;
+                    })();
+
                     el.innerHTML = `
                         <div class="overflow-x-auto">
                           <table class="text-sm" style="min-width: max-content; border-collapse: collapse;">
@@ -8297,7 +8330,10 @@
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">角色</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">指派人員</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">職稱</th>
-                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">哨點</th>
+                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">
+                                  <div>哨點</div>
+                                  ${filterLinks}
+                                </th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班日期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">星期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班時間</th>
@@ -8311,6 +8347,16 @@
                             <tbody>${rows.join('') || `<tr><td colspan="12" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
+                    // 綁定哨點篩選連結事件（僅在全部分頁）
+                    el.querySelectorAll('[data-post-filter]').forEach(a => {
+                        a.addEventListener('click', (evt) => {
+                            evt.preventDefault();
+                            const pid = a.getAttribute('data-post-filter');
+                            pageState.postFilterId = pid;
+                            renderCalendar();
+                            renderMonthlyList();
+                        });
+                    });
                     const addBtn = document.getElementById('open-add-schedule');
                     if (addBtn) { addBtn.onclick = () => openAddScheduleModal(); }
 
@@ -8363,7 +8409,10 @@
                         const postName2 = currentPost2?.name || '未命名哨點';
                         for (const [iso2, doc2] of entries2) {
                             if (filterIso && iso2 !== filterIso) continue;
-                            const shifts2 = Array.isArray(doc2.shifts) ? doc2.shifts : [];
+                            let shifts2 = Array.isArray(doc2.shifts) ? doc2.shifts : [];
+                            if (isAgg && postFilterId && postFilterId !== ALL_POSTS_ID) {
+                                shifts2 = shifts2.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId);
+                            }
                             shifts2.forEach((s2) => {
                                 if (roleFilter && ((s2.role || '保全') !== roleFilter)) return;
                                 const start = s2.start || '07:00';
