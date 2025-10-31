@@ -2003,8 +2003,26 @@
                             const communitiesByCode = Object.fromEntries(currentList.map(c => [ (c.code||'').trim(), c.id ]));
                             const usnap = await getDocs(collection(db, 'users'));
                             const counts = Object.fromEntries(currentList.map(c => [c.id, 0]));
+                            // 只計入指定人員角色：總幹事、秘書、保全、清潔、機電
+                            const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
+                            const resolveRole = (u) => {
+                                const tags = [u.role, u.jobTitle, u.applicationTitle].map(x => ((x||'') + '').trim());
+                                for (const t of tags) {
+                                    if (!t) continue;
+                                    if (allowedRoles.has(t)) return t;
+                                    if (t.includes('保全')) return '保全';
+                                    if (t.includes('清潔')) return '清潔';
+                                    if (t.includes('機電')) return '機電';
+                                    if (t.includes('總幹事')) return '總幹事';
+                                    if (t.includes('秘書')) return '秘書';
+                                }
+                                return null;
+                            };
                             usnap.forEach(d => {
                                 const u = d.data() || {};
+                                // 僅當使用者屬於指定人員角色時才計數
+                                const roleName = resolveRole(u);
+                                if (!roleName) return;
                                 const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
                                 const code = (u.serviceCommunityCode || '').trim();
                                 const mapped = code ? communitiesByCode[code] : null;
