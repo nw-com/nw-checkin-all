@@ -250,10 +250,8 @@
                 <button id="nav-settings" data-tab="settings" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2">
                     <i data-lucide="settings"></i><span class="text-xs mt-1">設定</span>
                 </button>
-                <button id="nav-group" data-tab="group" class="tab-btn flex flex-col items-center text-gray-500 border-t-2 border-transparent pt-2 hide">
-                    <i data-lucide="git-branch"></i><span class="text-xs mt-1">巡邏</span>
-                </button>
-            </nav>
+                
+                </nav>
         </footer>
     </div>
     
@@ -734,6 +732,41 @@
                             if (password !== confirmPassword) throw new Error('兩次密碼不一致');
                         }
 
+                        // 檢查是否已有待審核申請（以 email／手機為主）
+                        const phoneKey = typeof normalizePhone === 'function' ? normalizePhone(phone) : (phone || '').replace(/[^0-9+]/g, '');
+                        const { collection, query, where, getDocs, limit, addDoc } = window.__fs || {};
+                        let hasPending = false;
+                        try {
+                            // 以 Email 檢查（若填寫）
+                            if (!hasPending && email) {
+                                const qs = await getDocs(query(collection(window.__db, 'accountApplications'), where('email', '==', email), limit(5)));
+                                qs.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasPending = true; });
+                            }
+                            // 以原始手機字串檢查
+                            if (!hasPending && phone) {
+                                const qsRaw = await getDocs(query(collection(window.__db, 'accountApplications'), where('phone', '==', phone), limit(5)));
+                                qsRaw.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasPending = true; });
+                            }
+                            // 廣域抓取 pending，再以標準化手機比對（避免格式差異）
+                            if (!hasPending) {
+                                const qsPend = await getDocs(query(collection(window.__db, 'accountApplications'), where('status', '==', 'pending')));
+                                qsPend.forEach(d => {
+                                    const data = d.data() || {};
+                                    const p2 = typeof normalizePhone === 'function' ? normalizePhone(data.phone || '') : (data.phone || '').replace(/[^0-9+]/g, '');
+                                    const e2 = (data.email || '').trim();
+                                    if (p2 && p2 === phoneKey) hasPending = true;
+                                    if (!hasPending && email && e2 && e2 === email) hasPending = true;
+                                });
+                            }
+                        } catch (_) { /* 忽略檢查錯誤，避免阻斷送出 */ }
+
+                        if (hasPending) {
+                            errorEl.textContent = '已申請待審核';
+                            try { showToast('已申請待審核'); } catch (_) {}
+                            showLoading(false);
+                            return;
+                        }
+
                         const data = {
                             name, phone, email: (email || null), homeAddress, birthDate, idNumber, license, serviceCommunityCode,
                             bloodType, emergencyName, emergencyRelation, emergencyPhone,
@@ -743,7 +776,6 @@
                             status: 'pending',
                             createdAt: serverTimestamp()
                         };
-                        const { collection, addDoc } = window.__fs || {};
                         await addDoc(collection(window.__db, 'accountApplications'), data);
                         showToast('申請已送出，待後端審核');
                         close();
@@ -1532,10 +1564,6 @@
                         pushItem('schedule', 'calendar-days', '排班');
                     }
                     pushItem('features', 'layers', '功能');
-                    // 巡邏：目前對 junior_manager 必定顯示，管理員/高階主管/人事若具權限也顯示
-                    if (['admin','manager','junior_manager','hr'].includes(role)) {
-                        pushItem('group', 'git-branch', '巡邏');
-                    }
                     if (['admin','hr','manager','junior_manager'].includes(role)) {
                         pushItem('hr', 'users', '人員');
                     }
@@ -1544,7 +1572,6 @@
                     pushItem('dashboard', 'layout-dashboard', '儀表板');
                     pushItem('clock-in', 'fingerprint', '打卡');
                     pushItem('features', 'layers', '功能');
-                    pushItem('group', 'git-branch', '巡邏');
                 } else {
                     // 其他未定義角色：保守呈現基本功能
                     pushItem('dashboard', 'layout-dashboard', '儀表板');
@@ -1619,7 +1646,7 @@
                     'settings': () => role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
                     'hr': () => (['admin','hr','manager','junior_manager'].includes(role)) ? renderHR(subPage || 'applications') : renderAccessDenied(),
                     'navigation': () => isNavigationAllowed(state.currentUserData) ? renderNavigation(subPage || 'community') : renderAccessDenied(),
-                    'group': () => ['admin','hr','manager','junior_manager','總幹事','秘書','保全','清潔','機電'].includes(role) ? renderGroup(subPage || 'map') : renderAccessDenied()
+                    // 已移除巡邏分頁與功能
                 };
                 const renderFunction = router[pageName] || renderAccessDenied;
                 try {
