@@ -3694,15 +3694,20 @@
                         const tb = b.time ? b.time.getTime() : 0;
                         return tb - ta;
                     });
-                    // 將異常持久化並執行過期清理（不影響 UI 顯示流程）
-                    try {
-                        await persistAnomalies(filtered, targetCommunityId);
-                        await cleanupOldAnomalies(targetCommunityId);
-                    } catch (_) {}
-                    // 顯示通知（含刪除鍵，僅 reviewer 角色可見）
-                    let html = '';
+                    // 角色：社區維護/管理可管理異常（持久化、清理、刪除）
                     const role = state.currentUserData?.role || '';
-                    const canDelete = ['admin','hr','manager'].includes(role);
+                    const anomalyManagers = ['admin','hr','manager','junior_manager','community_admin','社區管理員'];
+                    const canManage = anomalyManagers.includes(role);
+                    // 僅管理角色執行持久化與自動清理，避免一般用戶觸發 400
+                    if (canManage) {
+                        try {
+                            await persistAnomalies(filtered, targetCommunityId);
+                            await cleanupOldAnomalies(targetCommunityId);
+                        } catch (_) {}
+                    }
+                    // 顯示通知（含刪除鍵，僅管理角色可見）
+                    let html = '';
+                    const canDelete = canManage;
                     filtered.forEach(a => {
                         const name = a.user.name || a.user.displayName || '未命名';
                         const icon = (a.type === '打卡定位異常') ? 'map-pin' : 'alert-triangle';
@@ -3736,8 +3741,10 @@
                                     // 立即從 UI 移除卡片
                                     const card = e.currentTarget.closest('.p-3');
                                     if (card && card.parentNode) card.parentNode.removeChild(card);
+                                    try { showToast('已刪除異常通知'); } catch (_) {}
                                 } catch (err) {
                                     console.warn('刪除異常事件失敗', err);
+                                    try { showToast('刪除異常通知失敗：請檢查權限', true); } catch (_) {}
                                 }
                             });
                         });

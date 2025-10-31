@@ -248,11 +248,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 異常事件：持久化與自動清理（由管理角色建立與刪除）
+    // 異常事件：持久化與自動清理（由社區維護/管理角色建立與刪除）
     match /anomalies/{anomalyId} {
-      // 任何登入者可讀（供儀表板與稽核）；僅管理/審核角色可寫入與刪除
+      // 任何登入者可讀（供儀表板與稽核）；僅社區維護角色可寫入與刪除
       allow read: if request.auth != null;
-      allow create: if isReviewer() &&
+      allow create: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source','suppressed'
         ]) &&
@@ -266,7 +266,7 @@ service cloud.firestore {
         (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp) &&
         (request.resource.data.source == null || request.resource.data.source is string) &&
         (request.resource.data.suppressed == null || request.resource.data.suppressed is bool);
-      allow update: if isReviewer() &&
+      allow update: if isCommunityEditor() &&
         request.resource.data.keys().hasOnly([
           'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source','suppressed'
         ]) &&
@@ -279,7 +279,7 @@ service cloud.firestore {
         (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp) &&
         (request.resource.data.source == null || request.resource.data.source is string) &&
         (request.resource.data.suppressed == null || request.resource.data.suppressed is bool);
-      allow delete: if isReviewer();
+      allow delete: if isCommunityEditor();
     }
 
     // 設定資料：general 與 group
