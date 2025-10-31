@@ -864,27 +864,49 @@
                             return;
                         }
 
-                        // 檢查是否已有重複申請（手機／電子郵件／身分證號）
-                        const { collection, query, where, getDocs, limit, addDoc } = window.__fs || {};
+                        // 強化檢查：手機／電子郵件不可重複（包含未核准的申請）
+                        const { collection, query, where, getDocs, limit, addDoc, doc, getDoc, serverTimestamp } = window.__fs || {};
                         let hasApplied = false;
+                        let dupReason = '';
                         try {
+                            // 檢查 users：Email 已存在
                             if (email && !hasApplied) {
-                                const qsEmail = await getDocs(query(collection(window.__db, 'accountApplications'), where('email', '==', email), limit(1)));
-                                qsEmail.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasApplied = true; });
+                                const qsUserEmail = await getDocs(query(collection(window.__db, 'users'), where('email', '==', email), limit(1)));
+                                if (!qsUserEmail.empty) { hasApplied = true; dupReason = '電子郵件已存在於系統'; }
                             }
+                            // 檢查 users/loginIndex：手機已存在（使用標準化 phoneKey）
                             if (phone && !hasApplied) {
-                                const qsPhone = await getDocs(query(collection(window.__db, 'accountApplications'), where('phone', '==', phone), limit(1)));
-                                qsPhone.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasApplied = true; });
+                                const phoneKey = normalizePhone(phone);
+                                if (phoneKey) {
+                                    const idxSnap = await getDoc(doc(window.__db, 'loginIndex', phoneKey));
+                                    if (idxSnap?.exists()) { hasApplied = true; dupReason = '手機號碼已存在於系統'; }
+                                }
+                                // 退回檢查：若尚未建立 loginIndex，嘗試比對 users 內原始 phone 欄位
+                                if (!hasApplied) {
+                                    const qsUserPhone = await getDocs(query(collection(window.__db, 'users'), where('phone', '==', phone), limit(1)));
+                                    if (!qsUserPhone.empty) { hasApplied = true; dupReason = '手機號碼已存在於系統'; }
+                                }
                             }
+                            // 檢查 accountApplications：Email 有未核准申請（pending/rejected 等非 approved）
+                            if (email && !hasApplied) {
+                                const qsEmail = await getDocs(query(collection(window.__db, 'accountApplications'), where('email', '==', email), limit(5)));
+                                qsEmail.forEach(d => { const st = (d.data()?.status || 'pending'); if (st !== 'approved') { hasApplied = true; dupReason = '電子郵件已有未核准申請'; } });
+                            }
+                            // 檢查 accountApplications：手機有未核准申請
+                            if (phone && !hasApplied) {
+                                const qsPhone = await getDocs(query(collection(window.__db, 'accountApplications'), where('phone', '==', phone), limit(5)));
+                                qsPhone.forEach(d => { const st = (d.data()?.status || 'pending'); if (st !== 'approved') { hasApplied = true; dupReason = '手機號碼已有未核准申請'; } });
+                            }
+                            // 保留身分證重複檢查（未核准也阻擋）
                             if (idNumber && !hasApplied) {
-                                const qsId = await getDocs(query(collection(window.__db, 'accountApplications'), where('idNumber', '==', idNumber), limit(1)));
-                                qsId.forEach(d => { const st = (d.data()?.status || 'pending'); if (st === 'pending') hasApplied = true; });
+                                const qsId = await getDocs(query(collection(window.__db, 'accountApplications'), where('idNumber', '==', idNumber), limit(5)));
+                                qsId.forEach(d => { const st = (d.data()?.status || 'pending'); if (st !== 'approved') { hasApplied = true; dupReason = '身分證號已有未核准申請'; } });
                             }
                         } catch (_) { /* 忽略檢查錯誤，避免阻斷送出 */ }
 
                         if (hasApplied) {
-                            errorEl.textContent = '已申請待審核';
-                            try { showToast('已申請待審核'); } catch (_) {}
+                            errorEl.textContent = dupReason ? `${dupReason}；此筆不成立` : '手機或電子郵件重複（包含未核准申請），此筆不成立';
+                            try { showToast(errorEl.textContent, true); } catch (_) {}
                             showLoading(false);
                             return;
                         }
@@ -13769,6 +13791,9 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const close = () => document.getElementById(modalId)?.remove();
 
                 const defaultAvatar = 'https://placehold.co/80x80/EFEFEF/333333?text=頭像';
+                // 預設角色：優先使用職稱（若屬指定社區角色），否則使用資料庫內的角色
+                const jt = isEditing ? ((user?.jobTitle || user?.applicationTitle || '') + '').trim() : '';
+                const effRole = isEditing ? (isFieldLikeRole(jt) ? jt : ((user?.role || 'user') + '')) : '';
 
                 const modalHTML = `
                     <div id="${modalId}" class="modal-backdrop">
@@ -13883,17 +13908,17 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                 <div>
                                     <label for="user-role" class="block text-sm font-medium text-gray-700">角色 (必填)</label>
                                     <select id="user-role" class="w-full mt-1 px-3 py-2 border rounded-md">
-                                        <option value="field" ${isEditing && user.role === 'field' ? 'selected' : ''}>外勤（一般）</option>
-                                        <option value="總幹事" ${isEditing && user.role === '總幹事' ? 'selected' : ''}>總幹事</option>
-                                        <option value="保全" ${isEditing && user.role === '保全' ? 'selected' : ''}>保全</option>
-                                        <option value="秘書" ${isEditing && user.role === '秘書' ? 'selected' : ''}>秘書</option>
-                                        <option value="清潔" ${isEditing && user.role === '清潔' ? 'selected' : ''}>清潔</option>
-                                        <option value="機電" ${isEditing && user.role === '機電' ? 'selected' : ''}>機電</option>
-                                        <option value="user" ${isEditing && user.role === 'user' ? 'selected' : ''}>內勤</option>
-                                        <option value="junior_manager" ${isEditing && user.role === 'junior_manager' ? 'selected' : ''}>初階主管</option>
-                                        <option value="manager" ${isEditing && user.role === 'manager' ? 'selected' : ''}>高階主管</option>
-                                        <option value="hr" ${isEditing && user.role === 'hr' ? 'selected' : ''}>人事</option>
-                                        <option value="admin" ${isEditing && user.role === 'admin' ? 'selected' : ''}>管理員</option>
+                                        <option value="field" ${isEditing && effRole === 'field' ? 'selected' : ''}>外勤（一般）</option>
+                                        <option value="總幹事" ${isEditing && effRole === '總幹事' ? 'selected' : ''}>總幹事</option>
+                                        <option value="保全" ${isEditing && effRole === '保全' ? 'selected' : ''}>保全</option>
+                                        <option value="秘書" ${isEditing && effRole === '秘書' ? 'selected' : ''}>秘書</option>
+                                        <option value="清潔" ${isEditing && effRole === '清潔' ? 'selected' : ''}>清潔</option>
+                                        <option value="機電" ${isEditing && effRole === '機電' ? 'selected' : ''}>機電</option>
+                                        <option value="user" ${isEditing && effRole === 'user' ? 'selected' : ''}>內勤</option>
+                                        <option value="junior_manager" ${isEditing && effRole === 'junior_manager' ? 'selected' : ''}>初階主管</option>
+                                        <option value="manager" ${isEditing && effRole === 'manager' ? 'selected' : ''}>高階主管</option>
+                                        <option value="hr" ${isEditing && effRole === 'hr' ? 'selected' : ''}>人事</option>
+                                        <option value="admin" ${isEditing && effRole === 'admin' ? 'selected' : ''}>管理員</option>
                                     </select>
                                 </div>
 
