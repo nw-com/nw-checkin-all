@@ -8000,6 +8000,7 @@
                     const { Timestamp } = window.__fs || {};
                     pageState.selectedDayIso = iso;
                     const isAgg = (pageState.selectedPostId === ALL_POSTS_ID);
+                    const postFilterId = pageState.postFilterId || (isAgg ? ALL_POSTS_ID : null);
                     let docData = null;
                     let shifts = [];
                     let isScheduledDay = false;
@@ -8019,6 +8020,18 @@
                         isScheduledDay = !!docData?.isScheduledDay;
                     }
 
+                    // 依哨點篩選（僅在全部分頁）：
+                    // 全部：不過濾；無：僅非保全；指定哨點：該哨點保全
+                    if (isAgg && postFilterId) {
+                        if (postFilterId === ALL_POSTS_ID) {
+                            // 全部，不變更
+                        } else if (postFilterId === '__NONE__') {
+                            shifts = shifts.filter(s => ((s.role || '保全') !== '保全'));
+                        } else {
+                            shifts = shifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId);
+                        }
+                    }
+
                     // 角色過濾：保留原始索引，事件仍指向原陣列索引
                     const roleFilter = pageState.roleFilter || null;
                     const filteredList = roleFilter
@@ -8027,9 +8040,16 @@
 
                     await loadCommunityUsers();
                     const userOptions = pageState.userOptionsHTML && pageState.userOptionsHTML.length ? pageState.userOptionsHTML : '<option value="" disabled>請先建立或指派人員</option>';
+                    // 顯示目前哨點篩選狀態（聚合分頁）
+                    let postFilterName = '';
+                    if (isAgg) {
+                        if (!postFilterId || postFilterId === ALL_POSTS_ID) postFilterName = '全部';
+                        else if (postFilterId === '__NONE__') postFilterName = '無';
+                        else postFilterName = (pageState.posts.find(p=>p.id===postFilterId)?.name) || '未命名哨點';
+                    }
                     panel.innerHTML = `
                         <div class="flex items-center justify-between mb-2">
-                            <div class="font-semibold">${iso} 的${isAgg ? '所有哨點' : '哨點'}班表</div>
+                            <div class="font-semibold">${iso} 的${isAgg ? `哨點：${postFilterName}` : '哨點'}班表</div>
                         </div>
                         <div class="flex items-center gap-4 mb-3">
                             <label class="flex items-center gap-1 text-sm"><input type="checkbox" id="chk-scheduled" ${isScheduledDay?'checked':''} ${isAgg ? 'disabled' : ''}/> 排班日${isAgg ? '（聚合模式不可編輯）' : ''}</label>
@@ -12521,9 +12541,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const q = fsQuery(appsCol, fsOrderBy('createdAt', 'desc'));
                 // 即時監聽申請清單變更，使核准後列表立即更新
                 try {
-                    const unsubscribe = fsOnSnapshot(q, (snap) => {
+                    const unsubscribe = fsOnSnapshot(q, async (snap) => {
                         allApps = [];
                         snap.forEach(ds => allApps.push({ id: ds.id, ...ds.data() }));
+                        try { await autoCleanupDuplicates(); } catch (_) {}
                         renderList();
                     }, (error) => {
                         console.error('即時監聽帳號申請失敗', error);
@@ -12627,8 +12648,17 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             return;
                         }
                         const app = appSnap.data();
-                        const email = (app.email || '').trim();
-                        if (!email) { showToast('申請缺少電子郵件', true); return; }
+                        let email = (app.email || '').trim();
+                        if (!email) {
+                            const rawPhone = (app.phone || '').trim();
+                            const phoneKey = (typeof normalizePhone === 'function') ? normalizePhone(rawPhone) : (rawPhone ? rawPhone.replace(/[^0-9+]/g, '') : '');
+                            if (phoneKey) {
+                                email = `${phoneKey}@nwcom.com`;
+                            } else {
+                                showToast('申請缺少電子郵件且手機號碼無效，無法核准', true);
+                                return;
+                            }
+                        }
 
                         // 建立 Auth 帳號（隨機暫時密碼），若 email 已存在則嘗試掛接既有使用者
                         let targetUserId = null;
@@ -12758,6 +12788,50 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         showToast('拒絕失敗', true);
                     } finally {
                         showLoading(false);
+                    }
+                }
+
+                // 自動清理：同名重複申請（pending），保留最新；若已有核准，則自動拒絕所有同名未核准申請
+                async function autoCleanupDuplicates() {
+                    try {
+                        const currentCommCode = state.currentCommunity?.code || null;
+                        const pending = allApps.filter(a => (a.status || 'pending') === 'pending' && (!currentCommCode || (a.serviceCommunityCode || '') === currentCommCode));
+                        const byName = {};
+                        pending.forEach(a => {
+                            const key = (a.name || '').trim();
+                            if (!key) return;
+                            (byName[key] ||= []).push(a);
+                        });
+
+                        for (const [nameKey, apps] of Object.entries(byName)) {
+                            const hasApproved = allApps.some(a => ((a.name || '').trim() === nameKey) && (a.status === 'approved'));
+                            let toReject = [];
+                            if (hasApproved) {
+                                toReject = apps; // 有已核准者：拒絕所有同名未核准申請
+                            } else if (apps.length > 1) {
+                                const sorted = apps.slice().sort((a,b) => {
+                                    const ta = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+                                    const tb = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+                                    return tb - ta; // 由新到舊
+                                });
+                                toReject = sorted.slice(1); // 保留最新，其餘拒絕
+                            }
+                            for (const app of toReject) {
+                                try {
+                                    await fsUpdateDoc(fsDoc(db, 'accountApplications', app.id), {
+                                        status: 'rejected',
+                                        reviewerId: auth.currentUser?.uid || '',
+                                        reviewedAt: fsServerTimestamp(),
+                                        reviewNotes: hasApproved ? '系統自動拒絕：重複於已核准申請' : '系統自動拒絕：重複申請（保留最新）',
+                                        applyPassword: null
+                                    });
+                                } catch (e) {
+                                    console.warn('自動拒絕重複申請失敗', e);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('自動清理重複申請失敗', e);
                     }
                 }
             }
