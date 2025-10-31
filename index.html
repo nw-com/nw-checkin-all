@@ -3276,7 +3276,7 @@
                     const listEl = document.getElementById('dashboard-anomalies-list');
                     if (!listEl) return;
                     const fs = window.__fs || {}; const db = window.__db;
-                    const { collection, getDocs, query, where, orderBy, Timestamp } = fs;
+                    const { collection, getDocs, query, where, orderBy, Timestamp, doc, getDoc, setDoc, deleteDoc } = fs;
                     // 需載入定位設定與社區快取，供定位異常判斷
                     try { await ensureAbnormalMarkingConfig(); } catch (_) {}
                     try { await ensureCommunitiesCache(); } catch (_) {}
@@ -3302,6 +3302,54 @@
                         return target ? target.id : null;
                     };
                     const resolvedIdFromCode = currentCommCode ? resolveCommunityIdByCode(currentCommCode) : null;
+                    const targetCommunityId = currentCommId || resolvedIdFromCode || null;
+                    // 將異常事件持久化到 Firestore，並設定 3 天到期；避免重複以固定鍵覆寫
+                    async function persistAnomalies(events, communityId) {
+                        if (!db || !Array.isArray(events) || events.length === 0) return;
+                        const now = new Date();
+                        const tsNow = Timestamp?.fromDate ? Timestamp.fromDate(now) : now;
+                        for (const a of events) {
+                            try {
+                                const userId = a?.user?.id || a?.userId || 'unknown';
+                                const type = a?.type || '未知異常';
+                                const dt = a?.time instanceof Date ? a.time : (a?.time?.toDate ? a.time.toDate() : new Date());
+                                const y = dt.getFullYear(), m = String(dt.getMonth()+1).padStart(2,'0'), d = String(dt.getDate()).padStart(2,'0');
+                                const ymd = `${y}-${m}-${d}`;
+                                const timeKey = Math.floor(dt.getTime()/1000);
+                                const docId = `${userId}_${type}_${ymd}_${timeKey}`;
+                                const expires = new Date(dt.getTime() + 3*24*60*60*1000);
+                                const payload = {
+                                    userId,
+                                    type,
+                                    detail: a?.detail || '',
+                                    time: Timestamp?.fromDate ? Timestamp.fromDate(dt) : dt,
+                                    communityId: communityId || null,
+                                    createdAt: tsNow,
+                                    updatedAt: tsNow,
+                                    expiresAt: Timestamp?.fromDate ? Timestamp.fromDate(expires) : expires,
+                                    source: 'dashboard'
+                                };
+                                await setDoc(doc(db, 'anomalies', docId), payload, { merge: true });
+                            } catch (_) {}
+                        }
+                    }
+                    // 自動清理：刪除已過期（expiresAt <= 現在）的異常；限定社區以減少讀取量
+                    async function cleanupOldAnomalies(communityId) {
+                        try {
+                            const now = new Date();
+                            const tsNow = Timestamp?.fromDate ? Timestamp.fromDate(now) : now;
+                            let q = query(collection(db, 'anomalies'), where('expiresAt','<=', tsNow));
+                            if (communityId) {
+                                q = query(collection(db, 'anomalies'), where('communityId','==', communityId), where('expiresAt','<=', tsNow));
+                            }
+                            const snap = await getDocs(q);
+                            const batchDeletes = [];
+                            snap.forEach(d => batchDeletes.push(d.id));
+                            for (const id of batchDeletes) {
+                                try { await deleteDoc(doc(db, 'anomalies', id)); } catch (_) {}
+                            }
+                        } catch (_) {}
+                    }
                     if (currentCommId || currentCommCode) {
                         users = users.filter(u => {
                             const idsArr = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
@@ -3313,14 +3361,15 @@
                         });
                     }
 
-                    // 今日範圍
+                    // 近三日範圍（含今日）：超過三日不顯示
                     const now = new Date();
-                    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                    const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(start) : start;
-                    const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(end) : end;
+                    const rangeEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                    const rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                    rangeStart.setDate(rangeStart.getDate() - 2);
+                    const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(rangeStart) : rangeStart;
+                    const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(rangeEnd) : rangeEnd;
 
-                    // 取全日打卡紀錄（前端過濾所屬使用者）
+                    // 取近三日打卡紀錄（前端過濾所屬使用者）
                     const recSnap = await getDocs(query(collection(db, 'clockInRecords'), where('timestamp', '>=', tsStart), where('timestamp', '<=', tsEnd)));
                     const records = [];
                     recSnap.forEach(d => records.push({ id: d.id, ...d.data() }));
@@ -3336,13 +3385,30 @@
                         });
                     });
 
-                    // 讀取今日預期上下班時間（支援個人班表）
-                    const ymKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}`;
-                    const { doc, getDoc } = fs;
+                    // 讀取近三日的預期上下班時間（支援個人班表，跨月需載入多份設定）
                     let globalDays = {};
+                    const daysInRange = [];
+                    const monthsToLoad = new Set();
+                    {
+                        const cur = new Date(rangeStart.getTime());
+                        while (cur <= rangeEnd) {
+                            const y = cur.getFullYear();
+                            const m = String(cur.getMonth()+1).padStart(2,'0');
+                            const d = String(cur.getDate()).padStart(2,'0');
+                            daysInRange.push({ date: new Date(cur.getTime()), ymd: `${y}-${m}-${d}` });
+                            monthsToLoad.add(`${y}-${m}`);
+                            cur.setDate(cur.getDate()+1);
+                        }
+                    }
                     try {
-                        const sSnap = await getDoc(doc(db, 'settings', `workdays_${ymKey}`));
-                        if (sSnap.exists()) { const sd = sSnap.data(); globalDays = sd?.days || {}; }
+                        for (const ymKey of monthsToLoad) {
+                            const sSnap = await getDoc(doc(db, 'settings', `workdays_${ymKey}`));
+                            if (sSnap.exists()) {
+                                const sd = sSnap.data();
+                                const ds = sd?.days || {};
+                                Object.assign(globalDays, ds);
+                            }
+                        }
                     } catch (_) {}
                     const resolveDayHM = (obj) => {
                         if (!obj || typeof obj !== 'object') return { start: '', end: '' };
@@ -3406,9 +3472,9 @@
                     };
 
                     // 今日日期字串
-                    const ymdToday = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+                    const ymdToday = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}`;
 
-                    // 今日待審假單（依使用者分組）— 以 startTime 查詢、endTime 客端過濾
+                    // 近三日待審假單（依使用者分組）— 以 startTime 查詢、endTime 客端過濾
                     const pendingLeavesByUserId = {};
                     try {
                         const lSnap = await getDocs(query(collection(db, 'leaves'), where('status','==','pending'), where('startTime','<=', tsEnd)));
@@ -3418,8 +3484,35 @@
                             // 客端過濾：endTime >= 今日起
                             const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
                             const endT = toDate(data.endTime);
-                            if (uid && (!endT || endT >= start)) {
+                            if (uid && (!endT || endT >= rangeStart)) {
                                 (pendingLeavesByUserId[uid] ||= []).push({ id: d.id, ...data });
+                            }
+                        });
+                    } catch (_) {}
+
+                    // 近三日已核准假單（依使用者與日期分組）— 以 startTime 查詢、endTime 客端過濾
+                    const approvedLeaveDaysByUserId = {};
+                    try {
+                        const aSnap = await getDocs(query(collection(db, 'leaves'), where('status','==','approved'), where('startTime','<=', tsEnd)));
+                        aSnap.forEach(d => {
+                            const data = d.data() || {};
+                            const uid = data.userId;
+                            const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
+                            const st = toDate(data.startTime);
+                            const et = toDate(data.endTime);
+                            if (!uid) return;
+                            if (st && et && et >= rangeStart) {
+                                // 標記覆蓋到的每一天
+                                let cur = new Date(st.getFullYear(), st.getMonth(), st.getDate());
+                                const until = new Date(et.getFullYear(), et.getMonth(), et.getDate());
+                                while (cur <= until) {
+                                    const y = cur.getFullYear();
+                                    const m = String(cur.getMonth()+1).padStart(2,'0');
+                                    const d = String(cur.getDate()).padStart(2,'0');
+                                    const ymd = `${y}-${m}-${d}`;
+                                    (approvedLeaveDaysByUserId[uid] ||= {})[ymd] = true;
+                                    cur.setDate(cur.getDate()+1);
+                                }
                             }
                         });
                     } catch (_) {}
@@ -3428,87 +3521,109 @@
                     for (const u of users) {
                         const recs = byUser[u.id] || [];
                         const svcIds = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : (u.serviceCommunityCode ? [u.serviceCommunityCode] : []);
-
-                        // 雙重打卡（今日存在重複上班或重複下班）
-                        let startCount = 0, endCount = 0;
-                        for (const r of recs) {
+                        // 依日期分組紀錄
+                        const recsByDay = {};
+                        recs.forEach(r => {
                             const dt = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : null);
-                            if (!dt) continue;
+                            if (!dt) return;
                             const y = dt.getFullYear(), m = dt.getMonth()+1, d = dt.getDate();
                             const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                            if (ymd !== ymdToday) continue;
-                            if (r.type === '上班') startCount++;
-                            if (r.type === '下班') endCount++;
-                            if (startCount >= 2 || endCount >= 2) break;
-                        }
-                        if (startCount >= 2 || endCount >= 2) {
-                            anomalies.push({ type: '雙重打卡', user: u, detail: '今日存在重複上班或重複下班打卡' });
+                            (recsByDay[ymd] ||= []).push(r);
+                        });
+                        Object.keys(recsByDay).forEach(ymd => {
+                            recsByDay[ymd].sort((a,b)=>{
+                                const ta = a.timestamp?.toDate?.() ? a.timestamp.toDate() : (a.timestamp ? new Date(a.timestamp) : new Date(0));
+                                const tb = b.timestamp?.toDate?.() ? b.timestamp.toDate() : (b.timestamp ? new Date(b.timestamp) : new Date(0));
+                                return ta - tb;
+                            });
+                        });
+
+                        // 雙重打卡（近三日任一天存在重複上/下班）— 每次達到 2 次時加入一筆異常（事件時間取第二次的時間）
+                        for (const { ymd, date } of daysInRange) {
+                            const dayRecs = recsByDay[ymd] || [];
+                            let countStart = 0, countEnd = 0;
+                            for (const r of dayRecs) {
+                                if (r.type === '上班') {
+                                    countStart++;
+                                    if (countStart === 2) {
+                                        const t = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : date);
+                                        anomalies.push({ type: '雙重打卡', user: u, detail: '重複上班打卡', time: t });
+                                    }
+                                }
+                                if (r.type === '下班') {
+                                    countEnd++;
+                                    if (countEnd === 2) {
+                                        const t = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : date);
+                                        anomalies.push({ type: '雙重打卡', user: u, detail: '重複下班打卡', time: t });
+                                    }
+                                }
+                            }
                         }
 
-                        // 待審假單
-                        if ((pendingLeavesByUserId[u.id] || []).length > 0) {
-                            anomalies.push({ type: '待審假單', user: u, detail: '今日有未審核的請假申請' });
-                        }
+                        // 待審假單（近三日內有重疊者，以申請時間或起始時間呈現）
+                        const pendLeaves = pendingLeavesByUserId[u.id] || [];
+                        pendLeaves.forEach(leave => {
+                            const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
+                            const st = toDate(leave.startTime);
+                            const rt = toDate(leave.requestedAt) || st || new Date();
+                            const et = toDate(leave.endTime);
+                            if (et && et < rangeStart) return; // 已在範圍前結束
+                            const detail = (st && et) ? `待審請假：${st.toLocaleString('zh-TW',{hour12:false})} ~ ${et.toLocaleString('zh-TW',{hour12:false})}` : '待審請假';
+                            anomalies.push({ type: '待審假單', user: u, detail, time: rt });
+                        });
 
-                        // 位置異常（任何紀錄標記異常）
+                        // 位置異常（近三日任一紀錄，只要異常就列出）
                         for (const r of recs) {
                             const abnormal = computeRecordAbnormal(r, svcIds);
                             if (abnormal && abnormal.isAbnormal) {
-                                anomalies.push({ type: '打卡定位異常', user: u, detail: abnormal.detail || '' });
-                                break;
+                                const t = r.timestamp?.toDate?.() ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : new Date());
+                                anomalies.push({ type: '打卡定位異常', user: u, detail: abnormal.detail || '', time: t });
                             }
                         }
 
-                        // 未打卡與提早下班（依班表）
+                        // 未打卡與提早下班（依班表，近三日逐日判斷；核准假單日不列入）
                         try {
-                            const obj = await fetchUserDayObjForUser(u.id, start);
-                            const hm = resolveDayHM(obj);
-                            const toDateFromHM = (hmStr) => {
-                                if (!hmStr) return null;
-                                const base = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
-                                const [hh, mm] = hmStr.split(':').map(x=>parseInt(x,10)||0);
-                                base.setHours(hh, mm, 0, 0);
-                                return isNaN(base.getTime()) ? null : base;
-                            };
-                            const expStart = toDateFromHM(hm.start);
-                            const expEnd = toDateFromHM(hm.end);
-                            const nowLocal = new Date();
-                            const getActualStart = () => {
-                                const r = recs.find(x => x.type === '上班') || recs.find(x => x.type === '外出') || recs.find(x => x.type === '抵達');
-                                const dt = r?.timestamp?.toDate?.() ? r.timestamp.toDate() : (r?.timestamp ? new Date(r.timestamp) : null);
-                                return dt || null;
-                            };
-                            const getActualEnd = () => {
-                                for (let i = recs.length - 1; i >= 0; i--) {
-                                    const x = recs[i];
-                                    if (x.type === '下班' || x.type === '自動下班') {
-                                        const dt = x.timestamp?.toDate?.() ? x.timestamp.toDate() : (x.timestamp ? new Date(x.timestamp) : null);
-                                        if (dt) return dt;
+                            for (const { ymd, date } of daysInRange) {
+                                // 核准假單覆蓋當日則略過
+                                if ((approvedLeaveDaysByUserId[u.id] || {})[ymd]) continue;
+                                const obj = await fetchUserDayObjForUser(u.id, date);
+                                const hm = resolveDayHM(obj);
+                                const toDateFromHM = (hmStr) => {
+                                    if (!hmStr) return null;
+                                    const base = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+                                    const [hh, mm] = hmStr.split(':').map(x=>parseInt(x,10)||0);
+                                    base.setHours(hh, mm, 0, 0);
+                                    return isNaN(base.getTime()) ? null : base;
+                                };
+                                const expStart = toDateFromHM(hm.start);
+                                const expEnd = toDateFromHM(hm.end);
+                                const dayRecs = recsByDay[ymd] || [];
+                                const actualStart = (() => {
+                                    const r = dayRecs.find(x => x.type === '上班') || dayRecs.find(x => x.type === '外出') || dayRecs.find(x => x.type === '抵達');
+                                    const dt = r?.timestamp?.toDate?.() ? r.timestamp.toDate() : (r?.timestamp ? new Date(r.timestamp) : null);
+                                    return dt || null;
+                                })();
+                                const actualEnd = (() => {
+                                    for (let i = dayRecs.length - 1; i >= 0; i--) {
+                                        const x = dayRecs[i];
+                                        if (x.type === '下班' || x.type === '自動下班') {
+                                            const dt = x.timestamp?.toDate?.() ? x.timestamp.toDate() : (x.timestamp ? new Date(x.timestamp) : null);
+                                            if (dt) return dt;
+                                        }
                                     }
+                                    return null;
+                                })();
+                                const thirtyMin = 30 * 60 * 1000;
+                                const refTime = (ymd === ymdToday) ? new Date() : new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23,59,59,999);
+                                if (expStart && refTime.getTime() >= expStart.getTime() + thirtyMin && !actualStart) {
+                                    anomalies.push({ type: '未打卡', user: u, detail: '未上班（超過表定30分鐘）', time: expStart });
                                 }
-                                return null;
-                            };
-                            // 假別：若使用者今日為核准請假，則跳過未打卡/提早下班
-                            let isApprovedLeaveToday = false;
-                            try {
-                                const leaveSt = u.leaveStatus || '';
-                                const toDate = v => v?.toDate ? v.toDate() : (v ? new Date(v) : null);
-                                if (leaveSt === 'approved' && u.leaveStartTime && u.leaveEndTime) {
-                                    const ls = toDate(u.leaveStartTime); const le = toDate(u.leaveEndTime);
-                                    if (ls && le && ls <= end && le >= start) { isApprovedLeaveToday = true; }
-                                }
-                            } catch (_) {}
-                            const actualStart = getActualStart();
-                            const actualEnd = getActualEnd();
-                            const thirtyMin = 30 * 60 * 1000;
-                            if (!isApprovedLeaveToday && expStart && nowLocal.getTime() >= expStart.getTime() + thirtyMin && !actualStart) {
-                                anomalies.push({ type: '未打卡', user: u, detail: '未上班（超過表定30分鐘）' });
-                            }
-                            if (!isApprovedLeaveToday && expEnd) {
-                                if (actualEnd && actualEnd.getTime() <= expEnd.getTime() - thirtyMin) {
-                                    anomalies.push({ type: '提早下班', user: u, detail: '下班早於表定30分鐘以上' });
-                                } else if (nowLocal.getTime() >= expEnd.getTime() + thirtyMin && !actualEnd) {
-                                    anomalies.push({ type: '未打卡', user: u, detail: '未下班（超過表定30分鐘）' });
+                                if (expEnd) {
+                                    if (actualEnd && actualEnd.getTime() <= expEnd.getTime() - thirtyMin) {
+                                        anomalies.push({ type: '提早下班', user: u, detail: '下班早於表定30分鐘以上', time: actualEnd });
+                                    } else if (refTime.getTime() >= expEnd.getTime() + thirtyMin && !actualEnd) {
+                                        anomalies.push({ type: '未打卡', user: u, detail: '未下班（超過表定30分鐘）', time: expEnd });
+                                    }
                                 }
                             }
                         } catch (_) {}
@@ -3516,11 +3631,28 @@
                         // 巡邏逾時未開始邏輯已移除
                     }
 
+                    // 過濾：超過三日的異常不顯示（保險，雖然查詢已限制）
+                    const filtered = anomalies.filter(a => {
+                        const t = a.time || new Date();
+                        return t >= rangeStart && t <= rangeEnd;
+                    });
+                    // 依時間新→舊排序
+                    filtered.sort((a,b)=>{
+                        const ta = a.time ? a.time.getTime() : 0;
+                        const tb = b.time ? b.time.getTime() : 0;
+                        return tb - ta;
+                    });
+                    // 將異常持久化並執行過期清理（不影響 UI 顯示流程）
+                    try {
+                        await persistAnomalies(filtered, targetCommunityId);
+                        await cleanupOldAnomalies(targetCommunityId);
+                    } catch (_) {}
                     // 顯示通知
                     let html = '';
-                    anomalies.forEach(a => {
+                    filtered.forEach(a => {
                         const name = a.user.name || a.user.displayName || '未命名';
                         const icon = (a.type === '打卡定位異常') ? 'map-pin' : 'alert-triangle';
+                        const timeStr = a.time ? a.time.toLocaleString('zh-TW', { hour12:false }) : '';
                         html += `
                             <div class="p-3 bg-red-50 border border-red-200 rounded-md">
                                 <div class="flex items-center">
@@ -3529,6 +3661,7 @@
                                 </div>
                                 <div class="mt-1 text-sm text-gray-700">${name}</div>
                                 ${a.detail ? `<div class="mt-1 text-xs text-gray-500">${a.detail}</div>` : ''}
+                                ${timeStr ? `<div class="mt-1 text-xs text-gray-400">${timeStr}</div>` : ''}
                             </div>`;
                     });
                     listEl.innerHTML = html || '<div class="text-gray-500">暫無異常通知</div>';

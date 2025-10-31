@@ -248,6 +248,38 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 異常事件：持久化與自動清理（由管理角色建立與刪除）
+    match /anomalies/{anomalyId} {
+      // 任何登入者可讀（供儀表板與稽核）；僅管理/審核角色可寫入與刪除
+      allow read: if request.auth != null;
+      allow create: if isReviewer() &&
+        request.resource.data.keys().hasOnly([
+          'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source'
+        ]) &&
+        request.resource.data.userId is string &&
+        request.resource.data.type is string &&
+        (request.resource.data.detail == null || request.resource.data.detail is string) &&
+        (request.resource.data.communityId == null || request.resource.data.communityId is string) &&
+        request.resource.data.time is timestamp &&
+        request.resource.data.createdAt is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp) &&
+        (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp) &&
+        (request.resource.data.source == null || request.resource.data.source is string);
+      allow update: if isReviewer() &&
+        request.resource.data.keys().hasOnly([
+          'userId','type','detail','time','communityId','createdAt','updatedAt','expiresAt','source'
+        ]) &&
+        request.resource.data.userId is string &&
+        request.resource.data.type is string &&
+        (request.resource.data.detail == null || request.resource.data.detail is string) &&
+        (request.resource.data.communityId == null || request.resource.data.communityId is string) &&
+        request.resource.data.time is timestamp &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp) &&
+        (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp) &&
+        (request.resource.data.source == null || request.resource.data.source is string);
+      allow delete: if isReviewer();
+    }
+
     // 設定資料：general 與 group
     // general：任何登入者可讀，僅管理員可寫
     match /settings/general {
