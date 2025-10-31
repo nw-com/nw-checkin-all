@@ -845,6 +845,25 @@
                         if (!emergencyPhone) throw new Error('請填寫緊急連絡人手機號碼');
                         if (!license) throw new Error('請選擇專業證照');
 
+                        // 年齡驗證：未滿或等於 18 歲不得申請
+                        try {
+                            const bd = new Date(birthDate.replace(/\//g, '-'));
+                            if (isNaN(bd.getTime())) throw new Error('出生年月日格式錯誤');
+                            const today = new Date();
+                            let age = today.getFullYear() - bd.getFullYear();
+                            const m = today.getMonth() - bd.getMonth();
+                            if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--;
+                            if (typeof age === 'number' && age <= 18) {
+                                errorEl.textContent = '未滿或等於18歲，不得申請（該筆無法申請）';
+                                showLoading(false);
+                                return;
+                            }
+                        } catch (_) {
+                            errorEl.textContent = '出生年月日格式錯誤，請重新輸入';
+                            showLoading(false);
+                            return;
+                        }
+
                         // 檢查是否已有重複申請（手機／電子郵件／身分證號）
                         const { collection, query, where, getDocs, limit, addDoc } = window.__fs || {};
                         let hasApplied = false;
@@ -2278,7 +2297,18 @@
                                         const explicitAge = (typeof u.age === 'number') ? u.age : ((typeof u.age === 'string' && /^\d+$/.test(u.age)) ? parseInt(u.age, 10) : null);
                                         const age = (explicitAge !== null && !isNaN(explicitAge)) ? explicitAge : computeAge(u.birth || u.birthday || u.birthDate);
                                         const ageText = (typeof age === 'number' && age >= 0) ? `(${age})` : '';
-                                        const ageClass = (typeof age === 'number' && age >= 70) ? 'font-bold text-red-600' : '';
+                                        // 年齡顏色規則：
+                                        // - 超過 70 歲且為「保全」顯示紅色
+                                        // - 超過 70 歲且為「總幹事」「秘書」「清潔」「機電」顯示藍色
+                                        let ageClass = '';
+                                        if (typeof age === 'number' && age > 70) {
+                                            const r = resolveRole(u);
+                                            if (r === '保全') {
+                                                ageClass = 'font-bold text-red-600';
+                                            } else if (['總幹事','秘書','清潔','機電'].includes(r)) {
+                                                ageClass = 'font-bold text-blue-600';
+                                            }
+                                        }
                                         const title = rawName.replace(/"/g,'&quot;');
                                         return `
                                         <button class="view-att w-full px-3 py-2 rounded-md border bg-white hover:bg-blue-50 text-gray-800 font-medium text-sm flex flex-col items-center justify-center text-center" style="aspect-ratio: 1 / 1;" data-id="${u.id}" title="${title}">
