@@ -372,7 +372,7 @@
             }
         };
 
-        // 全域審核權限檢查：管理員、人事、高階主管皆可
+        // 全域審核權限檢查：管理員、人事、高階主管、初階主管皆可
         window.checkReviewerStatus = async function() {
             try {
                 const user = window.__auth?.currentUser;
@@ -382,7 +382,7 @@
                 const userDoc = await getDoc(doc(db, 'users', user.uid));
                 if (!userDoc.exists()) return false;
                 const role = userDoc.data().role;
-                return ['admin','hr','manager'].includes(role);
+                return ['admin','hr','manager','junior_manager'].includes(role);
             } catch (error) {
                 console.warn('checkReviewerStatus 失敗:', error);
                 return false;
@@ -2147,7 +2147,7 @@
                         }
                     })();
 
-                    // 依社區顯示帳號申請待核准提示（淺紫色底，僅管理角色可見）
+                    // 依社區顯示帳號申請待核准提示（淺紫色底，僅管理角色可見），並在無待核准時移除既有紫色標示
                     (async () => {
                         try {
                             const role = state.currentUserData?.role || '';
@@ -2175,6 +2175,18 @@
                                 if (isRed) return;
                                 btn.classList.remove('bg-white','hover:bg-red-50');
                                 btn.classList.add('bg-purple-100','border-violet-200','text-violet-800');
+                            });
+
+                            // 移除非待核准社區上既有的紫色標示（避免殘留）
+                            container.querySelectorAll('.enter-community').forEach(btn => {
+                                const cid = btn.getAttribute('data-id');
+                                if (!pendingCommIds.has(cid) && btn.classList.contains('bg-purple-100')) {
+                                    btn.classList.remove('bg-purple-100','border-violet-200','text-violet-800');
+                                    const hasAlert = btn.classList.contains('bg-red-50') || btn.classList.contains('bg-orange-50') || btn.classList.contains('bg-yellow-50') || btn.classList.contains('bg-gray-100');
+                                    if (!hasAlert) {
+                                        btn.classList.add('bg-white','hover:bg-red-50');
+                                    }
+                                }
                             });
                         } catch (e) {
                             console.warn('套用社區待核准標示失敗', e);
