@@ -7571,7 +7571,13 @@
                             </div>
                             <div class="p-3">
                                 <div class="flex items-center justify-between mt-1 flex-nowrap">
-                                    <div id="shift-list-title" class="text-xs font-medium whitespace-nowrap">每月班表列表</div>
+                                    <div class="flex items-center gap-2">
+                                        <div id="shift-list-title" class="text-xs font-medium whitespace-nowrap">每月班表列表</div>
+                                        <label for="post-filter-select" class="text-xs text-gray-600">哨點：</label>
+                                        <select id="post-filter-select" class="px-2 py-1 text-xs rounded border bg-white text-gray-700">
+                                            <option value="__ALL__">全部</option>
+                                        </select>
+                                    </div>
                                     <div class="flex items-center gap-1 whitespace-nowrap">
                                         <button id="export-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯出CSV</button>
                                         <button id="import-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯入CSV</button>
@@ -8396,28 +8402,28 @@
                         }
                     }
 
-                    // 建立哨點篩選下拉（僅在全部分頁，放在列表上方）
-                    const filterButtonsHTML = (() => {
-                        if (!isAgg) return '';
-                        const pid = postFilterId || ALL_POSTS_ID;
-                        const opts = [];
-                        opts.push(`<option value="${ALL_POSTS_ID}">全部</option>`);
-                        if (hasNonGuardRole) opts.push(`<option value="__NONE__">無</option>`);
-                        (pageState.posts || []).forEach(p => {
-                            if (!presentPostIds.has(p.id)) return; // 非本月班表內的哨點不顯示
-                            opts.push(`<option value="${p.id}">${p.name||'未命名哨點'}</option>`);
-                        });
-                        // 設定選中值
-                        const select = `
-                          <select id="post-filter-select" class="px-2 py-1 text-xs rounded border bg-white text-gray-700">
-                            ${opts.join('')}
-                          </select>
-                        `;
-                        return `<div class="my-2 flex items-center gap-2"><span class="text-xs text-gray-600">哨點：</span>${select}</div>`;
-                    })();
+                    // 更新標題列上的哨點篩選下拉（僅在全部分頁）
+                    if (isAgg) {
+                        const selTop = document.getElementById('post-filter-select');
+                        if (selTop) {
+                            const opts = [];
+                            opts.push(`<option value="${ALL_POSTS_ID}">全部</option>`);
+                            if (hasNonGuardRole) opts.push(`<option value="__NONE__">無</option>`);
+                            (pageState.posts || []).forEach(p => {
+                                if (!presentPostIds.has(p.id)) return; // 非本月班表內的哨點不顯示
+                                opts.push(`<option value="${p.id}">${p.name||'未命名哨點'}</option>`);
+                            });
+                            selTop.innerHTML = opts.join('');
+                            selTop.value = (postFilterId || ALL_POSTS_ID);
+                            selTop.onchange = () => {
+                                pageState.postFilterId = selTop.value;
+                                renderCalendar();
+                                renderMonthlyList();
+                            };
+                        }
+                    }
 
                     el.innerHTML = `
-                        ${filterButtonsHTML}
                         <div class="overflow-x-auto">
                           <table class="text-sm" style="min-width: max-content; border-collapse: collapse;">
                             <thead>
@@ -8439,20 +8445,7 @@
                             <tbody>${rows.join('') || `<tr><td colspan="12" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
-                    // 綁定哨點篩選下拉事件（僅在全部分頁）
-                    if (isAgg) {
-                        const sel = el.querySelector('#post-filter-select');
-                        if (sel) {
-                            // 初始化選中值
-                            sel.value = (postFilterId || ALL_POSTS_ID);
-                            sel.addEventListener('change', (evt) => {
-                                const pid = sel.value;
-                                pageState.postFilterId = pid;
-                                renderCalendar();
-                                renderMonthlyList();
-                            });
-                        }
-                    }
+                    // 哨點下拉事件已在標題列綁定
                     const addBtn = document.getElementById('open-add-schedule');
                     if (addBtn) { addBtn.onclick = () => openAddScheduleModal(); }
 
