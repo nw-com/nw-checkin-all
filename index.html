@@ -372,7 +372,7 @@
             }
         };
 
-        // 全域審核權限檢查：管理員、人事、高階主管、初階主管皆可
+        // 全域審核權限檢查：管理員、人事、高階主管、初階主管、社區管理員、總幹事皆可
         window.checkReviewerStatus = async function() {
             try {
                 const user = window.__auth?.currentUser;
@@ -382,7 +382,7 @@
                 const userDoc = await getDoc(doc(db, 'users', user.uid));
                 if (!userDoc.exists()) return false;
                 const role = userDoc.data().role;
-                return ['admin','hr','manager','junior_manager'].includes(role);
+                return ['admin','hr','manager','junior_manager','community_admin','社區管理員','總幹事'].includes(role);
             } catch (error) {
                 console.warn('checkReviewerStatus 失敗:', error);
                 return false;
@@ -406,6 +406,9 @@
             currentCommunity: null,
             appMode: 'default',
             communityIdFromQuery: null,
+            // 自動清理退避（避免權限不足時重複嘗試）
+            lastCleanupRun: 0,
+            cleanupBackoffMs: 60000,
         };
         
         // 初始化本機裝置ID（用於打卡紀錄與首次打卡裝置標記）
@@ -2147,7 +2150,8 @@
                         }
                     })();
 
-                    // 依社區顯示帳號申請待核准提示（淺紫色底，僅管理角色可見），並在無待核准時移除既有紫色標示
+                    // 依社區顯示帳號申請待核准提示（淺紫色底，僅管理角色可見），並在無待核准時移除既有紫色標示；
+                    // 若同名已有「已核准」則忽略其 pending（避免造成殘留紫色）
                     (async () => {
                         try {
                             const role = state.currentUserData?.role || '';
@@ -2160,10 +2164,26 @@
                             const currentList = selectedRegion ? [...list].sort(compareCommunitiesByCode).filter(c => (c?.region || '') === selectedRegion) : [...list].sort(compareCommunitiesByCode);
                             const communitiesByCode = Object.fromEntries(currentList.map(c => [ (c.code||'').trim(), c.id ]));
                             const appsSnap = await getDocs(query(collection(db, 'accountApplications'), where('status','==','pending')));
+                            // 讀取已核准清單，用以過濾同名的 pending（同社區代號）
+                            let approvedKeySet = new Set();
+                            try {
+                                const approvedSnap = await getDocs(query(collection(db, 'accountApplications'), where('status','==','approved')));
+                                approvedSnap.forEach(d => {
+                                    const a = d.data() || {};
+                                    const nm = (a.name || '').trim();
+                                    const code = (a.serviceCommunityCode || '').trim();
+                                    if (nm && communitiesByCode.hasOwnProperty(code)) {
+                                        approvedKeySet.add(`${code}::${nm}`);
+                                    }
+                                });
+                            } catch (_) {}
                             const pendingCommIds = new Set();
                             appsSnap.forEach(d => {
                                 const a = d.data() || {};
                                 const code = (a.serviceCommunityCode || '').trim();
+                                const nm = (a.name || '').trim();
+                                // 若同社區同名已有已核准，忽略此 pending 以避免紫色殘留
+                                if (nm && approvedKeySet.has(`${code}::${nm}`)) return;
                                 const cid = communitiesByCode[code];
                                 if (cid) pendingCommIds.add(cid);
                             });
@@ -12813,6 +12833,10 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 // 自動清理：同名重複申請（pending），保留最新；若已有核准，則自動刪除所有同名未核准申請
                 async function autoCleanupDuplicates() {
                     try {
+                        // 簡單退避：若近期嘗試失敗，暫不重試
+                        if (state.lastCleanupRun && (Date.now() - state.lastCleanupRun) < (state.cleanupBackoffMs || 60000)) {
+                            return;
+                        }
                         const currentCommCode = state.currentCommunity?.code || null;
                         const pending = allApps.filter(a => (a.status || 'pending') === 'pending' && (!currentCommCode || (a.serviceCommunityCode || '') === currentCommCode));
                         const byName = {};
@@ -12839,10 +12863,22 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                 try {
                                     await fsDeleteDoc(fsDoc(db, 'accountApplications', app.id));
                                 } catch (e) {
-                                    console.warn('自動刪除重複申請失敗', e);
+                                    const msg = (e && (e.message || e.toString())) || '';
+                                    if (/insufficient permissions|permission-denied/i.test(msg)) {
+                                        // 權限不足：記錄退避時間，避免重複噪音
+                                        state.lastCleanupRun = Date.now();
+                                        state.cleanupBackoffMs = Math.min((state.cleanupBackoffMs || 60000) * 2, 10 * 60 * 1000);
+                                        console.warn('自動刪除重複申請失敗（權限不足），暫停重試', e);
+                                        return; // 提前結束循環
+                                    } else {
+                                        console.warn('自動刪除重複申請失敗', e);
+                                    }
                                 }
                             }
                         }
+                        // 成功執行：重設退避
+                        state.lastCleanupRun = 0;
+                        state.cleanupBackoffMs = 60000;
                     } catch (e) {
                         console.warn('自動清理重複申請失敗', e);
                     }

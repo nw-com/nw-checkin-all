@@ -11,10 +11,10 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager','community_admin','社區管理員','總幹事']
       );
     }
-    // 審核角色：管理員、人事、高階主管、初階主管
+    // 審核角色：管理員、人事、高階主管、初階主管、社區管理員、總幹事
     function isReviewer() {
       return (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager']
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin','hr','manager','junior_manager','community_admin','社區管理員','總幹事']
       );
     }
     // 全域預設：允許所有已登入用戶讀取，但不允許任意寫入
