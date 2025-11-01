@@ -8292,12 +8292,16 @@
                 };
 
                 const getUserNameById = (uid) => {
-                    const u = (pageState.communityUsers || []).find(x => x.id === uid);
-                    return u ? (u.name || u.displayName || u.id) : '未指派';
+                    const key = String(uid || '').trim();
+                    const users = (pageState.communityUsers || []);
+                    const u = users.find(x => x.id === key) || users.find(x => String(x.name || x.displayName || '').trim() === key);
+                    return u ? (u.name || u.displayName || u.id) : (key || '未指派');
                 };
 
                 const getUserTitleById = (uid) => {
-                    const u = (pageState.communityUsers || []).find(x => x.id === uid);
+                    const key = String(uid || '').trim();
+                    const users = (pageState.communityUsers || []);
+                    const u = users.find(x => x.id === key) || users.find(x => String(x.name || x.displayName || '').trim() === key);
                     return u ? ((u.jobTitle || u.applicationTitle || u.role || '') + '') : '';
                 };
 
@@ -8617,7 +8621,9 @@
                                             }
                                         }
                                     }
-                                    const assUser = (pageState.communityUsers || []).find(u => (u.name || u.displayName || '') === assigneeName);
+                                    const nameOrId = String(assigneeName || '').trim();
+                                    const usersList = (pageState.communityUsers || []);
+                                    const assUser = usersList.find(u => u.id === nameOrId) || usersList.find(u => String(u.name || u.displayName || '').trim() === nameOrId);
                                     const assId = assUser ? assUser.id : '';
                                     if (!dateIso || !startStr || !endStr) continue;
                                     const effPostId = postId || pageState.selectedPostId;
