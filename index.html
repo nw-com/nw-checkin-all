@@ -8396,20 +8396,24 @@
                         }
                     }
 
-                    // 建立哨點篩選按鈕（僅在全部分頁，且放在列表上方）
+                    // 建立哨點篩選下拉（僅在全部分頁，放在列表上方）
                     const filterButtonsHTML = (() => {
                         if (!isAgg) return '';
-                        const activeCls = 'bg-red-600 text-white';
-                        const baseCls = 'px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50';
-                        const btn = (label, val, active) => `<button data-post-filter="${val}" class="${baseCls} ${active?activeCls:''}">${label}</button>`;
                         const pid = postFilterId || ALL_POSTS_ID;
-                        const parts = [btn('全部', ALL_POSTS_ID, pid===ALL_POSTS_ID)];
-                        if (hasNonGuardRole) parts.push(btn('無', '__NONE__', pid==='__NONE__'));
+                        const opts = [];
+                        opts.push(`<option value="${ALL_POSTS_ID}">全部</option>`);
+                        if (hasNonGuardRole) opts.push(`<option value="__NONE__">無</option>`);
                         (pageState.posts || []).forEach(p => {
                             if (!presentPostIds.has(p.id)) return; // 非本月班表內的哨點不顯示
-                            parts.push(btn(p.name||'未命名哨點', p.id, pid===p.id));
+                            opts.push(`<option value="${p.id}">${p.name||'未命名哨點'}</option>`);
                         });
-                        return `<div class="my-2 flex items-center gap-2"><span class="text-xs text-gray-600">哨點：</span>${parts.join('')}</div>`;
+                        // 設定選中值
+                        const select = `
+                          <select id="post-filter-select" class="px-2 py-1 text-xs rounded border bg-white text-gray-700">
+                            ${opts.join('')}
+                          </select>
+                        `;
+                        return `<div class="my-2 flex items-center gap-2"><span class="text-xs text-gray-600">哨點：</span>${select}</div>`;
                     })();
 
                     el.innerHTML = `
@@ -8435,16 +8439,20 @@
                             <tbody>${rows.join('') || `<tr><td colspan="12" class="px-2 py-3 text-center text-gray-500 border border-gray-300">本月尚無班表</td></tr>`}</tbody>
                           </table>
                         </div>`;
-                    // 綁定哨點篩選按鈕事件（僅在全部分頁）
-                    el.querySelectorAll('[data-post-filter]').forEach(a => {
-                        a.addEventListener('click', (evt) => {
-                            evt.preventDefault();
-                            const pid = a.getAttribute('data-post-filter');
-                            pageState.postFilterId = pid;
-                            renderCalendar();
-                            renderMonthlyList();
-                        });
-                    });
+                    // 綁定哨點篩選下拉事件（僅在全部分頁）
+                    if (isAgg) {
+                        const sel = el.querySelector('#post-filter-select');
+                        if (sel) {
+                            // 初始化選中值
+                            sel.value = (postFilterId || ALL_POSTS_ID);
+                            sel.addEventListener('change', (evt) => {
+                                const pid = sel.value;
+                                pageState.postFilterId = pid;
+                                renderCalendar();
+                                renderMonthlyList();
+                            });
+                        }
+                    }
                     const addBtn = document.getElementById('open-add-schedule');
                     if (addBtn) { addBtn.onclick = () => openAddScheduleModal(); }
 
@@ -11196,6 +11204,12 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             <option value="all">全部人員</option>
           </select>
         </div>
+        <div class="flex items-center space-x-2">
+          <label for="schedule-post" class="text-sm font-medium">哨點:</label>
+          <select id="schedule-post" class="border border-gray-300 rounded-md px-2 py-1">
+            <option value="__ALL__">全部</option>
+          </select>
+        </div>
       </div>
       <div class="bg-white rounded-lg shadow overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200 text-sm">
@@ -11222,6 +11236,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
   const dateInput = document.getElementById('schedule-date');
   const userSelect = document.getElementById('schedule-user');
   const rowsEl = document.getElementById('schedule-rows');
+  const postSelect = document.getElementById('schedule-post');
 
   // 本地使用者清單，避免依賴 pageState
   let scheduleUsers = [];
@@ -11303,6 +11318,26 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
     if (params && params.selectedUserId) userSelect.value = params.selectedUserId;
   };
 
+  // 取得哨點名稱（優先使用 pageState 的 posts，後援查詢 posts 集合）
+  let postNamesById = {};
+  const ensurePostNames = async () => {
+    try {
+      if (Object.keys(postNamesById).length) return;
+      const cid = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
+      // 先用已載入的 posts
+      if (Array.isArray(window.pageState?.posts) && window.pageState.posts.length) {
+        window.pageState.posts.forEach(p => { postNamesById[p.id] = p.name || '未命名哨點'; });
+        return;
+      }
+      const { collection, getDocs } = window.__fs || {};
+      const db = window.__db;
+      if (db && collection && getDocs && cid) {
+        const snap = await getDocs(collection(db, 'communities', cid, 'posts'));
+        snap.forEach(d => { const data = d.data() || {}; postNamesById[d.id] = data.name || '未命名哨點'; });
+      }
+    } catch(_) {}
+  };
+
   const computeStatusText = (now, start, end, startRec, endRec, cashShift) => {
     try {
       if (cashShift === true) return '轉現金班';
@@ -11352,7 +11387,36 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
 
     // 篩選人員（若選擇特定人員，只顯示包含該人員之排班）
     const selectedUserId = userSelect.value;
-    const filtered = selectedUserId === 'all' ? shifts : shifts.filter(s => s.assignees.includes(selectedUserId));
+    // 每日哨點選單：以當日實際出現的哨點建立選項
+    await ensurePostNames();
+    const presentPostIds = new Set();
+    let hasNonGuardRole = false;
+    shifts.forEach(s => {
+      const r = s.role || '保全';
+      if (r === '保全' && s.postId) presentPostIds.add(s.postId);
+      else if (r !== '保全') hasNonGuardRole = true;
+    });
+    if (postSelect) {
+      const opts = [`<option value="${typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__'}">全部</option>`];
+      if (hasNonGuardRole) opts.push('<option value="__NONE__">無</option>');
+      presentPostIds.forEach(pid => { opts.push(`<option value="${pid}">${postNamesById[pid]||'未命名哨點'}</option>`); });
+      postSelect.innerHTML = opts.join('');
+      const desired = (window.pageState?.postFilterId) || (typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__');
+      postSelect.value = desired;
+    }
+
+    // 先依人員篩選
+    let filtered = selectedUserId === 'all' ? shifts.slice() : shifts.filter(s => s.assignees.includes(selectedUserId));
+
+    // 再依哨點篩選（全部、無、指定哨點）
+    const pidSel = postSelect ? postSelect.value : (typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__');
+    if (pidSel && pidSel !== (typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__')) {
+      if (pidSel === '__NONE__') {
+        filtered = filtered.filter(s => (s.role || '保全') !== '保全');
+      } else {
+        filtered = filtered.filter(s => ((s.role || '保全') === '保全') && s.postId === pidSel);
+      }
+    }
 
     // 讀取當日打卡記錄
     const startOfDay = new Date(`${iso}T00:00:00`);
@@ -11549,6 +11613,12 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
   ensureUsersOptions().then(renderList);
   userSelect.addEventListener('change', renderList);
   dateInput.addEventListener('change', renderList);
+  postSelect.addEventListener('change', () => {
+    if (window.pageState) window.pageState.postFilterId = postSelect.value;
+    renderList();
+    try { if (typeof renderCalendar === 'function') renderCalendar(); } catch(_) {}
+    try { if (typeof renderMonthlyList === 'function') renderMonthlyList(); } catch(_) {}
+  });
 }
 
 function renderTrackingLeave(container) {
