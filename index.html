@@ -8803,6 +8803,7 @@
                                 <button id="multi-prev-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50" title="上一月">〈</button>
                                 <span id="multi-month-label" class="text-sm font-medium"></span>
                                 <button id="multi-next-month" class="px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50" title="下一月">〉</button>
+                                <button id="multi-select-all" class="ml-2 px-2 py-1 rounded border bg-white text-gray-700 hover:bg-gray-50" title="全選當月所有日期">全選</button>
                               </div>
                               <div id="multi-date-grid" class="grid grid-cols-7 gap-1"></div>
                               <div class="text-xs text-gray-600 mt-1">已選 <span id="multi-selected-count">0</span> 天</div>
@@ -8924,8 +8925,21 @@
                     };
                     const prevM = document.getElementById('multi-prev-month');
                     const nextM = document.getElementById('multi-next-month');
+                    const selectAllBtn = document.getElementById('multi-select-all');
                     if (prevM) prevM.addEventListener('click', ()=>{ viewMonthDate.setMonth(viewMonthDate.getMonth()-1); renderMultiGrid(); });
                     if (nextM) nextM.addEventListener('click', ()=>{ viewMonthDate.setMonth(viewMonthDate.getMonth()+1); renderMultiGrid(); });
+                    if (selectAllBtn) selectAllBtn.addEventListener('click', ()=>{
+                        const y = viewMonthDate.getFullYear();
+                        const m = viewMonthDate.getMonth();
+                        const last = new Date(y, m+1, 0);
+                        const days = last.getDate();
+                        const all = [];
+                        for (let d=1; d<=days; d++) {
+                            all.push(fmtYMD(new Date(y, m, d)));
+                        }
+                        selectedDates = new Set(all);
+                        renderMultiGrid();
+                    });
 
                     // 切換多日模式顯示/隱藏對應欄位
                     if (multiToggle) {
