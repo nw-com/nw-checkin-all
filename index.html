@@ -501,6 +501,11 @@
             const fieldRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
             return fieldRoles.has((role || '').trim());
         }
+        // 取得使用者的有效角色：優先使用職稱，其次 applicationTitle，最後 role
+        function getUserFieldRole(u) {
+            const jt = ((u?.jobTitle || u?.applicationTitle || '').trim());
+            return jt || ((u?.role || '').trim());
+        }
         
         const loadingScreen = document.getElementById('loading-screen');
         
@@ -4305,7 +4310,7 @@
                     const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
                     const filteredUsersList = visibleUsersList.filter(u => {
                         // 角色過濾（排除管理員、人事、主管）
-                        if (!isFieldLikeRole(u.role)) return false;
+                        if (!isFieldLikeRole(getUserFieldRole(u))) return false;
                         // 社區服務過濾（支援以 id 或 code 表示的欄位）
                         const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
                         const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
@@ -4529,7 +4534,7 @@
                     const currentCommId = state.currentCommunity?.id || null;
                     const currentCommCode = state.currentCommunity?.code || null;
                     const filteredByRoleAndCommunity = visibleUsersList.filter(u => {
-                        if (!isFieldLikeRole(u.role)) return false;
+                        if (!isFieldLikeRole(getUserFieldRole(u))) return false;
                         const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
                         const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
                         const codeSingle = u.serviceCommunityCode || null;
