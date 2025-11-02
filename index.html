@@ -8330,15 +8330,10 @@
                     const roleFilter = pageState.roleFilter || null;
                     const titleEl = document.getElementById('shift-list-title');
                     // 顯示目前哨點篩選狀態於標題（僅在全部分頁）
-                    const isAgg = (pageState.selectedPostId === ALL_POSTS_ID);
-                    const postFilterId = pageState.postFilterId || (isAgg ? ALL_POSTS_ID : null);
-                    let postFilterName = '';
-                    if (isAgg) {
-                        if (!postFilterId || postFilterId === ALL_POSTS_ID) postFilterName = '全部';
-                        else if (postFilterId === '__NONE__') postFilterName = '無';
-                        else postFilterName = (pageState.posts.find(p=>p.id===postFilterId)?.name) || '未命名哨點';
-                    }
-                    if (titleEl) titleEl.textContent = `${filterIso ? '當日' : '每月'}班表列表${roleFilter ? `（角色：${roleFilter}）` : ''}${isAgg ? `（哨點：${postFilterName}）` : ''}`;
+                    // 改為顯示全社區排班，不再顯示哨點篩選狀態
+                    const isAgg = true;
+                    const postFilterId = null;
+                    if (titleEl) titleEl.textContent = `${filterIso ? '當日' : '每月'}班表列表${roleFilter ? `（角色：${roleFilter}）` : ''}`;
                     const entries = Object.entries(pageState.monthDocsMap).sort(([a],[b]) => a.localeCompare(b));
                     const rows = [];
                     const currentPost = pageState.posts.find(p=>p.id===pageState.selectedPostId);
@@ -8346,17 +8341,8 @@
                     for (const [iso, doc] of entries) {
                         if (filterIso && iso !== filterIso) continue;
                         const allShifts = Array.isArray(doc.shifts) ? doc.shifts : [];
-                        // 依哨點篩選（僅在全部分頁且選了特定哨點時）
+                        // 不再依哨點篩選，顯示全部排班
                         let shifts = allShifts;
-                        if (isAgg && postFilterId) {
-                            if (postFilterId === ALL_POSTS_ID) {
-                                // 全部：不過濾
-                            } else if (postFilterId === '__NONE__') {
-                                shifts = shifts.filter(s => ((s.role || '保全') !== '保全'));
-                            } else {
-                                shifts = shifts.filter(s => ((s.role || '保全') === '保全') && s.__postId === postFilterId);
-                            }
-                        }
                         shifts.forEach((s, idx) => {
                             if (roleFilter && ((s.role || '保全') !== roleFilter)) return;
                             const start = s.start || '07:00';
@@ -8369,13 +8355,12 @@
                             const role = s.role || '保全';
                             const endIso = s.endDateIso || iso;
                             const endDow = dayOfWeekShort(endIso);
-                            const displayPost = role === '保全' ? (s.__postName || postName) : '無';
+                            // 移除哨點欄位
                             rows.push(`
                                 <tr>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${role}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${assName}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${assTitle}</td>
-                                  <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${displayPost}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${iso}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${dow}</td>
                                   <td class="px-2 py-1 whitespace-nowrap border border-gray-300">${start}</td>
@@ -8406,26 +8391,7 @@
                         }
                     }
 
-                    // 更新標題列上的哨點篩選下拉（僅在全部分頁）
-                    if (isAgg) {
-                        const selTop = document.getElementById('post-filter-select');
-                        if (selTop) {
-                            const opts = [];
-                            opts.push(`<option value="${ALL_POSTS_ID}">全部</option>`);
-                            if (hasNonGuardRole) opts.push(`<option value="__NONE__">無</option>`);
-                            (pageState.posts || []).forEach(p => {
-                                if (!presentPostIds.has(p.id)) return; // 非本月班表內的哨點不顯示
-                                opts.push(`<option value="${p.id}">${p.name||'未命名哨點'}</option>`);
-                            });
-                            selTop.innerHTML = opts.join('');
-                            selTop.value = (postFilterId || ALL_POSTS_ID);
-                            selTop.onchange = () => {
-                                pageState.postFilterId = selTop.value;
-                                renderCalendar();
-                                renderMonthlyList();
-                            };
-                        }
-                    }
+                    // 已移除哨點篩選下拉，不再顯示或維護 postFilterId
 
                     el.innerHTML = `
                         <div class="overflow-x-auto">
@@ -8435,7 +8401,6 @@
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">角色</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">指派人員</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">職稱</th>
-                                <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">哨點</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班日期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">星期</th>
                                 <th class="px-2 py-1 text-left whitespace-nowrap border border-gray-300">上班時間</th>
@@ -11203,12 +11168,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             <option value="all">全部人員</option>
           </select>
         </div>
-        <div class="flex items-center space-x-2">
-          <label for="schedule-post" class="text-sm font-medium">哨點:</label>
-          <select id="schedule-post" class="border border-gray-300 rounded-md px-2 py-1">
-            <option value="__ALL__">全部</option>
-          </select>
-        </div>
+        <!-- 哨點篩選已移除：列表改為顯示全社區排班 -->
       </div>
       <div class="bg-white rounded-lg shadow overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200 text-sm">
@@ -11235,7 +11195,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
   const dateInput = document.getElementById('schedule-date');
   const userSelect = document.getElementById('schedule-user');
   const rowsEl = document.getElementById('schedule-rows');
-  const postSelect = document.getElementById('schedule-post');
+  // 哨點選擇已移除
 
   // 本地使用者清單，避免依賴 pageState
   let scheduleUsers = [];
@@ -11386,36 +11346,12 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
 
     // 篩選人員（若選擇特定人員，只顯示包含該人員之排班）
     const selectedUserId = userSelect.value;
-    // 每日哨點選單：以當日實際出現的哨點建立選項
-    await ensurePostNames();
-    const presentPostIds = new Set();
-    let hasNonGuardRole = false;
-    shifts.forEach(s => {
-      const r = s.role || '保全';
-      if (r === '保全' && s.postId) presentPostIds.add(s.postId);
-      else if (r !== '保全') hasNonGuardRole = true;
-    });
-    if (postSelect) {
-      const opts = [`<option value="${typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__'}">全部</option>`];
-      if (hasNonGuardRole) opts.push('<option value="__NONE__">無</option>');
-      presentPostIds.forEach(pid => { opts.push(`<option value="${pid}">${postNamesById[pid]||'未命名哨點'}</option>`); });
-      postSelect.innerHTML = opts.join('');
-      const desired = (window.pageState?.postFilterId) || (typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__');
-      postSelect.value = desired;
-    }
+    // 哨點選單已移除，改為顯示所有排班（不再依哨點篩選）
 
     // 先依人員篩選
     let filtered = selectedUserId === 'all' ? shifts.slice() : shifts.filter(s => s.assignees.includes(selectedUserId));
 
-    // 再依哨點篩選（全部、無、指定哨點）
-    const pidSel = postSelect ? postSelect.value : (typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__');
-    if (pidSel && pidSel !== (typeof ALL_POSTS_ID !== 'undefined' ? ALL_POSTS_ID : '__ALL__')) {
-      if (pidSel === '__NONE__') {
-        filtered = filtered.filter(s => (s.role || '保全') !== '保全');
-      } else {
-        filtered = filtered.filter(s => ((s.role || '保全') === '保全') && s.postId === pidSel);
-      }
-    }
+    // 不再依哨點篩選，保留依人員的篩選（顯示全社區排班）
 
     // 讀取當日打卡記錄
     const startOfDay = new Date(`${iso}T00:00:00`);
@@ -11612,12 +11548,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
   ensureUsersOptions().then(renderList);
   userSelect.addEventListener('change', renderList);
   dateInput.addEventListener('change', renderList);
-  postSelect.addEventListener('change', () => {
-    if (window.pageState) window.pageState.postFilterId = postSelect.value;
-    renderList();
-    try { if (typeof renderCalendar === 'function') renderCalendar(); } catch(_) {}
-    try { if (typeof renderMonthlyList === 'function') renderMonthlyList(); } catch(_) {}
-  });
+  // 哨點下拉已移除
 }
 
 function renderTrackingLeave(container) {
