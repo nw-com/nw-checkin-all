@@ -7570,22 +7570,18 @@
                                 </div>
                             </div>
                             <div class="p-3">
-                                <div class="flex items-center justify-between mt-1 flex-nowrap">
-                                    <div class="flex items-center gap-2">
-                                        <div id="shift-list-title" class="text-xs font-medium whitespace-nowrap">每月班表列表</div>
-                                        <label for="post-filter-select" class="text-xs text-gray-600">哨點：</label>
-                                        <select id="post-filter-select" class="px-2 py-1 text-xs rounded border bg-white text-gray-700">
-                                            <option value="__ALL__">全部</option>
-                                        </select>
+                                    <div class="flex items-center justify-between mt-1 flex-nowrap">
+                                        <div class="flex items-center gap-2">
+                                            <div id="shift-list-title" class="text-xs font-medium whitespace-nowrap">每月班表列表</div>
+                                        </div>
+                                        <div class="flex items-center gap-1 whitespace-nowrap">
+                                            <button id="export-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯出CSV</button>
+                                            <button id="import-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯入CSV</button>
+                                            <button id="open-add-schedule" class="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
+                                            <button id="delete-schedule" class="px-2 py-1 text-xs rounded bg-rose-600 text-white hover:bg-rose-700">刪除</button>
+                                            <input id="import-csv-input" type="file" accept=".csv,text/csv" class="hidden">
+                                        </div>
                                     </div>
-                                    <div class="flex items-center gap-1 whitespace-nowrap">
-                                        <button id="export-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯出CSV</button>
-                                        <button id="import-csv" class="px-2 py-1 text-xs rounded border bg-white text-gray-700 hover:bg-gray-50">匯入CSV</button>
-                                        <button id="open-add-schedule" class="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700">新增排班</button>
-                                        <button id="delete-schedule" class="px-2 py-1 text-xs rounded bg-rose-600 text-white hover:bg-rose-700">刪除</button>
-                                        <input id="import-csv-input" type="file" accept=".csv,text/csv" class="hidden">
-                                    </div>
-                                </div>
                                 <div id="shift-monthly-list" class="mt-2"></div>
                             </div>
                         </div>`;
