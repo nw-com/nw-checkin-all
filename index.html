@@ -506,6 +506,20 @@
             const jt = ((u?.jobTitle || u?.applicationTitle || '').trim());
             return jt || ((u?.role || '').trim());
         }
+        // 判斷打卡紀錄是否屬於目前社區（優先 communityId / communityCode，回退以名稱比對）
+        function recordMatchesCommunity(rec, comm) {
+            if (!rec || !comm) return true;
+            const cid = (comm.id || '').trim();
+            const ccode = (comm.code || comm.communityCode || '').trim();
+            const cname = (comm.name || '').trim();
+            const rcid = (rec.communityId || '').trim();
+            const rcode = (rec.communityCode || rec.dutyCommunityCode || '').trim();
+            const lname = (rec.locationName || '').trim();
+            if (cid && rcid && rcid === cid) return true;
+            if (ccode && rcode && rcode === ccode) return true;
+            if (cname && lname && lname.includes(cname)) return true;
+            return false;
+        }
         
         const loadingScreen = document.getElementById('loading-screen');
         
@@ -4419,13 +4433,20 @@
                             const endTS = Timestamp?.fromDate ? Timestamp.fromDate(todayEnd) : todayEnd;
                             const uidSet = new Set(filteredUsersList.map(u => u.id));
 
-                            // 今日打卡紀錄
-                            const recSnap = await getDocs(query(collection(db, 'clockInRecords'), where('timestamp','>=', startTS), where('timestamp','<=', endTS)));
+                            // 今日打卡紀錄（社區過濾，回退名稱比對）
+                            let recSnap = null;
+                            try {
+                                const base = [where('timestamp','>=', startTS), where('timestamp','<=', endTS)];
+                                if (state.currentCommunity?.id) base.push(where('communityId','==', state.currentCommunity.id));
+                                recSnap = await getDocs(query(collection(db, 'clockInRecords'), ...base));
+                            } catch(_) {
+                                recSnap = await getDocs(query(collection(db, 'clockInRecords'), where('timestamp','>=', startTS), where('timestamp','<=', endTS)));
+                            }
                             const recordsByUser = {};
                             filteredUsersList.forEach(u => { recordsByUser[u.id] = []; });
                             recSnap.forEach(d => {
                                 const data = d.data() || {};
-                                if (uidSet.has(data.userId)) {
+                                if (uidSet.has(data.userId) && recordMatchesCommunity(data, state.currentCommunity)) {
                                     (recordsByUser[data.userId] ||= []).push(data);
                                 }
                             });
@@ -4577,11 +4598,21 @@
                         try {
                             await Promise.all(filteredByRoleAndCommunity.map(async (u) => {
                                 try {
-                                    const qLatest = query(collection(db, 'clockInRecords'), where('userId', '==', u.id), orderBy('timestamp', 'desc'), limit(1));
-                                    const latestSnap = await getDocs(qLatest);
+                                    const currentComm = state.currentCommunity || null;
+                                    let latestSnap = null;
+                                    try {
+                                        const base = [where('userId','==', u.id)];
+                                        if (currentComm?.id) base.push(where('communityId','==', currentComm.id));
+                                        const qLatest = query(collection(db, 'clockInRecords'), ...base, orderBy('timestamp','desc'), limit(3));
+                                        latestSnap = await getDocs(qLatest);
+                                    } catch (_) {
+                                        const qFallback = query(collection(db, 'clockInRecords'), where('userId','==', u.id), orderBy('timestamp','desc'), limit(3));
+                                        latestSnap = await getDocs(qFallback);
+                                    }
                                     if (!latestSnap.empty) {
-                                        // 儲存整筆最新紀錄資料以便取得 type/locationName/dutyType/timestamp
-                                        latestMap[u.id] = latestSnap.docs[0].data();
+                                        const docs = latestSnap.docs.map(d => d.data());
+                                        const picked = docs.find(r => recordMatchesCommunity(r, currentComm)) || docs[0];
+                                        latestMap[u.id] = picked;
                                     } else {
                                         latestMap[u.id] = null;
                                     }
@@ -4712,11 +4743,21 @@
                         try {
                             Promise.all(filteredByStatus.map(async (u) => {
                                 try {
-                                    const qLatest = query(collection(db, 'clockInRecords'), where('userId', '==', u.id), orderBy('timestamp', 'desc'), limit(1));
-                                    const latestSnap = await getDocs(qLatest);
+                                    const currentComm = state.currentCommunity || null;
+                                    let latestSnap = null;
+                                    try {
+                                        const base = [where('userId','==', u.id)];
+                                        if (currentComm?.id) base.push(where('communityId','==', currentComm.id));
+                                        const qLatest = query(collection(db, 'clockInRecords'), ...base, orderBy('timestamp', 'desc'), limit(3));
+                                        latestSnap = await getDocs(qLatest);
+                                    } catch (_) {
+                                        const qFallback = query(collection(db, 'clockInRecords'), where('userId','==', u.id), orderBy('timestamp', 'desc'), limit(3));
+                                        latestSnap = await getDocs(qFallback);
+                                    }
                                     let dt = null;
                                     if (!latestSnap.empty) {
-                                        const rec = latestSnap.docs[0].data();
+                                        const docs = latestSnap.docs.map(d => d.data());
+                                        const rec = docs.find(r => recordMatchesCommunity(r, currentComm)) || docs[0];
                                         const ts = rec.timestamp;
                                         dt = ts?.toDate?.() ? ts.toDate() : (ts ? new Date(ts) : null);
                                     }
@@ -5597,7 +5638,11 @@
                                 photoUrls: [],
                                 descriptions: [],
                                 isAutomatic: true,
-                                shiftId: shiftId || ''
+                                shiftId: shiftId || '',
+                                // 加入社區識別與名稱，供社區過濾使用
+                                communityId: state.currentCommunity?.id || null,
+                                communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null,
+                                locationName: state.currentCommunity?.name || null
                             });
                             await updateDoc(doc(db, 'users', user.uid), {
                                 clockInStatus: '下班',
@@ -7269,7 +7314,10 @@
                                     deviceId: 'retro',
                                     locationName: r.locationName || null,
                                     dutyType: null,
-                                    isAutomatic: false
+                                    isAutomatic: false,
+                                    // 以目前社區識別為主（若申請本身無社區欄位）
+                                    communityId: state.currentCommunity?.id || null,
+                                    communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null
                                 });
                                 // 同步更新 users 狀態，讓儀錶板與定位打卡按鈕正確顯示
                                 try {
@@ -7418,7 +7466,9 @@
                                 deviceId: 'manual-admin',
                                 locationName: ['外出','抵達','離開'].includes(type) ? `${locationName}${reason ? '｜'+reason : ''}` : (locationName || null),
                                 dutyType: null,
-                                isAutomatic: false
+                                isAutomatic: false,
+                                communityId: state.currentCommunity?.id || null,
+                                communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null
                             });
                             // 同步使用者文件的狀態，讓儀表板即時顯示
                             try {
@@ -10492,15 +10542,20 @@ function renderGroupPatrolRecords(container) {
                     const latestMap = {};
                     try {
                         await Promise.all(visibleUsersList.map(async (u) => {
-                            const recQ = query(
-                                collection(db, 'clockInRecords'),
-                                where('userId', '==', u.id),
-                                orderBy('timestamp', 'desc'),
-                                limit(1)
-                            );
-                            const snap = await getDocs(recQ);
+                            const currentComm = state.currentCommunity || null;
+                            let snap = null;
+                            try {
+                                const base = [where('userId','==', u.id)];
+                                if (currentComm?.id) base.push(where('communityId','==', currentComm.id));
+                                const recQ = query(collection(db, 'clockInRecords'), ...base, orderBy('timestamp', 'desc'), limit(3));
+                                snap = await getDocs(recQ);
+                            } catch (_) {
+                                const recQ = query(collection(db, 'clockInRecords'), where('userId','==', u.id), orderBy('timestamp', 'desc'), limit(3));
+                                snap = await getDocs(recQ);
+                            }
                             if (!snap.empty) {
-                                latestMap[u.id] = snap.docs[0].data();
+                                const docs = snap.docs.map(d => d.data());
+                                latestMap[u.id] = docs.find(r => recordMatchesCommunity(r, currentComm)) || docs[0];
                             }
                         }));
                     } catch (e) {}
@@ -10618,10 +10673,23 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 const { Timestamp } = window.__fs || {};
                 const startTS = Timestamp?.fromDate ? Timestamp.fromDate(startOfDay) : startOfDay;
                 const endTS = Timestamp?.fromDate ? Timestamp.fromDate(endOfDay) : endOfDay;
-                if (selectedUserId === 'all') {
-                    q = query(recordsRef, where('timestamp', '>=', startTS), where('timestamp', '<=', endTS));
-                } else {
-                    q = query(recordsRef, where('userId', '==', selectedUserId), where('timestamp', '>=', startTS), where('timestamp', '<=', endTS));
+                const currentComm = state.currentCommunity || null;
+                try {
+                    if (selectedUserId === 'all') {
+                        const base = [where('timestamp', '>=', startTS), where('timestamp', '<=', endTS)];
+                        if (currentComm?.id) base.push(where('communityId','==', currentComm.id));
+                        q = query(recordsRef, ...base);
+                    } else {
+                        const base = [where('userId', '==', selectedUserId), where('timestamp', '>=', startTS), where('timestamp', '<=', endTS)];
+                        if (currentComm?.id) base.push(where('communityId','==', currentComm.id));
+                        q = query(recordsRef, ...base);
+                    }
+                } catch (_) {
+                    if (selectedUserId === 'all') {
+                        q = query(recordsRef, where('timestamp', '>=', startTS), where('timestamp', '<=', endTS));
+                    } else {
+                        q = query(recordsRef, where('userId', '==', selectedUserId), where('timestamp', '>=', startTS), where('timestamp', '<=', endTS));
+                    }
                 }
 
                 container.innerHTML = `<div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>`;
@@ -10634,6 +10702,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 }
                 const records = [];
                 querySnapshot.forEach(doc => records.push({ id: doc.id, ...doc.data() }));
+                const filteredRecords = records.filter(r => recordMatchesCommunity(r, state.currentCommunity));
                 const usersRef = collection(db, 'users');
                 const usersSnapshot = await getDocs(usersRef);
                 const usersMap = {};
@@ -10645,7 +10714,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 });
 
                 container.innerHTML = '';
-                records
+                filteredRecords
                     .filter(r => !allowedUserIds || allowedUserIds.includes(r.userId))
                     .sort((a,b) => {
                         const timeA = a.timestamp?.toDate?.() || new Date(0);
@@ -11470,31 +11539,33 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
       const user = window.__auth?.currentUser;
       const dt = parseTimeInput(iso, hm);
       if (!dt) { showToast('時間無效', true); return; }
-      try {
-        if (existingRecordId) {
-          await updateDoc(doc(db, 'clockInRecords', existingRecordId), {
-            timestamp: Timestamp.fromDate(dt),
-            updatedBy: user?.uid || '',
-            updatedAt: Timestamp.fromDate(new Date())
-          });
-          showToast('已更新時間');
-        } else {
-          await addDoc(collection(db, 'clockInRecords'), {
-            userId: assigneeId,
-            type: type,
-            timestamp: Timestamp.fromDate(dt),
-            location: state.currentLocation ? { latitude: state.currentLocation.lat, longitude: state.currentLocation.lng } : null,
-            photoUrls: [],
-            descriptions: [],
-            deviceId: state.deviceId || 'manual',
-            locationName: state.currentCommunity?.name || '',
-            dutyType: '',
-            isAutomatic: false,
-            createdAt: serverTimestamp()
-          });
-          showToast('已新增打卡');
-        }
-      } catch (e) {
+          try {
+            if (existingRecordId) {
+              await updateDoc(doc(db, 'clockInRecords', existingRecordId), {
+                timestamp: Timestamp.fromDate(dt),
+                updatedBy: user?.uid || '',
+                updatedAt: Timestamp.fromDate(new Date())
+              });
+              showToast('已更新時間');
+            } else {
+              await addDoc(collection(db, 'clockInRecords'), {
+                userId: assigneeId,
+                type: type,
+                timestamp: Timestamp.fromDate(dt),
+                location: state.currentLocation ? { latitude: state.currentLocation.lat, longitude: state.currentLocation.lng } : null,
+                photoUrls: [],
+                descriptions: [],
+                deviceId: state.deviceId || 'manual',
+                locationName: state.currentCommunity?.name || '',
+                dutyType: '',
+                isAutomatic: false,
+                communityId: state.currentCommunity?.id || null,
+                communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null,
+                createdAt: serverTimestamp()
+              });
+              showToast('已新增打卡');
+            }
+          } catch (e) {
         console.error('updateClockTime error', e);
         showToast('更新失敗：請檢查權限或格式', true);
       }
@@ -11514,6 +11585,8 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
           locationName: state.currentCommunity?.name || '',
           dutyType: '',
           isAutomatic: false,
+          communityId: state.currentCommunity?.id || null,
+          communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null,
           createdAt: serverTimestamp()
         });
         showToast(type === '上班' ? '已手動上班打卡' : '已手動下班打卡');
