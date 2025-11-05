@@ -325,9 +325,10 @@
             verifyPasswordResetCode, confirmPasswordReset
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         import { 
-            getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot,
+            getFirestore, initializeFirestore, persistentLocalCache,
+            doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot,
             query, where, getDocs, serverTimestamp, orderBy, limit, GeoPoint, Timestamp, writeBatch,
-            enableIndexedDbPersistence, arrayUnion, arrayRemove
+            arrayUnion, arrayRemove
         } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { 
             getStorage, ref, uploadBytes, getDownloadURL, deleteObject
@@ -506,7 +507,7 @@
             const jt = ((u?.jobTitle || u?.applicationTitle || '').trim());
             return jt || ((u?.role || '').trim());
         }
-        // 判斷打卡紀錄是否屬於目前社區（優先 communityId / communityCode，回退以名稱比對）
+        // 判斷打卡紀錄是否屬於目前社區（寬鬆：允許名稱包含作為回退）
         function recordMatchesCommunity(rec, comm) {
             if (!rec || !comm) return true;
             const cid = (comm.id || '').trim();
@@ -515,10 +516,41 @@
             const rcid = (rec.communityId || '').trim();
             const rcode = (rec.communityCode || rec.dutyCommunityCode || '').trim();
             const lname = (rec.locationName || '').trim();
+            // 明確匹配
             if (cid && rcid && rcid === cid) return true;
             if (ccode && rcode && rcode === ccode) return true;
             if (cname && lname && lname.includes(cname)) return true;
+            // 舊紀錄可能沒有社區欄位或地點名稱，避免誤排除
+            if (!rcid && !rcode && !lname) return true;
             return false;
+        }
+        // 嚴格判斷：僅接受 communityId 或 communityCode 明確匹配
+        function recordMatchesCommunityStrict(rec, comm) {
+            if (!rec || !comm) return false;
+            const cid = (comm.id || '').trim();
+            const ccode = (comm.code || comm.communityCode || '').trim();
+            const rcid = (rec.communityId || '').trim();
+            const rcode = (rec.communityCode || rec.dutyCommunityCode || '').trim();
+            return (cid && rcid && rcid === cid) || (ccode && rcode && rcode === ccode);
+        }
+        // 名稱回退：僅以地點名稱包含社區名稱作為過濾（避免舊紀錄無社區欄位時完全不顯示）
+        function recordMatchesCommunityByName(rec, comm) {
+            if (!rec || !comm) return false;
+            const cname = (comm.name || '').trim();
+            const lname = (rec.locationName || '').trim();
+            return !!(cname && lname && lname.includes(cname));
+        }
+        // 追蹤分頁專用過濾：先嚴格，若完全無嚴格匹配則以名稱回退（不使用舊函式的全通配回退）
+        function filterRecordsByCommunityForTracking(records, comm) {
+            try {
+                const strict = (records || []).filter(r => recordMatchesCommunityStrict(r, comm));
+                if (strict.length > 0) return strict;
+                const byName = (records || []).filter(r => recordMatchesCommunityByName(r, comm));
+                return byName;
+            } catch (e) {
+                console.warn('社區過濾失敗，暫以名稱過濾回退', e);
+                return (records || []).filter(r => recordMatchesCommunityByName(r, comm));
+            }
         }
         
         const loadingScreen = document.getElementById('loading-screen');
@@ -533,22 +565,13 @@
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
             try { auth.languageCode = 'zh-TW'; } catch (_) {}
-            const db = getFirestore(app);
-
-            // 啟用 Firestore 離線持久化與線上/離線提示
-            enableIndexedDbPersistence(db).then(() => {
-                window.__persistenceEnabled = true;
-            }).catch((err) => {
-                if (err?.code === 'failed-precondition') {
-                    console.warn('Firestore persistence failed-precondition', err);
-                    try { showToast('提示：離線模式僅支援單一分頁，請關閉其他分頁', true); } catch (_) {}
-                } else if (err?.code === 'unimplemented') {
-                    console.warn('Firestore persistence unimplemented', err);
-                    try { showToast('提示：瀏覽器不支援離線存取，需連線使用', true); } catch (_) {}
-                } else {
-                    console.warn('啟用離線持久化失敗', err);
-                }
+            // 使用新版初始化方式與持久化快取，並強制 Long Polling 以避免 WebChannel 400 終止請求
+            const db = initializeFirestore(app, {
+                localCache: persistentLocalCache(),
+                experimentalAutoDetectLongPolling: true,
+                useFetchStreams: true
             });
+            window.__persistenceEnabled = true;
             const notifyOnlineState = (online) => {
                 window.__isOnline = !!online;
                 try {
@@ -675,6 +698,31 @@
                 const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
                 const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
                 return R * c;
+            }
+
+            // 取得社區中心與打卡半徑（優先使用 state.currentCommunity，否則回退 settings/location）
+            async function fetchCommunityCenterAndRadius() {
+                try {
+                    const c = state.currentCommunity || {};
+                    let center = null, radius = null;
+                    if (typeof c.lat === 'number' && typeof c.lng === 'number') {
+                        center = { lat: c.lat, lng: c.lng };
+                        if (typeof c.radius === 'number' && c.radius > 0) radius = c.radius;
+                    }
+                    if (!center) {
+                        const { getDoc, doc } = window.__fs; const db = window.__db;
+                        const docSnap = await getDoc(doc(db, 'settings', 'location'));
+                        if (docSnap.exists()) {
+                            const s = docSnap.data() || {};
+                            if (typeof s.communityLat === 'number' && typeof s.communityLng === 'number') center = { lat: s.communityLat, lng: s.communityLng };
+                            else if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') center = { lat: s.companyLat, lng: s.companyLng };
+                            if (typeof s.companyRadius === 'number' && s.companyRadius > 0) radius = s.companyRadius;
+                        }
+                    }
+                    return { center, radius };
+                } catch (_) {
+                    return { center: null, radius: null };
+                }
             }
 
             function openApplyAccountModal() {
@@ -1385,25 +1433,22 @@
                 const navGroup = document.getElementById('nav-group');
                 const navFeatures = document.getElementById('nav-features');
                 const navCalendar = document.getElementById('nav-calendar');
-                const navSchedule = document.getElementById('nav-schedule');
                 const navDashboard = document.querySelector('.tab-btn[data-tab="dashboard"]');
                 const navClockIn = document.querySelector('.tab-btn[data-tab="clock-in"]');
 
                 // 導覽顯示權限（角色：admin、manager、junior_manager、總幹事、秘書、保全、清潔、機電）
                 const role = state.currentUserData.role;
-                [navTracking, navSettings, navHr, navGroup, navSchedule].forEach(el => el && el.classList.add('hide'));
+                [navTracking, navSettings, navHr, navGroup].forEach(el => el && el.classList.add('hide'));
 
                 if (role === 'admin') {
-                    // 管理員：顯示追蹤與排班；設定已移至導覽頁
+                    // 管理員：顯示追蹤；設定已移至導覽頁
                     navTracking && navTracking.classList.remove('hide');
-                    navSchedule && navSchedule.classList.remove('hide');
                     navSettings && navSettings.classList.add('hide');
                     // 人事分頁不再針對「人事」角色開放，預設隱藏
                     navHr && navHr.classList.add('hide');
                 } else if (role === 'manager') {
-                    // 高階主管：顯示追蹤與排班
+                    // 高階主管：顯示追蹤
                     navTracking && navTracking.classList.remove('hide');
-                    navSchedule && navSchedule.classList.remove('hide');
                     navSettings && navSettings.classList.add('hide');
                 } else if (role === 'junior_manager') {
                     // 初階主管：僅顯示群組
@@ -1690,28 +1735,24 @@
             function applyRoleNavVisibility() {
                 const role = state.currentUserData?.role || '';
                 const navTracking = document.getElementById('nav-tracking');
-                const navSchedule = document.getElementById('nav-schedule');
                 const navSettings = document.getElementById('nav-settings');
                 const navHr = document.getElementById('nav-hr');
                 const navGroup = document.getElementById('nav-group');
 
                 // 預設隱藏進階分頁
                 navTracking && navTracking.classList.add('hide');
-                navSchedule && navSchedule.classList.add('hide');
                 navSettings && navSettings.classList.add('hide');
                 navHr && navHr.classList.add('hide');
                 navGroup && navGroup.classList.add('hide');
 
                 if (role === 'admin') {
                     navTracking && navTracking.classList.remove('hide');
-                    navSchedule && navSchedule.classList.remove('hide');
                     // 全域設定已移至導覽頁設定，保持隱藏
                     navSettings && navSettings.classList.add('hide');
                     // 人事保持隱藏
                     navHr && navHr.classList.add('hide');
                 } else if (role === 'manager') {
                     navTracking && navTracking.classList.remove('hide');
-                    navSchedule && navSchedule.classList.remove('hide');
                     navSettings && navSettings.classList.add('hide');
                 } else if (role === 'junior_manager') {
                     navGroup && navGroup.classList.remove('hide');
@@ -1742,7 +1783,6 @@
                         case 'hr': return 'nav-hr';
                         case 'features': return 'nav-features';
                         case 'calendar': return 'nav-calendar';
-                        case 'schedule': return 'nav-schedule';
                         case 'settings': return 'nav-settings';
                         case 'group': return 'nav-group';
                         default: return '';
@@ -1754,9 +1794,6 @@
                     pushItem('dashboard', 'layout-dashboard', '儀表板');
                     if (['admin','hr','manager','junior_manager'].includes(role)) {
                         pushItem('tracking', 'map-pin', '追蹤');
-                    }
-                    if (['admin','hr','manager','junior_manager'].includes(role)) {
-                        pushItem('schedule', 'calendar-days', '排班');
                     }
                     pushItem('features', 'layers', '功能');
                     if (['admin','hr','manager','junior_manager'].includes(role)) {
@@ -1833,11 +1870,10 @@
                 const role = state.currentUserData?.role || '';
                 const router = {
                     'dashboard': renderDashboard,
-                    'clock-in': () => renderClockIn(subPage || 'workdays'),
+                    'clock-in': () => renderClockIn(subPage || 'location'),
                     'tracking': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderTracking(subPage || 'map', params) : renderAccessDenied(),
                     'features': () => renderFeatures(subPage || 'training'),
                     'calendar': () => renderCalendar(subPage || 'overview'),
-                    'schedule': () => ['admin','hr','manager','junior_manager'].includes(role) ? renderShifts(subPage || null) : renderAccessDenied(),
                     'settings': () => role === 'admin' ? renderSettings(subPage || 'applications') : renderAccessDenied(),
                     'hr': () => (['admin','hr','manager','junior_manager'].includes(role)) ? renderHR(subPage || 'applications') : renderAccessDenied(),
                     'navigation': () => isNavigationAllowed(state.currentUserData) ? renderNavigation(subPage || 'community') : renderAccessDenied(),
@@ -2301,6 +2337,15 @@
                     const users = [];
                     snap.forEach(d => users.push({ id: d.id, ...d.data() }));
 
+                    // 過濾：排除離職與已刪除帳號（若存在刪除旗標）
+                    const isActiveUser = (u) => {
+                        const emp = ((u?.employmentStatus || '') + '').trim();
+                        const deleted = (u && (u.deleted === true || u.isDeleted === true)) ||
+                                        (typeof u?.status === 'string' && u.status.toLowerCase() === 'deleted');
+                        // 僅保留非離職且未刪除之使用者
+                        return emp !== '離職' && !deleted;
+                    };
+
                     // 計算年齡
                     const computeAge = (birth) => {
                         if (!birth) return null;
@@ -2339,7 +2384,7 @@
                         }
                         return null;
                     };
-                    let baseUsers = users.filter(u => resolveRole(u));
+                    let baseUsers = users.filter(u => isActiveUser(u) && resolveRole(u));
                     // 人員依年齡多→少排序（若年齡相同或未知，備援姓氏筆畫）
                     // 優先使用 u.age，其次由生日推算
                     const ageOf = (u) => {
@@ -3371,7 +3416,7 @@
                     };
                     const resolvedIdFromCode = currentCommCode ? resolveCommunityIdByCode(currentCommCode) : null;
                     const targetCommunityId = currentCommId || resolvedIdFromCode || null;
-                    // 將異常事件持久化到 Firestore，並設定 3 天到期；避免重複以固定鍵覆寫
+                    // 將異常事件持久化到 Firestore，並設定 24 小時到期；避免重複以固定鍵覆寫
                     async function persistAnomalies(events, communityId) {
                         if (!db || !Array.isArray(events) || events.length === 0) return;
                         const now = new Date();
@@ -3391,7 +3436,7 @@
                                 const type = a?.type || '未知異常';
                                 const dt = a?.time instanceof Date ? a.time : (a?.time?.toDate ? a.time.toDate() : new Date());
                                 const docId = buildDocId(a);
-                                const expires = new Date(dt.getTime() + 3*24*60*60*1000);
+                                const expires = new Date(dt.getTime() + 24*60*60*1000);
                                 // 若已標記 suppressed，略過持久化（避免重新覆寫）
                                 try {
                                     const existSnap = await getDoc(doc(db, 'anomalies', docId));
@@ -3442,11 +3487,10 @@
                         });
                     }
 
-                    // 近三日範圍（含今日）：超過三日不顯示
+                    // 近 24 小時範圍：超過 24 小時不顯示
                     const now = new Date();
-                    const rangeEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                    const rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                    rangeStart.setDate(rangeStart.getDate() - 2);
+                    const rangeEnd = new Date(now.getTime());
+                    const rangeStart = new Date(now.getTime() - 24*60*60*1000);
                     const tsStart = Timestamp?.fromDate ? Timestamp.fromDate(rangeStart) : rangeStart;
                     const tsEnd = Timestamp?.fromDate ? Timestamp.fromDate(rangeEnd) : rangeEnd;
 
@@ -3759,14 +3803,26 @@
                             await cleanupOldAnomalies(targetCommunityId);
                         } catch (_) {}
                     }
-                    // 顯示通知（含刪除鍵，僅管理角色可見）
+                    // 顯示通知（不顯示刪除鍵，24 小時後自動過期）
                     let html = '';
-                    const canDelete = canManage;
+                    // 建立索引以便刪除時可重建 payload（避免文件不存在時無法更新）
+                    try { state.__anomaliesIndex = {}; } catch (_) { window.state = window.state || {}; window.state.__anomaliesIndex = {}; }
+                    const canDelete = false;
                     filtered.forEach(a => {
                         const name = a.user.name || a.user.displayName || '未命名';
                         const icon = (a.type === '打卡定位異常') ? 'map-pin' : 'alert-triangle';
                         const timeStr = a.time ? a.time.toLocaleString('zh-TW', { hour12:false }) : '';
                         const idKey = buildDocId(a);
+                        // 建立刪除所需的資料索引
+                        try {
+                            (state.__anomaliesIndex ||= {})[idKey] = {
+                                userId: a?.user?.id || a?.userId || 'unknown',
+                                type: a?.type || '未知異常',
+                                detail: a?.detail || '',
+                                time: a?.time instanceof Date ? a.time : (a?.time?.toDate ? a.time.toDate() : new Date()),
+                                communityId: targetCommunityId || null
+                            };
+                        } catch (_) {}
                         html += `
                             <div class="p-3 bg-red-50 border border-red-200 rounded-md">
                                 <div class="flex items-center justify-between">
@@ -3791,7 +3847,36 @@
                                 try {
                                     const nowY = new Date();
                                     const tsNowY = Timestamp?.fromDate ? Timestamp.fromDate(nowY) : nowY;
-                                    await setDoc(doc(db, 'anomalies', id), { suppressed: true, updatedAt: tsNowY }, { merge: true });
+                                    // 若文件存在則更新；不存在則以完整 payload 建立並標記 suppressed
+                                    let exists = false;
+                                    try {
+                                        const snap = await getDoc(doc(db, 'anomalies', id));
+                                        exists = !!(snap && snap.exists && snap.exists());
+                                    } catch (_) {}
+                                    if (exists) {
+                                        await setDoc(doc(db, 'anomalies', id), { suppressed: true, updatedAt: tsNowY }, { merge: true });
+                                    } else {
+                                        const info = (state.__anomaliesIndex || {})[id] || null;
+                                        if (info) {
+                                            const expires = new Date(info.time.getTime() + 3*24*60*60*1000);
+                                            const payload = {
+                                                userId: info.userId,
+                                                type: info.type,
+                                                detail: info.detail || '',
+                                                time: Timestamp?.fromDate ? Timestamp.fromDate(info.time) : info.time,
+                                                communityId: info.communityId || null,
+                                                createdAt: tsNowY,
+                                                updatedAt: tsNowY,
+                                                expiresAt: Timestamp?.fromDate ? Timestamp.fromDate(expires) : expires,
+                                                source: 'dashboard',
+                                                suppressed: true
+                                            };
+                                            await setDoc(doc(db, 'anomalies', id), payload, { merge: true });
+                                        } else {
+                                            // 若索引缺失，仍先移除卡片以改善使用體驗
+                                            console.warn('缺少 anomalies 索引資料，僅移除卡片');
+                                        }
+                                    }
                                     // 立即從 UI 移除卡片
                                     const card = e.currentTarget.closest('.p-3');
                                     if (card && card.parentNode) card.parentNode.removeChild(card);
@@ -4271,23 +4356,27 @@
                             const nextDateText = `${String(nextDate.getMonth()+1).padStart(2,'0')}/${String(nextDate.getDate()).padStart(2,'0')}`;
                             const lineNext = nextStartExp ? `下一個班表（${nextDateText}）：上班（表定）${nextStartExp}${nextEndExp ? `，下班（表定）${nextEndExp}` : ''}` : '下一個班表：未設定';
 
-                            const html = `
-                                <div id="workday-clock-card" class="p-3 bg-blue-50 border border-blue-200 rounded-md">
-                                  <div class="flex items-center"><i data-lucide="clock" class="w-4 h-4 mr-2 text-blue-600"></i><span class="font-medium text-blue-800">今日班表與打卡</span></div>
-                                  <div class="mt-1 text-sm text-gray-700">${lineTodayStart}</div>
-                                  <div class="mt-1 text-sm text-gray-700">${lineTodayEnd}</div>
-                                  <div class="mt-1 text-sm text-gray-700">${lineNext}</div>
-                                </div>`;
+                            // 完全移除「今日班表與打卡」通知卡片的顯示
+                            window.DASHBOARD_SHOW_WORKDAY_CLOCK_CARD = false;
                             const existing = document.getElementById('workday-clock-card');
-                            if (existing) existing.outerHTML = html;
-                            else listEl.insertAdjacentHTML('afterbegin', html);
-                            try { lucide.createIcons(); } catch (_) {}
+                            if (existing) existing.remove();
+                            // 若未來要重新顯示，可將旗標改為 true 並還原下列插入邏輯
+                            if (window.DASHBOARD_SHOW_WORKDAY_CLOCK_CARD) {
+                                const html = `
+                                    <div id="workday-clock-card" class="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                                      <div class="flex items-center"><i data-lucide="clock" class="w-4 h-4 mr-2 text-blue-600"></i><span class="font-medium text-blue-800">今日班表與打卡</span></div>
+                                      <div class="mt-1 text-sm text-gray-700">${lineTodayStart}</div>
+                                      <div class="mt-1 text-sm text-gray-700">${lineTodayEnd}</div>
+                                      <div class="mt-1 text-sm text-gray-700">${lineNext}</div>
+                                    </div>`;
+                                listEl.insertAdjacentHTML('afterbegin', html);
+                                try { lucide.createIcons(); } catch (_) {}
+                            }
                         } catch (e) {
                             console.warn('渲染打卡時刻通知失敗', e);
                         }
                     }
 
-                    renderWorkdayClockCard();
                     renderDutyReminder();
                 } catch (e) {
                     console.warn('初始化儀錶板通知失敗', e);
@@ -4628,9 +4717,7 @@
                     // 狀態過濾：僅保留上班、下班、請假（排除外出/抵達/離開）
                     const filteredByStatus = filteredByRoleAndCommunity.filter(u => {
                         const latest = latestMap[u.id] || null;
-                        const locText = latest?.locationName || (u.clockInStatus === '外出' && u.outboundLocation ? u.outboundLocation : (u.lastLocation?.address || null));
-                        const display = latest ? getStatusDisplayText(latest.type || '未知', latest.locationName || null, latest.dutyType || null)
-                                              : getStatusDisplayText(u.clockInStatus || '未打卡', locText, u.dutyType);
+                        const display = latest ? getStatusDisplayText(latest.type || '未知', latest.locationName || null, latest.dutyType || null) : '未打卡';
                         // 請假判定
                         let isLeave = (u.clockInStatus === '臨時請假') || display.includes('請假');
                         if (!isLeave) {
@@ -4647,8 +4734,8 @@
                             }
                         }
                         if (isLeave) return true;
-                        if (display.includes('下班') || (u.clockInStatus === '下班')) return true;
-                        if (display.includes('上班') || (u.clockInStatus === '返回')) return true;
+                        if (display.includes('下班')) return true;
+                        if (display.includes('上班')) return true;
                         return false;
                     });
 
@@ -4657,10 +4744,8 @@
                             const latestB = latestMap[b.id] || null;
                             const locA = latestA?.locationName || (a.clockInStatus === '外出' && a.outboundLocation ? a.outboundLocation : (a.lastLocation?.address || null));
                             const locB = latestB?.locationName || (b.clockInStatus === '外出' && b.outboundLocation ? b.outboundLocation : (b.lastLocation?.address || null));
-                            const displayA = latestA ? getStatusDisplayText(latestA.type || '未知', latestA.locationName || null, latestA.dutyType || null)
-                                                     : getStatusDisplayText(a.clockInStatus || '未打卡', locA, a.dutyType);
-                            const displayB = latestB ? getStatusDisplayText(latestB.type || '未知', latestB.locationName || null, latestB.dutyType || null)
-                                                     : getStatusDisplayText(b.clockInStatus || '未打卡', locB, b.dutyType);
+                            const displayA = latestA ? getStatusDisplayText(latestA.type || '未知', latestA.locationName || null, latestA.dutyType || null) : '未打卡';
+                            const displayB = latestB ? getStatusDisplayText(latestB.type || '未知', latestB.locationName || null, latestB.dutyType || null) : '未打卡';
 
                             // 判斷請假（臨時請假或當天有效申請）
                             let isLeaveA = (a.clockInStatus === '臨時請假') || (displayA.includes('請假'));
@@ -4715,12 +4800,11 @@
                             return a.name.localeCompare(b.name, 'zh-Hant');
                         }).forEach(user => {
                             const latest = latestMap[user.id] || null;
-                            const locText = latest?.locationName || (user.clockInStatus === '外出' && user.outboundLocation ? user.outboundLocation : (user.lastLocation?.address || null));
-                            const statusText = latest ? getStatusDisplayText(latest.type || '未知', latest.locationName || null, latest.dutyType || null)
-                                                      : getStatusDisplayText(user.clockInStatus || '未打卡', locText, user.dutyType);
+                            const statusText = latest ? getStatusDisplayText(latest.type || '未知', latest.locationName || null, latest.dutyType || null) : '未打卡';
                             const statusColor = getStatusColor(statusText);
                             const clockInTime = latest?.timestamp?.toDate?.() ? latest.timestamp.toDate() : (latest?.timestamp ? new Date(latest.timestamp) : null);
                             const timeFormatted = clockInTime ? clockInTime.toLocaleString('zh-TW', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}) : 'N/A';
+                            const photoUrl = Array.isArray(latest?.photoUrls) ? latest.photoUrls[0] : (latest?.photoUrl || null);
                             listEl.innerHTML += `
                                 <div class=\"flex items-center justify-between bg-white p-3 rounded-md shadow-sm border\">
                                     <div class=\"flex items-center\">
@@ -4734,7 +4818,7 @@
                                         </div>
                                     </div>
                                     <div class=\"flex space-x-2\">
-                                        ${user.lastPhotoUrl ? `<button class=\"view-photo-btn p-2 bg-blue-100 rounded-md\" data-photo=\"${user.lastPhotoUrl}\" data-desc=\"${user.lastLocation || ''}\"><i data-lucide=\"image\" class=\"w-6 h-6 text-blue-600\"></i></button>` : ''}
+                                        ${photoUrl ? `<button class=\"view-photo-btn p-2 bg-blue-100 rounded-md\" data-photo=\"${photoUrl}\" data-desc=\"${latest?.locationName || ''}\"><i data-lucide=\"image\" class=\"w-6 h-6 text-blue-600\"></i></button>` : ''}
                                     </div>
                                     
                                 </div>`;
@@ -4800,21 +4884,28 @@
             function renderClockIn(subPage) {
                 const role = state.currentUserData?.role || '';
                 const isStaff = new Set(['總幹事','秘書','保全','清潔','機電']).has(role);
+                // 恢復定位打卡子分頁；移除我的班表
                 const tabs = isStaff
                     ? [
-                        { key: 'workdays', label: '我的班表' },
+                        { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
                         { key: 'leaves', label: '請假申請' }
                       ]
                     : [
-                        { key: 'workdays', label: '我的班表' },
+                        { key: 'location', label: '定位打卡' },
                         { key: 'records', label: '打卡紀錄' },
                         { key: 'leaves', label: '請假申請' }
                       ];
 
-                const tabsHtml = tabs.map(t => `
-                    <button data-subtab="${t.key}" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${(subPage === t.key || (!subPage && t.key === 'workdays')) ? 'active' : ''}">${t.label}</button>
-                `).join('');
+                const knownKeys = tabs.map(t => t.key);
+                const currentSub = knownKeys.includes(subPage) ? subPage : 'location';
+                const tabsHtml = tabs.map(t => {
+                    const isActive = currentSub === t.key;
+                    const activeCls = isActive ? 'active bg-red-100 text-red-600' : 'text-gray-600';
+                    return `
+                        <button data-subtab="${t.key}" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium ${activeCls}">${t.label}</button>
+                    `;
+                }).join('');
 
                 mainContent.innerHTML = `
                     <div class="h-[50px] flex items-center justify-around border-b border-gray-200 bg-white">
@@ -4823,16 +4914,17 @@
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
 
                 const subPageContent = document.getElementById('sub-page-content');
-                if (subPage === 'records') {
+                if (currentSub === 'location') {
+                    renderClockInLocation(subPageContent);
+                } else if (currentSub === 'records') {
                     renderClockInRecords(subPageContent);
-                } else if (subPage === 'retro') {
+                } else if (currentSub === 'retro') {
                     renderRetroClockRequestForm(subPageContent);
-                } else if (subPage === 'leaves') {
+                } else if (currentSub === 'leaves') {
                     renderMyLeaveRecords(subPageContent);
                 } else {
-                    // 只讀的我的班表（月視圖）
-                    renderWorkDatesMonthView(subPageContent);
-                    try { updateMyScheduleButtons(); } catch (e) { console.warn('updateMyScheduleButtons 初始化失敗', e); }
+                    // 預設回到定位打卡
+                    renderClockInLocation(subPageContent);
                 }
 
                 mainContent.querySelectorAll('.sub-tab-btn').forEach(btn => btn.addEventListener('click', () => showPage('clock-in', btn.dataset.subtab)));
@@ -4844,6 +4936,7 @@
                         <button id="relocate-btn" class="w-full bg-white border border-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-md hover:bg-gray-50 flex items-center justify-center mb-4">
                             <i data-lucide="locate-fixed" class="w-4 h-4 mr-2"></i>重新定位
                         </button>
+                        <div class="text-center text-sm text-gray-600 mb-2">打卡必須在社區範圍內</div>
                         <div id="map-container" class="flex-grow rounded-lg overflow-hidden border border-gray-300 relative">
                              <div id="map" class="map-canvas"></div>
                              <div id="map-loader" class="absolute inset-0 bg-white/70 flex items-center justify-center pointer-events-none"><div class="loader"></div></div>
@@ -4853,28 +4946,59 @@
                         </div>
                         <div id="clock-in-buttons" class="grid grid-cols-2 gap-2 pt-4">
                             <!-- 僅保留兩個按鈕：上班、下班；請假申請已移至子分頁 -->
-                            <button id="work-start-btn" data-type="上班" class="clock-in-btn bg-green-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-green-600">上班打卡</button>
-                            <button id="work-end-btn" data-type="下班" class="clock-in-btn bg-red-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-red-600">下班打卡</button>
+            <button id="work-start-btn" data-type="上班" class="clock-in-btn bg-green-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-green-600">上班打卡</button>
+            <button id="work-end-btn" data-type="下班" class="clock-in-btn bg-gray-300 text-white font-semibold py-3 px-4 rounded-md cursor-not-allowed disabled" disabled>下班打卡</button>
+                        </div>
+                        <div class="pt-2">
+                            <button id="leave-apply-btn" class="w-full bg-orange-500 text-white font-semibold py-3 px-4 rounded-md hover:bg-orange-600 flex items-center justify-center">
+                                <i data-lucide="calendar" class="w-4 h-4 mr-2"></i>請假申請
+                            </button>
                         </div>
                     </div>`;
                 lucide.createIcons();
                 initClockInMap();
 
                 document.getElementById('relocate-btn').addEventListener('click', initClockInMap);
+                const leaveBtn = document.getElementById('leave-apply-btn');
+                if (leaveBtn) {
+                    leaveBtn.addEventListener('click', () => {
+                        try { openTempLeaveModal(); } catch (e) { showToast('無法開啟請假申請', true); }
+                    });
+                }
                 
                 // 初始化打卡狀態（在定位打卡子頁渲染完成後）
                 initClockInButtonStatus();
                 updateStatusDisplay();
+                // 立即同步本地狀態到按鈕樣式，避免依賴遠端回讀延遲
+                if (typeof updateButtonStatus === 'function') {
+                    try { updateButtonStatus(); } catch (e) { console.debug('立即更新按鈕狀態失敗', e); }
+                }
                 
                 // 打卡按鈕點擊事件
                 document.querySelectorAll('.clock-in-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
+                    btn.addEventListener('click', async (e) => {
                         if (btn.classList.contains('disabled')) {
                             return;
                         }
                         
                         if (!state.currentLocation) {
                             alert("無法取得目前位置，請稍後再試");
+                            return;
+                        }
+                        // 半徑內檢查：必須在社區範圍內才可打卡
+                        try {
+                            const { center, radius } = await fetchCommunityCenterAndRadius();
+                            if (!center || typeof radius !== 'number') {
+                                showToast('尚未設定社區中心或打卡半徑，請聯絡管理員', true);
+                                return;
+                            }
+                            const dist = calculateDistanceMeters(state.currentLocation.lat, state.currentLocation.lng, center.lat, center.lng);
+                            if (dist > radius) {
+                                showToast('您不在社區打卡範圍內，請移動至範圍內再打卡', true);
+                                return;
+                            }
+                        } catch (_) {
+                            showToast('檢查打卡範圍時發生錯誤，請稍後再試', true);
                             return;
                         }
                         
@@ -6244,7 +6368,6 @@
                         <div class="flex items-center space-x-2">
                             <label for="record-month" class="text-sm font-medium">篩選月份:</label>
                             <input type="month" id="record-month" value="${ym}" class="border border-gray-300 rounded-md px-2 py-1">
-                            <button id="open-month-report" class="ml-2 px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm">月報表</button>
                         </div>
                         <div id="records-list" class="space-y-3">
                             <div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>
@@ -6725,8 +6848,7 @@
                 loadRecords();
 
                 // 月報表：選擇月份彈窗
-                const monthBtn = document.getElementById('open-month-report');
-                monthBtn?.addEventListener('click', () => openMonthReportModal());
+                
 
                 function openMonthReportModal() {
                     const now = new Date();
@@ -7031,6 +7153,28 @@
                 }
                 
                 try {
+                    // 計算社區中心與半徑設定（若社區無設定則以公司設定為備援）
+                    let center = null, radius = null;
+                    async function computeCenterAndRadius() {
+                        const c = state.currentCommunity || {};
+                        if (typeof c.lat === 'number' && typeof c.lng === 'number') {
+                            center = { lat: c.lat, lng: c.lng };
+                            if (typeof c.radius === 'number' && c.radius > 0) radius = c.radius;
+                        }
+                        if (!center) {
+                            try {
+                                const { getDoc, doc } = window.__fs; const db = window.__db;
+                                const docSnap = await getDoc(doc(db, 'settings', 'location'));
+                                if (docSnap.exists()) {
+                                    const s = docSnap.data() || {};
+                                    if (typeof s.communityLat === 'number' && typeof s.communityLng === 'number') center = { lat: s.communityLat, lng: s.communityLng };
+                                    else if (typeof s.companyLat === 'number' && typeof s.companyLng === 'number') center = { lat: s.companyLat, lng: s.companyLng };
+                                    if (typeof s.companyRadius === 'number' && s.companyRadius > 0) radius = s.companyRadius;
+                                }
+                            } catch (_) {}
+                        }
+                    }
+                    await computeCenterAndRadius();
                     const pos = await new Promise((resolve, reject) => {
                         navigator.geolocation.getCurrentPosition(resolve, reject, { 
                             enableHighAccuracy: true, 
@@ -7057,6 +7201,11 @@
                         position: coords, 
                         map: map 
                     });
+                    // 描繪打卡設定半徑範圍（若取得中心與半徑）
+                    if (center && typeof radius === 'number') {
+                        try { state.clockinRadiusCircle && state.clockinRadiusCircle.setMap(null); } catch (_) {}
+                        state.clockinRadiusCircle = new google.maps.Circle({ map, center, radius, strokeColor:'#FF0000', strokeOpacity:0.8, strokeWeight:2, fillColor:'#FF0000', fillOpacity:0.1 });
+                    }
                     
                     mapLoader.classList.add('hide');
                 } catch (error) {
@@ -7074,6 +7223,7 @@
                         <button data-subtab="map" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'map' || !subPage ? 'active' : ''}">人員地圖</button>
                         <button data-subtab="attendance" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'attendance' ? 'active' : ''}">出勤紀錄</button>
                         <button data-subtab="leave" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'leave' ? 'active' : ''}">假單審核</button>
+                        <button data-subtab="retro" class="sub-tab-btn px-4 py-2 rounded-md text-sm font-medium text-gray-600 ${subPage === 'retro' ? 'active' : ''}">修改申請審核</button>
                     </div>
                     <div id="sub-page-content" class="overflow-y-auto" style="height: calc(100% - 50px);"></div>`;
                 
@@ -7082,6 +7232,8 @@
                     renderTrackingAttendanceSchedule(subPageContent, params);
                 } else if (subPage === 'leave') {
                     renderTrackingLeave(subPageContent);
+                } else if (subPage === 'retro') {
+                    renderRetroApprovals(subPageContent);
                 } else {
                     renderTrackingMap(subPageContent);
                 }
@@ -7194,11 +7346,17 @@
                     try {
                         const { collection, query, where, orderBy, getDocs } = window.__fs; const db = window.__db; const user = window.__auth?.currentUser;
                         if (!user) { listEl.innerHTML = '<p class="text-sm text-red-600">請先登入</p>'; return; }
-                        const qs = await getDocs(query(collection(db, 'retroClockRequests'), where('userId','==', user.uid), orderBy('requestedAt', 'desc')));
+                        const qs = await getDocs(query(collection(db, 'retroClockRequests'), where('userId','==', user.uid)));
                         if (qs.empty) { listEl.innerHTML = '<p class="text-sm text-gray-500">尚無申請</p>'; return; }
+                        const items = [];
+                        qs.forEach(docSnap => items.push({ id: docSnap.id, ...docSnap.data() }));
+                        items.sort((a,b)=>{
+                            const at = a.requestedAt?.toDate?.() ? a.requestedAt.toDate().getTime() : (a.requestedAt ? new Date(a.requestedAt).getTime() : 0);
+                            const bt = b.requestedAt?.toDate?.() ? b.requestedAt.toDate().getTime() : (b.requestedAt ? new Date(b.requestedAt).getTime() : 0);
+                            return bt - at;
+                        });
                         listEl.innerHTML = '';
-                        qs.forEach(docSnap => {
-                            const r = { id: docSnap.id, ...docSnap.data() };
+                        items.forEach(r => {
                             const when = r.targetTime?.toDate?.() ? r.targetTime.toDate() : (r.targetTime ? new Date(r.targetTime) : null);
                             const item = document.createElement('div');
                             item.className = 'p-3 border rounded-md bg-white flex items-center justify-between';
@@ -7220,13 +7378,13 @@
                 try { renderMyRetroRequests(); } catch(e) {}
             }
 
-            // 補打申請審核頁面
-            /* async function renderRetroApprovals(container) {
+            // 修改申請審核頁面（僅顯示當前社區成員提出的申請）
+            async function renderRetroApprovals(container) {
                 container.innerHTML = `
                     <div class="p-4 h-full">
                         <div class="bg-white rounded-lg shadow-sm border p-4">
                             <div class="flex items-center justify-between mb-3">
-                                <h2 class="text-lg font-bold">補打申請審核</h2>
+                                <h2 class="text-lg font-bold">修改申請審核</h2>
                                 <button id="manual-add-record" class="px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">新增人員打卡紀錄</button>
                             </div>
                             <div class="mb-3 flex items-center gap-2">
@@ -7243,21 +7401,33 @@
                 const listEl = document.getElementById('retro-requests-list');
                 const filterDateEl = document.getElementById('retro-filter-date');
                 const filterUserEl = document.getElementById('retro-filter-user');
+                const currentCommId = state.currentCommunity?.id || null;
+                const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                if (!currentCommId && !currentCommCode) {
+                    listEl.innerHTML = `<p class="text-center text-gray-500 p-4">請先選擇社區</p>`;
+                }
 
                 // 載入人員下拉
+                const userInfo = {};
                 try {
                     const us = await getDocs(collection(db, 'users'));
                     us.forEach(d => {
-                        const opt = document.createElement('option');
-                        opt.value = d.id; opt.textContent = d.data().name || d.id;
-                        filterUserEl.appendChild(opt);
+                        const data = d.data();
+                        const svc = Array.isArray(data.serviceCommunities) ? data.serviceCommunities.filter(Boolean) : [];
+                        const inCommunity = (svc.includes(currentCommId) || svc.includes(currentCommCode));
+                        userInfo[d.id] = { name: data.name || d.id, serviceCommunities: svc };
+                        if (inCommunity) {
+                            const opt = document.createElement('option');
+                            opt.value = d.id; opt.textContent = data.name || d.id;
+                            filterUserEl.appendChild(opt);
+                        }
                     });
                 } catch(e) {}
 
                 async function renderList() {
                     listEl.innerHTML = `<div class="p-4 text-center text-gray-500"><div class="flex items-center justify-center"><i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i>載入申請...</div></div>`;
                     try {
-                        const qs = await getDocs(query(collection(db, 'retroClockRequests'), where('status','==','pending'), orderBy('requestedAt','desc')));
+                        const qs = await getDocs(query(collection(db, 'retroClockRequests'), where('status','==','pending')));
                         const selectedUser = filterUserEl.value || '';
                         const selectedDate = filterDateEl.value || '';
                         const items = [];
@@ -7265,17 +7435,22 @@
                             const req = { id: docSnap.id, ...docSnap.data() };
                             const when = req.targetTime?.toDate?.() ? req.targetTime.toDate() : (req.targetTime ? new Date(req.targetTime) : null);
                             const dateStr = when ? when.toISOString().split('T')[0] : '';
+                            // 僅顯示當前社區成員提出的申請
+                            const svc = userInfo[req.userId]?.serviceCommunities || [];
+                            const inCommunity = (svc.includes(currentCommId) || svc.includes(currentCommCode));
+                            if (!inCommunity) return;
                             if (selectedUser && req.userId !== selectedUser) return;
                             if (selectedDate && dateStr !== selectedDate) return;
                             items.push({ ...req, when });
                         });
+                        items.sort((a,b)=>{
+                            const at = a.requestedAt?.toDate?.() ? a.requestedAt.toDate().getTime() : (a.requestedAt ? new Date(a.requestedAt).getTime() : 0);
+                            const bt = b.requestedAt?.toDate?.() ? b.requestedAt.toDate().getTime() : (b.requestedAt ? new Date(b.requestedAt).getTime() : 0);
+                            return bt - at;
+                        });
                         if (items.length === 0) { listEl.innerHTML = `<p class="text-center text-gray-500 p-4">無符合條件的申請</p>`; return; }
                         // 載入使用者名稱映射
-                        const userMap = {};
-                        try {
-                            const us = await getDocs(collection(db, 'users'));
-                            us.forEach(d => userMap[d.id] = d.data().name || d.id);
-                        } catch(e) {}
+                        const userMap = Object.fromEntries(Object.entries(userInfo).map(([uid, info]) => [uid, info.name]));
                         listEl.innerHTML = '';
                         items.forEach(req => {
                             const userName = userMap[req.userId] || req.userId;
@@ -7304,20 +7479,18 @@
                                 if (!reqDoc.exists()) { showToast('申請不存在', true); return; }
                                 const r = reqDoc.data();
                                 const ts = r.targetTime?.toDate?.() ? r.targetTime.toDate() : (r.targetTime ? new Date(r.targetTime) : new Date());
+                                // 注意：遵守 Firestore 規則允許的欄位集合
                                 await addDoc(collection(db, 'clockInRecords'), {
                                     userId: r.userId,
                                     type: r.type,
                                     timestamp: Timestamp?.fromDate ? Timestamp.fromDate(ts) : ts,
-                                    location: GeoPoint ? new GeoPoint(0,0) : { latitude: 0, longitude: 0 },
+                                    location: GeoPoint ? new GeoPoint(0,0) : new (window.__fs?.GeoPoint || function(lat,lng){ return { latitude: lat, longitude: lng }; })(0,0),
                                     photoUrls: [],
                                     descriptions: [],
                                     deviceId: 'retro',
                                     locationName: r.locationName || null,
                                     dutyType: null,
-                                    isAutomatic: false,
-                                    // 以目前社區識別為主（若申請本身無社區欄位）
-                                    communityId: state.currentCommunity?.id || null,
-                                    communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null
+                                    isAutomatic: false
                                 });
                                 // 同步更新 users 狀態，讓儀錶板與定位打卡按鈕正確顯示
                                 try {
@@ -7499,7 +7672,7 @@
                 });
 
                 await renderList();
-            } */
+            }
 
             // 人員分頁：帳號申請、帳號列表（各社區獨立內容）
             function renderHR(subPage) {
@@ -7535,6 +7708,16 @@
             }
 
             function renderShifts(subPage) {
+                // 已移除：排班分頁功能
+                mainContent.innerHTML = `
+                    <div class="p-8 flex items-center justify-center h-full">
+                        <div class="text-center text-gray-500">
+                            <i data-lucide="alert-triangle" class="w-8 h-8 mx-auto mb-3"></i>
+                            <div>排班分頁已移除</div>
+                        </div>
+                    </div>`;
+                try { lucide.createIcons(); } catch (_) {}
+                return;
                 const comm = state.currentCommunity;
                 if (!comm || !comm.id) {
                     mainContent.innerHTML = `
@@ -10661,6 +10844,18 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             }
 
             // 共用：出勤紀錄列表渲染（支援指定用戶白名單）
+            // 先全域掛載 getStatusBgColor，避免函式尚未宣告導致 ReferenceError
+            if (typeof window.getStatusBgColor !== 'function') {
+                window.getStatusBgColor = function(typeOrText) {
+                    const s = String(typeOrText || '').toLowerCase();
+                    if (s.includes('上班') || s.includes('返回') || s.includes('在辦')) return 'bg-green-100 text-green-800';
+                    if (s.includes('下班')) return 'bg-red-100 text-red-800';
+                    if (s.includes('外出') || s.includes('抵達') || s.includes('離開')) return 'bg-blue-100 text-blue-800';
+                    if (s.includes('請假')) return 'bg-orange-100 text-orange-800';
+                    if (s.includes('特殊勤務')) return 'bg-indigo-100 text-indigo-800';
+                    return 'bg-gray-100 text-gray-800';
+                };
+            }
             async function renderAttendanceRecordsList(containerId, selectedUserId, selectedDateStr, allowedUserIds = null) {
                 const container = document.getElementById(containerId);
                 const selectedDate = new Date(selectedDateStr);
@@ -10677,11 +10872,11 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 try {
                     if (selectedUserId === 'all') {
                         const base = [where('timestamp', '>=', startTS), where('timestamp', '<=', endTS)];
-                        if (currentComm?.id) base.push(where('communityId','==', currentComm.id));
+                        // 不在查詢層面加 communityId；改以前端 recordMatchesCommunity 過濾
                         q = query(recordsRef, ...base);
                     } else {
                         const base = [where('userId', '==', selectedUserId), where('timestamp', '>=', startTS), where('timestamp', '<=', endTS)];
-                        if (currentComm?.id) base.push(where('communityId','==', currentComm.id));
+                        // 不在查詢層面加 communityId；改以前端 recordMatchesCommunity 過濾
                         q = query(recordsRef, ...base);
                     }
                 } catch (_) {
@@ -10695,14 +10890,41 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 container.innerHTML = `<div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>`;
                 await ensureAbnormalMarkingConfig();
                 await ensureCommunitiesCache();
-                const querySnapshot = await getDocs(q);
+                let querySnapshot;
+                try {
+                    querySnapshot = await getDocs(q);
+                } catch (err) {
+                    console.warn('getDocs index error, switching to fallback (timestamp-only) query', err);
+                    try {
+                        const q2 = query(recordsRef, where('timestamp', '>=', startTS), where('timestamp', '<=', endTS));
+                        querySnapshot = await getDocs(q2);
+                        try { showToast('已使用後備查詢；請於 Firestore 建立複合索引', false); } catch(_) {}
+                    } catch (err2) {
+                        console.error('fallback query failed', err2);
+                        container.innerHTML = `<p class="text-center text-red-600 p-4">讀取出勤紀錄失敗：請稍後再試</p>`;
+                        return;
+                    }
+                }
                 if (querySnapshot.empty) {
                     container.innerHTML = `<p class="text-center text-gray-500 p-4">無打卡紀錄</p>`;
                     return;
                 }
                 const records = [];
                 querySnapshot.forEach(doc => records.push({ id: doc.id, ...doc.data() }));
-                const filteredRecords = records.filter(r => recordMatchesCommunity(r, state.currentCommunity));
+                let filteredRecords;
+                if (selectedUserId === 'all') {
+                    // 若有白名單（社區成員），直接以 userId 過濾，避免舊紀錄缺少社區欄位
+                    filteredRecords = (!allowedUserIds || allowedUserIds.length === 0)
+                        ? filterRecordsByCommunityForTracking(records, state.currentCommunity)
+                        : records.filter(r => allowedUserIds.includes(r.userId));
+                } else {
+                    // 選定人員：顯示該人員的全部當日紀錄
+                    filteredRecords = records.filter(r => r.userId === selectedUserId);
+                }
+                if (!filteredRecords || filteredRecords.length === 0) {
+                    container.innerHTML = `<p class="text-center text-gray-500 p-4">無打卡紀錄</p>`;
+                    return;
+                }
                 const usersRef = collection(db, 'users');
                 const usersSnapshot = await getDocs(usersRef);
                 const usersMap = {};
@@ -10714,8 +10936,9 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                 });
 
                 container.innerHTML = '';
+                // 僅在「全部人員」模式套用白名單；選擇特定人員時不過濾
                 filteredRecords
-                    .filter(r => !allowedUserIds || allowedUserIds.includes(r.userId))
+                    .filter(r => (selectedUserId === 'all' ? (!allowedUserIds || allowedUserIds.includes(r.userId)) : true))
                     .sort((a,b) => {
                         const timeA = a.timestamp?.toDate?.() || new Date(0);
                         const timeB = b.timestamp?.toDate?.() || new Date(0);
@@ -10987,7 +11210,7 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                             <div class="flex items-center space-x-2">
                                 <label for="user-select" class="text-sm font-medium">選擇人員:</label>
                                 <select id="user-select" class="border border-gray-300 rounded-md px-2 py-1">
-                                    <option value="all">全部人員</option>
+                                    <option value="all">全社區人員</option>
                                     <!-- 人員選項將動態添加 -->
                                 </select>
                             </div>
@@ -11013,8 +11236,8 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                     });
                 }
                 
-                // 載入所有用戶
-                const { collection, getDocs } = window.__fs || {};
+                // 載入所有用戶（僅顯示指定角色且限目前社區）
+                const { collection, getDocs, query, where } = window.__fs || {};
                 const db = window.__db;
                 const usersRef = db && collection ? collection(db, "users") : null;
                 const userSelect = document.getElementById('user-select');
@@ -11022,14 +11245,28 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                     document.getElementById('attendance-records-list').innerHTML = '<div class="p-4 text-red-600">資料庫尚未就緒</div>';
                     return;
                 }
+                let __allowedIdsSet = null;
                 
                 getDocs(usersRef).then((querySnapshot) => {
                     const users = [];
                     querySnapshot.forEach(doc => {
                         users.push({ id: doc.id, ...doc.data() });
                     });
-                    
-                    users.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')).forEach(user => {
+                    // 目前社區過濾（顯示該社區的所有人員）
+                    const currentCommId = state.currentCommunity?.id || null;
+                    const currentCommCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                    const inCurrentCommunity = (u) => {
+                        const svcIds = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                        const svcCodes = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const oneCode = (u.serviceCommunityCode || '').trim();
+                        const byId = currentCommId ? svcIds.includes(currentCommId) : false;
+                        const byCode = currentCommCode ? (svcCodes.includes(currentCommCode) || oneCode === currentCommCode) : false;
+                        return byId || byCode;
+                    };
+                    const filteredUsers = users.filter(u => inCurrentCommunity(u));
+                    __allowedIdsSet = new Set(filteredUsers.map(u => u.id));
+
+                    filteredUsers.sort((a, b) => (a.name||'').localeCompare(b.name||'', 'zh-Hant')).forEach(user => {
                         const option = document.createElement('option');
                         option.value = user.id;
                         option.textContent = user.name;
@@ -11041,38 +11278,39 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                     }
                     
                     // 初始載入記錄
-                    loadAttendanceRecords();
+                    loadAttendanceRecords(__allowedIdsSet);
                 });
                 
                 const dateInput = document.getElementById('record-date');
-                userSelect.addEventListener('change', loadAttendanceRecords);
-                dateInput.addEventListener('change', loadAttendanceRecords);
+                userSelect.addEventListener('change', () => loadAttendanceRecords(__allowedIdsSet));
+                dateInput.addEventListener('change', () => loadAttendanceRecords(__allowedIdsSet));
                 
-                async function loadAttendanceRecords() {
+                async function loadAttendanceRecords(allowedIdsSetParam) {
                     const selectedDate = new Date(dateInput.value);
                     const startOfDay = new Date(selectedDate);
                     startOfDay.setHours(0, 0, 0, 0);
                     const endOfDay = new Date(selectedDate);
                     endOfDay.setHours(23, 59, 59, 999);
                     const selectedUserId = userSelect.value;
+                    const currentComm = state.currentCommunity || null;
                     
                     const recordsRef = collection(db, "clockInRecords");
                     let q;
                     const { Timestamp } = window.__fs || {};
                     const startTS = Timestamp?.fromDate ? Timestamp.fromDate(startOfDay) : startOfDay;
                     const endTS = Timestamp?.fromDate ? Timestamp.fromDate(endOfDay) : endOfDay;
-                    
-                    if (selectedUserId === 'all') {
-                        q = query(recordsRef, 
-                            where("timestamp", ">=", startTS),
-                            where("timestamp", "<=", endTS)
-                        );
-                    } else {
-                        q = query(recordsRef, 
-                            where("userId", "==", selectedUserId),
-                            where("timestamp", ">=", startTS),
-                            where("timestamp", "<=", endTS)
-                        );
+                    try {
+                        const base = [where("timestamp", ">=", startTS), where("timestamp", "<=", endTS)];
+                        if (selectedUserId !== 'all') base.unshift(where("userId", "==", selectedUserId));
+                        // 不在查詢層面套用 communityId，避免舊紀錄缺欄位被排除；改以前端過濾
+                        q = query(recordsRef, ...base);
+                    } catch (_) {
+                        // 後備查詢（避免複合索引未建立）
+                        if (selectedUserId === 'all') {
+                            q = query(recordsRef, where("timestamp", ">=", startTS), where("timestamp", "<=", endTS));
+                        } else {
+                            q = query(recordsRef, where("userId", "==", selectedUserId), where("timestamp", ">=", startTS), where("timestamp", "<=", endTS));
+                        }
                     }
                     
                     const recordsList = document.getElementById('attendance-records-list');
@@ -11089,6 +11327,31 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                         querySnapshot.forEach(doc => {
                             records.push({ id: doc.id, ...doc.data() });
                         });
+                        // 套用社區過濾與角色過濾（all 情況）
+                        const allowedIdsSet = allowedIdsSetParam instanceof Set ? allowedIdsSetParam : null;
+                        let finalRecords;
+                        if (selectedUserId === 'all') {
+                            // 依社區成員白名單過濾；若白名單為空則以紀錄上的社區欄位做後備過濾
+                            if (allowedIdsSet && allowedIdsSet.size > 0) {
+                                finalRecords = records.filter(r => allowedIdsSet.has(r.userId));
+                            } else {
+                                const commId = state.currentCommunity?.id || null;
+                                const commCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                                finalRecords = records.filter(r => {
+                                    const rid = (r.communityId || r.community)?.id || null;
+                                    const rcode = r.communityCode || (r.community?.code) || null;
+                                    return (commId && rid === commId) || (commCode && rcode === commCode);
+                                });
+                            }
+                        } else {
+                            // 指定人員時，顯示該人員的全部當日紀錄
+                            finalRecords = records.filter(r => r.userId === selectedUserId);
+                        }
+
+                        if (!finalRecords || finalRecords.length === 0) {
+                            recordsList.innerHTML = `<p class="text-center text-gray-500 p-4">無打卡紀錄</p>`;
+                            return;
+                        }
                         
                         // 獲取所有用戶資料，用於顯示名稱
                         getDocs(usersRef).then((usersSnapshot) => {
@@ -11098,44 +11361,40 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
                             });
                             
                             recordsList.innerHTML = '';
-                            records.sort((a, b) => {
+                            finalRecords.sort((a, b) => {
                                 const timeA = a.timestamp?.toDate?.() || new Date(0);
                                 const timeB = b.timestamp?.toDate?.() || new Date(0);
                                 return timeB - timeA;
                             }).forEach(record => {
-                                const time = record.timestamp?.toDate?.() || new Date();
                                 const userName = usersMap[record.userId] || '未知用戶';
+                                const statusText = getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null);
+                                const statusColor = getStatusColor(statusText);
                                 const abnormalInfo = computeRecordAbnormal(record, (users.find(u => u.id === record.userId)?.serviceCommunities) || []);
                                 const abnormalHtml = (abnormalInfo && abnormalInfo.isAbnormal)
-                                    ? `<div class="mt-1"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class=\"ml-2 text-xs text-gray-500\">${abnormalInfo.detail}</span>` : ''}</div>`
+                                    ? `<div class="mt-1 flex items-center"><span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 border border-red-200">打卡位置異常</span>${abnormalInfo.detail ? `<span class=\"ml-2 text-xs text-gray-500\">${abnormalInfo.detail}</span>` : ''}</div>`
                                     : '';
-                                
+
                                 const card = document.createElement('div');
-                                card.className = 'bg-white p-4 rounded-lg shadow border border-gray-200';
+                                card.className = 'bg-white p-3 rounded-lg shadow-sm border mb-3';
                                 card.innerHTML = `
                                     <div class="flex justify-between items-start">
                                         <div>
-                                            <div class="font-semibold">${userName}</div>
-                                            <div class="text-sm text-gray-500">${time.toLocaleString('zh-TW', { hour12: false })}</div>
-                                            <div class="mt-1 flex items-center">
-                                                <span class="px-2 py-0.5 rounded text-sm ${getStatusBgColor(getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null))}">${getStatusDisplayText(record.type || '未知', record.locationName || null, record.dutyType || null)}</span>
-                        ${record.location && typeof record.location.latitude === 'number' && typeof record.location.longitude === 'number' ? `<span class="ml-2 text-sm text-gray-500">${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}</span>` : ''}
-                                            </div>
-                                            <div class="mt-1 text-xs text-gray-500">裝置ID: ${record.deviceId || '未知'}</div>
+                                            <p class="text-sm text-gray-700">${userName}</p>
+                                            <p class="font-bold text-lg ${statusColor}">${statusText}</p>
+                                            <p class="text-sm text-gray-600">${formatDate(record.timestamp)}</p>
                                             ${abnormalHtml}
                                         </div>
-                                        <div class="flex space-x-2 items-start"></div>
                                     </div>
-                                    <div class="mt-2 flex space-x-2 overflow-x-auto items-center">
+                                    <div class="mt-2 flex space-x-2 overflow-x-auto">
                                         ${record.photoUrls && record.photoUrls.length > 0 ? `
-                                            <button class="photo-btn bg-blue-500 text-white px-2 py-1 rounded text-sm" 
+                                            <button class="photo-btn bg-green-500 text-white px-2 py-1 rounded text-sm" 
                                                 data-photos='${encodeURIComponent(JSON.stringify(record.photoUrls || []))}' 
                                                 data-descriptions='${encodeURIComponent(JSON.stringify(record.descriptions || []))}'>
                                                 <i data-lucide="image"></i> 照片 (${record.photoUrls.length})
                                             </button>
                                         ` : ''}
                                         ${record.location ? `
-                                            <button class="map-btn bg-green-500 text-white px-2 py-1 rounded text-sm" 
+                                            <button class="map-btn bg-blue-500 text-white px-2 py-1 rounded text-sm" 
                                                 data-lat="${record.location.latitude}" 
                                                 data-lng="${record.location.longitude}">
                                                 <i data-lucide="map-pin"></i> 地圖
@@ -11238,406 +11497,388 @@ const roleBorderClass = roleColorMap[titleKey] || 'border-white';
             }
             
             function renderTrackingAttendanceSchedule(container, params = {}) {
-  const todayIso = new Date().toISOString().split('T')[0];
-  container.innerHTML = `
-    <div class="p-4 space-y-4">
-      <div class="flex flex-wrap items-center gap-4 mb-2">
-        <div class="flex items-center space-x-2">
-          <label for="schedule-date" class="text-sm font-medium">日期:</label>
-          <input type="date" id="schedule-date" value="${todayIso}" class="border border-gray-300 rounded-md px-2 py-1" />
-        </div>
-        <div class="flex items-center space-x-2">
-          <label for="schedule-user" class="text-sm font-medium">人員:</label>
-          <select id="schedule-user" class="border border-gray-300 rounded-md px-2 py-1">
-            <option value="all">全部人員</option>
-          </select>
-        </div>
-        <!-- 哨點篩選已移除：列表改為顯示全社區排班 -->
-      </div>
-      <div class="bg-white rounded-lg shadow overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200 text-sm">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-3 py-2 text-left whitespace-nowrap">角色</th>
-              <th class="px-3 py-2 text-left whitespace-nowrap">指派人員</th>
-              <th class="px-3 py-2 text-left whitespace-nowrap">排定上班時間</th>
-              <th class="px-3 py-2 text-left whitespace-nowrap">實際打卡時間</th>
-              <th class="px-3 py-2 text-left whitespace-nowrap">排定下班時間</th>
-              <th class="px-3 py-2 text-left whitespace-nowrap">實際打卡下班時間</th>
-              <th class="px-3 py-2 text-left whitespace-nowrap">狀態</th>
-              <th class="px-3 py-2 text-left whitespace-nowrap">操作</th>
-            </tr>
-          </thead>
-          <tbody id="schedule-rows">
-            <tr><td colspan="8" class="px-3 py-3 text-center text-gray-500">正在載入當日排班...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-  try { lucide.createIcons(); } catch (_) {}
+                const todayIso = new Date().toISOString().split('T')[0];
+                container.innerHTML = `
+                    <div class="p-4 space-y-4">
+                        <div class="flex flex-wrap items-center gap-4 mb-2">
+                            <div class="flex items-center space-x-2">
+                                <label for="user-select" class="text-sm font-medium">選擇人員:</label>
+                                <select id="user-select" class="border border-gray-300 rounded-md px-2 py-1">
+                                    <option value="all">全部人員</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <label for="record-date" class="text-sm font-medium">日期:</label>
+                                <input type="date" id="record-date" value="${params.selectedDate || todayIso}" class="border border-gray-300 rounded-md px-2 py-1" />
+                            </div>
+                            <div class="flex items-center">
+                                <button id="generate-all-month-report" class="px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm">全部人員月報表</button>
+                            </div>
+                        </div>
+                        <div id="attendance-records-list" class="space-y-3">
+                            <div class="text-center p-4 text-gray-500">正在讀取紀錄...</div>
+                        </div>
+                    </div>`;
+                try { lucide.createIcons(); } catch (_) {}
 
-  const dateInput = document.getElementById('schedule-date');
-  const userSelect = document.getElementById('schedule-user');
-  const rowsEl = document.getElementById('schedule-rows');
-  // 哨點選擇已移除
+                const userSelect = document.getElementById('user-select');
+                const dateInput = document.getElementById('record-date');
+                let allowedIds = [];
 
-  // 本地使用者清單，避免依賴 pageState
-  let scheduleUsers = [];
-  const getUserById = (uid) => {
-    const fromLocal = scheduleUsers.find(x => x.id === uid);
-    const fromPageState = (window.pageState?.communityUsers || []).find(x => x.id === uid);
-    return fromLocal || fromPageState || null;
-  };
-  const getUserNameById = (uid) => {
-    const u = getUserById(uid);
-    return u ? (u.name || u.displayName || u.id) : (uid || '未指派');
-  };
-  const getUserTitleById = (uid) => {
-    const u = getUserById(uid);
-    return u ? ((u.jobTitle || u.applicationTitle || u.role || '') + '') : '';
-  };
+                const loadUsersOptions = async () => {
+                    const db = window.__db;
+                    const { collection, getDocs } = window.__fs || {};
+                    const selectedCommunityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
+                    const selectedCommunityCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                    const userInCurrentCommunity = (u) => {
+                        const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const codeOne = (u.serviceCommunityCode || '').trim();
+                        const byIdMatch = selectedCommunityId ? ids.includes(selectedCommunityId) : false;
+                        const byCodeMatch = selectedCommunityCode ? (codesArr.includes(selectedCommunityCode) || codeOne === selectedCommunityCode) : false;
+                        return byIdMatch || byCodeMatch;
+                    };
 
-  const roleOrder = { '總幹事': 0, '秘書': 1, '保全': 2, '清潔': 3, '機電': 4 };
-  const toDate = (tsOrDate) => tsOrDate?.toDate?.() || (tsOrDate instanceof Date ? tsOrDate : new Date(tsOrDate));
-  const fmtHM = (date) => {
-    if (!date || isNaN(date.getTime())) return '';
-    return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
-  };
-  const getStatusBgColor = (typeOrText) => {
-    const s = String(typeOrText || '').toLowerCase();
-    if (s.includes('上班') || s.includes('返回') || s.includes('在辦')) return 'bg-green-100 text-green-800';
-    if (s.includes('下班')) return 'bg-red-100 text-red-800';
-    if (s.includes('外出') || s.includes('抵達') || s.includes('離開')) return 'bg-blue-100 text-blue-800';
-    if (s.includes('請假')) return 'bg-orange-100 text-orange-800';
-    if (s.includes('特殊勤務') || s.includes('現金班')) return 'bg-indigo-100 text-indigo-800';
-    return 'bg-gray-100 text-gray-800';
-  };
+                    let users = [];
+                    if (Array.isArray(window.pageState?.communityUsers) && window.pageState.communityUsers.length) {
+                        users = window.pageState.communityUsers.slice();
+                    } else if (db && collection && getDocs) {
+                        try {
+                            const snap = await getDocs(collection(db, 'users'));
+                            snap.forEach(d => { const data = d.data(); users.push({ id: d.id, name: data.name || data.displayName || d.id, ...data }); });
+                        } catch (e) { console.warn('載入使用者失敗', e); }
+                        users = users.filter(userInCurrentCommunity);
+                    }
+                    // 角色過濾（僅顯示指定角色）
+                    const allowedRoles = ['總幹事','秘書','保全','清潔','機電'];
+                    const pickTitle = (u) => ((u.applicationTitle || u.jobTitle || u.role || '').trim());
+                    users = users.filter(u => allowedRoles.includes(pickTitle(u)));
 
-  const ensureUsersOptions = async () => {
-    const { collection, getDocs } = window.__fs || {};
-    const db = window.__db;
-    // 依目前選定社區判斷成員歸屬
-    const selectedCommunityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
-    const selectedCommunityCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
-    const userInCurrentCommunity = (u) => {
-      const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
-      const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
-      const codeOne = (u.serviceCommunityCode || '').trim();
-      const byIdMatch = selectedCommunityId ? ids.includes(selectedCommunityId) : false;
-      const byCodeMatch = selectedCommunityCode ? (codesArr.includes(selectedCommunityCode) || codeOne === selectedCommunityCode) : false;
-      return byIdMatch || byCodeMatch;
-    };
-    // 優先使用 pageState 已載入的社區使用者
-    if (Array.isArray(window.pageState?.communityUsers) && window.pageState.communityUsers.length) {
-      // 頁面已載入的社區人員名單（已是社區帳號清單）
-      scheduleUsers = window.pageState.communityUsers.slice();
-    } else if (db && collection && getDocs) {
-      // 後援：從 users 直接載入
-      try {
-        const snap = await getDocs(collection(db, 'users'));
-        scheduleUsers = [];
-        snap.forEach(d => {
-          const data = d.data();
-          scheduleUsers.push({ id: d.id, name: data.name || data.displayName || d.id, ...data });
-        });
-      } catch (e) {
-        console.warn('載入使用者失敗', e);
-      }
-    }
+                    users.sort((a,b)=> (a.name||'').localeCompare(b.name||'', 'zh-Hant')).forEach(u => {
+                        const opt = document.createElement('option');
+                        opt.value = u.id; opt.textContent = u.name || u.displayName || u.id;
+                        userSelect.appendChild(opt);
+                    });
+                    allowedIds = users.map(u => u.id);
+                    if (params && params.selectedUserId) userSelect.value = params.selectedUserId;
+                };
 
-    // 若是後援載入，需過濾為「僅此社區帳號清單」
-    if (!Array.isArray(window.pageState?.communityUsers) || !window.pageState.communityUsers.length) {
-      scheduleUsers = scheduleUsers.filter(userInCurrentCommunity);
-    }
+                const loadRecords = () => {
+                    const selectedUserId = userSelect.value || 'all';
+                    const selectedDateStr = dateInput.value || todayIso;
+                    renderAttendanceRecordsList('attendance-records-list', selectedUserId, selectedDateStr, allowedIds);
+                };
 
-    // 僅保留「總幹事、秘書、保全、清潔、機電」
-    const allowedRoles = new Set(['總幹事','秘書','保全','清潔','機電']);
-    const filteredUsers = scheduleUsers.filter(u => allowedRoles.has((u.jobTitle || u.applicationTitle || u.role || '').trim()));
-    filteredUsers.sort((a,b)=> (a.name||'').localeCompare(b.name||'', 'zh-Hant')).forEach(u => {
-      const opt = document.createElement('option');
-      opt.value = u.id; opt.textContent = u.name || u.displayName || u.id;
-      userSelect.appendChild(opt);
-    });
-    if (params && params.selectedUserId) userSelect.value = params.selectedUserId;
-  };
+                loadUsersOptions().then(loadRecords);
+                userSelect.addEventListener('change', loadRecords);
+                dateInput.addEventListener('change', loadRecords);
 
-  // 取得哨點名稱（優先使用 pageState 的 posts，後援查詢 posts 集合）
-  let postNamesById = {};
-  const ensurePostNames = async () => {
-    try {
-      if (Object.keys(postNamesById).length) return;
-      const cid = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
-      // 先用已載入的 posts
-      if (Array.isArray(window.pageState?.posts) && window.pageState.posts.length) {
-        window.pageState.posts.forEach(p => { postNamesById[p.id] = p.name || '未命名哨點'; });
-        return;
-      }
-      const { collection, getDocs } = window.__fs || {};
-      const db = window.__db;
-      if (db && collection && getDocs && cid) {
-        const snap = await getDocs(collection(db, 'communities', cid, 'posts'));
-        snap.forEach(d => { const data = d.data() || {}; postNamesById[d.id] = data.name || '未命名哨點'; });
-      }
-    } catch(_) {}
-  };
+                // 全部人員月報表：選擇月份彈窗與生成
+                const btnAllReport = document.getElementById('generate-all-month-report');
+                btnAllReport?.addEventListener('click', () => openAllMonthReportModal());
 
-  const computeStatusText = (now, start, end, startRec, endRec, cashShift) => {
-    try {
-      if (cashShift === true) return '轉現金班';
-      if (now < start) return '尚未到上班時間';
-      if (!startRec) return '未打上班卡';
-      if (now < end) return '正常上班';
-      if (endRec) return '正常下班';
-      return '未打下班卡';
-    } catch(_) { return '未打卡'; }
-  };
+                function openAllMonthReportModal() {
+                    const now = new Date();
+                    const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+                    const modal = document.createElement('div');
+                    modal.className = 'fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50';
+                    modal.innerHTML = `
+                        <div class="bg-white rounded-lg shadow-xl w-11/12 max-w-md overflow-hidden">
+                            <div class="px-4 py-3 bg-indigo-600 text-white flex items-center justify-between">
+                                <h3 class="font-semibold">選擇月份</h3>
+                                <button class="close-month-modal">
+                                    <i data-lucide="x" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                            <div class="p-4 space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium mb-1">月份</label>
+                                    <input type="month" id="all-month-input" value="${ym}" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                                </div>
+                                <div class="flex justify-end space-x-2">
+                                    <button class="close-month-modal px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">取消</button>
+                                    <button id="gen-all-month-report" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">生成全部月報表</button>
+                                </div>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(modal);
+                    try { lucide.createIcons(); } catch(e) {}
+                    modal.querySelectorAll('.close-month-modal').forEach(btn => btn.addEventListener('click', () => document.body.removeChild(modal)));
+                    document.getElementById('gen-all-month-report').addEventListener('click', async () => {
+                        const mi = document.getElementById('all-month-input').value;
+                        if (!mi) { showToast('請選擇月份', true); return; }
+                        document.body.removeChild(modal);
+                        await generateAllMonthlyReport(mi);
+                    });
+                }
 
-  const renderList = async () => {
-    const iso = dateInput.value || todayIso;
-    const communityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
-    const { collection, getDocs, query, where, Timestamp } = window.__fs || {};
-    const db = window.__db;
-    if (!communityId || !collection || !getDocs) {
-      rowsEl.innerHTML = `<tr><td colspan="8" class="px-3 py-3 text-center text-red-600">資料庫或社區尚未就緒</td></tr>`;
-      return;
-    }
+                async function generateAllMonthlyReport(ymStr) {
+                    const [yearStr, monthStr] = ymStr.split('-');
+                    const year = parseInt(yearStr, 10); const monthIndex = parseInt(monthStr, 10) - 1; // 0-based
+                    const start = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+                    const end = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
 
-    rowsEl.innerHTML = `<tr><td colspan="8" class="px-3 py-3 text-center text-gray-500">正在載入當日排班...</td></tr>`;
+                    const { collection, where, query, getDocs, Timestamp, doc, getDoc } = window.__fs; const db = window.__db;
+                    const startTS = Timestamp?.fromDate ? Timestamp.fromDate(new Date(year, monthIndex, 1)) : start;
+                    const endTS = Timestamp?.fromDate ? Timestamp.fromDate(new Date(year, monthIndex + 1, 0, 23, 59, 59, 999)) : end;
 
-    // 讀取當日所有哨點的排班（postSchedules）
-    const schedulesRef = collection(db, 'communities', communityId, 'postSchedules');
-    const snap = await getDocs(query(schedulesRef, where('dateIso', '==', iso)));
-    const shifts = [];
-    snap.forEach(d => {
-      const data = d.data();
-      const postId = data.postId;
-      const arr = Array.isArray(data.shifts) ? data.shifts : [];
-      arr.forEach((s, idx) => {
-        shifts.push({
-          role: s.role || '保全',
-          assignees: Array.isArray(s.assignees) ? s.assignees : [],
-          startStr: s.start || '07:00',
-          endStr: s.end || '19:00',
-          endDateIso: s.endDateIso || iso,
-          cashShift: s.cashShift === true,
-          docId: d.id,
-          postId,
-          dateIso: iso,
-          shiftIndex: idx
-        });
-      });
-    });
+                    // 讀取目前社區的所有帳號（不限制角色）
+                    const selectedCommunityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
+                    const selectedCommunityCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
+                    const userInCurrentCommunity = (u) => {
+                        const ids = Array.isArray(u.serviceCommunities) ? u.serviceCommunities : [];
+                        const codesArr = Array.isArray(u.serviceCommunityCodes) ? u.serviceCommunityCodes : [];
+                        const codeOne = (u.serviceCommunityCode || '').trim();
+                        const byIdMatch = selectedCommunityId ? ids.includes(selectedCommunityId) : false;
+                        const byCodeMatch = selectedCommunityCode ? (codesArr.includes(selectedCommunityCode) || codeOne === selectedCommunityCode) : false;
+                        return byIdMatch || byCodeMatch;
+                    };
+                    let communityUsers = [];
+                    try {
+                        const snap = await getDocs(collection(db, 'users'));
+                        snap.forEach(d => { const data = d.data(); communityUsers.push({ id: d.id, name: data.name || data.displayName || d.id, ...data }); });
+                        communityUsers = communityUsers.filter(userInCurrentCommunity);
+                        // 僅保留指定職務（總幹事、秘書、保全、清潔、機電）
+                        const allowedRoleTokens = ['總幹事','秘書','保全','清潔','機電'];
+                        const norm = (s) => (s || '').toString().trim();
+                        const toArray = (x) => Array.isArray(x) ? x : (x ? [x] : []);
+                        const matchAllowedRole = (u) => {
+                            const buckets = [
+                                u.role, u.jobTitle, u.applicationTitle, u.position, u.title, u.department, u.category, u.type,
+                                ...(toArray(u.roles)), ...(toArray(u.serviceRoles)), ...(toArray(u.tags)),
+                                norm(u.dutyTitle), norm(u.staffTitle), norm(u.workTitle)
+                            ].map(norm).filter(Boolean);
+                            if (buckets.length === 0) return false;
+                            const joined = buckets.join(' ');
+                            return allowedRoleTokens.some(tok => joined.includes(tok));
+                        };
+                        communityUsers = communityUsers.filter(matchAllowedRole);
+                    } catch (e) { console.warn('載入所有社區使用者失敗', e); }
 
-    // 篩選人員（若選擇特定人員，只顯示包含該人員之排班）
-    const selectedUserId = userSelect.value;
-    // 哨點選單已移除，改為顯示所有排班（不再依哨點篩選）
+                    // 讀取週五值班名單（一次）
+                    let fridayDutyRoster = {};
+                    try {
+                        const settingsRef = doc(db, 'settings', 'general');
+                        const settingsSnap = await getDoc(settingsRef);
+                        fridayDutyRoster = settingsSnap.exists() ? (settingsSnap.data().fridayDutyRoster || {}) : {};
+                    } catch (e) { console.warn('讀取值班名單失敗', e); }
 
-    // 先依人員篩選
-    let filtered = selectedUserId === 'all' ? shifts.slice() : shifts.filter(s => s.assignees.includes(selectedUserId));
+                    // 讀取本月排班資料（一次）
+                    let schedulesByDate = {};
+                    try {
+                        const sq = query(
+                            collection(db, 'postSchedules'),
+                            where('dateTS', '>=', startTS),
+                            where('dateTS', '<=', endTS)
+                        );
+                        const ss = await getDocs(sq);
+                        ss.forEach(docSnap => {
+                            const data = docSnap.data();
+                            const di = data.dateIso;
+                            if (!di) return;
+                            if (!schedulesByDate[di]) schedulesByDate[di] = [];
+                            schedulesByDate[di].push(data);
+                        });
+                    } catch(e) { console.warn('讀取排班資料失敗', e); }
 
-    // 不再依哨點篩選，保留依人員的篩選（顯示全社區排班）
+                    const norm = (s) => (s || '').trim();
+                    const hasScheduleForUser = (dateIso, user) => {
+                        const docs = schedulesByDate[dateIso];
+                        if (!Array.isArray(docs) || docs.length === 0) return false;
+                        const uid = user.id;
+                        const myName = (user?.name || user?.displayName || user?.email || '').trim();
+                        return docs.some(sd => {
+                            if (sd?.isScheduledDay === true) return true; // 全體排班
+                            const shifts = Array.isArray(sd?.shifts) ? sd.shifts : [];
+                            return shifts.some(s => {
+                                if (!s) return false;
+                                if (typeof s === 'string') return norm(s) === myName;
+                                if (typeof s === 'object') return (norm(s.name) === myName) || (norm(s.assigneeName) === myName) || (s.userId === uid) || (s.assigneeId === uid);
+                                return false;
+                            });
+                        });
+                    };
 
-    // 讀取當日打卡記錄
-    const startOfDay = new Date(`${iso}T00:00:00`);
-    const endOfDay = new Date(`${iso}T23:59:59`);
-    const startTS = Timestamp?.fromDate ? Timestamp.fromDate(startOfDay) : startOfDay;
-    const endTS = Timestamp?.fromDate ? Timestamp.fromDate(endOfDay) : endOfDay;
-    const clockRef = collection(db, 'clockInRecords');
-    const clockSnap = await getDocs(query(clockRef, where('timestamp', '>=', startTS), where('timestamp', '<=', endTS)));
-    const recsByUser = {};
-    clockSnap.forEach(dd => {
-      const r = { id: dd.id, ...dd.data() };
-      if (!recsByUser[r.userId]) recsByUser[r.userId] = [];
-      recsByUser[r.userId].push(r);
-    });
+                    // 準備列印容器（多使用者）
+                    const old = document.getElementById('monthly-report-container');
+                    if (old) old.remove();
+                    const container = document.createElement('div');
+                    container.id = 'monthly-report-container';
+                    container.className = 'fixed inset-0 z-50 bg-white';
+                    const ymTag = `${year}-${String(monthIndex+1).padStart(2,'0')}`;
+                    container.innerHTML = `
+                        <div class="bg-white w-full h-full flex flex-col">
+                            <div class="px-4 py-3 bg-indigo-600 text-white flex items-center justify-between shrink-0">
+                                <h3 class="font-semibold">${ymTag}出勤紀錄-全部人員</h3>
+                                <div class="space-x-2">
+                                    <button id="print-month-report" class="px-3 py-1.5 bg-white text-indigo-700 rounded hover:bg-gray-100">列印</button>
+                                    <button id="close-month-report" class="px-3 py-1.5 bg-white text-indigo-700 rounded hover:bg-gray-100">關閉</button>
+                                </div>
+                            </div>
+                            <div class="p-4 flex-1 overflow-auto">
+                                <div id="month-report-content" class="mx-auto" style="width:190mm">
+                                    <div id="month-report-inner" style="transform-origin: top left;"></div>
+                                </div>
+                            </div>
+                        </div>`;
+                    document.body.appendChild(container);
 
-    // 按角色排序
-    filtered.sort((a,b) => {
-      const ao = roleOrder[a.role] ?? 999, bo = roleOrder[b.role] ?? 999;
-      if (ao !== bo) return ao - bo;
-      const an = (a.assignees[0] ? getUserNameById(a.assignees[0]) : ''), bn = (b.assignees[0] ? getUserNameById(b.assignees[0]) : '');
-      return an.localeCompare(bn, 'zh-Hant');
-    });
+                    const inner = container.querySelector('#month-report-inner');
+                    const weekdayZh = ['日','一','二','三','四','五','六'];
 
-    const now = new Date();
-    const rows = filtered.map(s => {
-      const assId = s.assignees[0] || '';
-      const assUser = getUserById(assId);
-      const assName = assId ? getUserNameById(assId) : '未指派';
-      const start = new Date(`${s.dateIso}T${s.startStr}:00`);
-      const end = new Date(`${s.endDateIso}T${s.endStr}:00`);
-      const userRecs = recsByUser[assId] || [];
-      const startRec = userRecs.filter(r => (r.type === '上班')).sort((a,b)=> toDate(a.timestamp) - toDate(b.timestamp))[0] || null;
-      const endRec = userRecs.filter(r => (r.type === '下班')).sort((a,b)=> toDate(b.timestamp) - toDate(a.timestamp))[0] || null;
-      const startTimeDisp = startRec ? fmtHM(toDate(startRec.timestamp)) : '';
-      const endTimeDisp = endRec ? fmtHM(toDate(endRec.timestamp)) : '';
-      const statusText = computeStatusText(now, start, end, startRec, endRec, s.cashShift);
+                    for (const user of communityUsers) {
+                        // 讀取該使用者的月資料
+                        const allRecords = [];
+                        try {
+                            const rq = query(
+                                collection(db, 'clockInRecords'),
+                                where('userId', '==', user.id),
+                                where('timestamp', '>=', startTS),
+                                where('timestamp', '<=', endTS)
+                            );
+                            const rs = await getDocs(rq);
+                            rs.forEach(d => allRecords.push({ id: d.id, ...d.data() }));
+                        } catch(e) { console.warn('讀取打卡失敗', user.id, e); }
 
-      const recordInfo = (() => {
-        const sUpBy = startRec?.updatedBy || null, eUpBy = endRec?.updatedBy || null;
-        const sUpAt = startRec?.updatedAt ? toDate(startRec.updatedAt) : null;
-        const eUpAt = endRec?.updatedAt ? toDate(endRec.updatedAt) : null;
-        const maxAt = (!sUpAt && !eUpAt) ? null : (!sUpAt ? eUpAt : (!eUpAt ? sUpAt : (sUpAt > eUpAt ? sUpAt : eUpAt)));
-        const maxBy = (maxAt === sUpAt) ? sUpBy : eUpBy;
-        const byName = maxBy ? getUserNameById(maxBy) : '';
-        return maxAt ? `${byName} @ ${maxAt.toLocaleString('zh-TW', { hour12: false })}` : '';
-      })();
+                        let leaves = [];
+                        try {
+                            const lq = query(collection(db, 'leaves'), where('userId','==', user.id));
+                            const ls = await getDocs(lq);
+                            ls.forEach(docSnap => leaves.push({ id: docSnap.id, ...docSnap.data() }));
+                        } catch(e) { console.warn('讀取請假失敗', user.id, e); }
 
-      return `
-        <tr data-doc-id="${s.docId}" data-shift-index="${s.shiftIndex}" data-assignee-id="${assId}" data-start-record-id="${startRec?.id||''}" data-end-record-id="${endRec?.id||''}">
-          <td class="px-3 py-2 whitespace-nowrap">${s.role}</td>
-          <td class="px-3 py-2 whitespace-nowrap">${assName}</td>
-          <td class="px-3 py-2 whitespace-nowrap">${s.dateIso} ${s.startStr}</td>
-          <td class="px-3 py-2 whitespace-nowrap">
-            <div class="flex items-center gap-2">
-              <input type="time" class="start-time-input px-2 py-1 border rounded" value="${startTimeDisp}" placeholder="--:--" />
-              <button class="save-start-time bg-yellow-500 text-white px-2 py-1 rounded text-xs"><i data-lucide="save"></i> 儲存</button>
-            </div>
-          </td>
-          <td class="px-3 py-2 whitespace-nowrap">${s.endDateIso} ${s.endStr}</td>
-          <td class="px-3 py-2 whitespace-nowrap">
-            <div class="flex items-center gap-2">
-              <input type="time" class="end-time-input px-2 py-1 border rounded" value="${endTimeDisp}" placeholder="--:--" />
-              <button class="save-end-time bg-yellow-500 text-white px-2 py-1 rounded text-xs"><i data-lucide="save"></i> 儲存</button>
-            </div>
-          </td>
-          <td class="px-3 py-2 whitespace-nowrap">
-            <span class="px-2 py-0.5 rounded ${getStatusBgColor(statusText)}">${statusText}</span>
-          </td>
-          <td class="px-3 py-2 whitespace-nowrap">
-            <div class="flex items-center gap-2">
-              <button class="manual-clock-in bg-green-600 text-white px-2 py-1 rounded text-xs"><i data-lucide="log-in"></i> 手動上班打卡</button>
-              <button class="manual-clock-out bg-red-600 text-white px-2 py-1 rounded text-xs"><i data-lucide="log-out"></i> 手動下班打卡</button>
-              <button class="row-leave-apply bg-orange-500 text-white px-2 py-1 rounded text-xs"><i data-lucide="calendar-days"></i> 請假申請</button>
-              <button class="row-share bg-amber-500 text-white px-2 py-1 rounded text-xs"><i data-lucide="share-2"></i> 分享</button>
-              <span class="text-xs text-gray-500">${recordInfo}</span>
-            </div>
-          </td>
-        </tr>`;
-    });
+                        let duties = [];
+                        try {
+                            const dq = query(collection(db, 'specialDuties'), where('userId','==', user.id));
+                            const ds = await getDocs(dq);
+                            ds.forEach(docSnap => duties.push({ id: docSnap.id, ...docSnap.data() }));
+                        } catch(e) { console.warn('讀取特殊勤務失敗', user.id, e); }
 
-    rowsEl.innerHTML = rows.length ? rows.join('') : `<tr><td colspan="8" class="px-3 py-3 text-center text-gray-500">當日尚無排班</td></tr>`;
-    try { lucide.createIcons(); } catch (_) {}
+                        // 為該使用者建立一個區塊與表格
+                        const section = document.createElement('div');
+                        section.className = 'mb-6 monthly-report-section';
+                        section.innerHTML = `
+                            <h2 class="text-xl font-bold mb-2 text-center">${ymTag}出勤紀錄-${user.name || user.id}</h2>
+                            <table class="w-full border border-gray-300 text-sm">
+                                <thead>
+                                    <tr class="bg-gray-100">
+                                        <th class="border px-2 py-1">日期</th>
+                                        <th class="border px-2 py-1">星期</th>
+                                        <th class="border px-2 py-1">上班打卡時間</th>
+                                        <th class="border px-2 py-1">下班打卡時間</th>
+                                        <th class="border px-2 py-1">總時數</th>
+                                        <th class="border px-2 py-1">備註</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>`;
+                        inner.appendChild(section);
+                        const bodyEl = section.querySelector('tbody');
 
-    bindRowEvents();
-  };
+                        const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+                        for (let d = 1; d <= daysInMonth; d++) {
+                            const dayStart = new Date(year, monthIndex, d, 0, 0, 0, 0);
+                            const dayEnd = new Date(year, monthIndex, d, 23, 59, 59, 999);
+                            const w = dayStart.getDay();
+                            const dateLabel = `${year}-${String(monthIndex+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 
-  const bindRowEvents = () => {
-    const { addDoc, collection, Timestamp, serverTimestamp, updateDoc, doc, getDoc, setDoc } = window.__fs || {};
-    const db = window.__db;
+                            const recs = allRecords.filter(r => {
+                                const ts = r.timestamp?.toDate?.() || (r.timestamp ? new Date(r.timestamp) : null);
+                                if (!ts) return false;
+                                return ts >= dayStart && ts <= dayEnd;
+                            }).sort((a,b) => {
+                                const ta = a.timestamp?.toDate?.() || (a.timestamp ? new Date(a.timestamp) : new Date(0));
+                                const tb = b.timestamp?.toDate?.() || (b.timestamp ? new Date(b.timestamp) : new Date(0));
+                                return ta - tb;
+                            });
 
-    const parseTimeInput = (iso, hm) => {
-      if (!iso || !hm) return null;
-      const dt = new Date(`${iso}T00:00:00`);
-      const [hh, mm] = hm.split(':');
-      dt.setHours(parseInt(hh,10)||0, parseInt(mm,10)||0, 0, 0);
-      return dt;
-    };
+                            let startRecord = recs.find(r => (r.type === '上班')) || recs.find(r => (r.type === '外出')) || null;
+                            const isEndType = (r) => {
+                                const t = r?.type || '';
+                                return t === '下班' || (typeof t === 'string' && t.includes('下班')) || r?.auto === true || r?.autoClockOut === true || r?.isAuto === true;
+                            };
+                            let endRecord = recs.slice().reverse().find(isEndType) || null;
+                            const fmt = (dt) => dt ? `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}` : '';
+                            const startTime = startRecord ? (startRecord.timestamp?.toDate?.() || new Date(startRecord.timestamp)) : null;
+                            const endTime = endRecord ? (endRecord.timestamp?.toDate?.() || new Date(endRecord.timestamp)) : null;
+                            const startText = startTime ? fmt(startTime) : '';
+                            const endText = endTime ? fmt(endTime) : '';
 
-    const updateClockTime = async (assigneeId, type, iso, hm, existingRecordId = null) => {
-      if (!assigneeId || !type || !iso || !hm) { showToast('時間無效', true); return; }
-      const user = window.__auth?.currentUser;
-      const dt = parseTimeInput(iso, hm);
-      if (!dt) { showToast('時間無效', true); return; }
-          try {
-            if (existingRecordId) {
-              await updateDoc(doc(db, 'clockInRecords', existingRecordId), {
-                timestamp: Timestamp.fromDate(dt),
-                updatedBy: user?.uid || '',
-                updatedAt: Timestamp.fromDate(new Date())
-              });
-              showToast('已更新時間');
-            } else {
-              await addDoc(collection(db, 'clockInRecords'), {
-                userId: assigneeId,
-                type: type,
-                timestamp: Timestamp.fromDate(dt),
-                location: state.currentLocation ? { latitude: state.currentLocation.lat, longitude: state.currentLocation.lng } : null,
-                photoUrls: [],
-                descriptions: [],
-                deviceId: state.deviceId || 'manual',
-                locationName: state.currentCommunity?.name || '',
-                dutyType: '',
-                isAutomatic: false,
-                communityId: state.currentCommunity?.id || null,
-                communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null,
-                createdAt: serverTimestamp()
-              });
-              showToast('已新增打卡');
+                            let totalHours = '';
+                            if (startTime && endTime && endTime > startTime) {
+                                const diffMs = endTime - startTime;
+                                totalHours = (diffMs / 3600000).toFixed(2);
+                            }
+
+                            let indicators = [];
+                            const nowForReport = new Date();
+                            const todayEndForReport = new Date(nowForReport.getFullYear(), nowForReport.getMonth(), nowForReport.getDate(), 23, 59, 59, 999);
+                            const isFutureDayForNotes = dayStart > todayEndForReport;
+                            const nextDay = new Date(dayStart); nextDay.setDate(nextDay.getDate()+1);
+                            if (!isFutureDayForNotes) {
+                                const isDutyBySpecial = duties.some(di => {
+                                    const s = di.startTime?.toDate?.() || (di.startTime ? new Date(di.startTime) : null);
+                                    const e = di.endTime?.toDate?.() || (di.endTime ? new Date(di.endTime) : null);
+                                    if (!s || !e) return false;
+                                    return s < nextDay && e > dayStart;
+                                });
+                                const rosterNamesForDay = fridayDutyRoster[dateLabel] || [];
+                                const isRosterDuty = Array.isArray(rosterNamesForDay) && rosterNamesForDay.some(n => norm(n) === norm(user.name));
+                                const isDuty = isDutyBySpecial || isRosterDuty;
+                                const scheduled = hasScheduleForUser(dateLabel, user);
+                                const hasAnyRecord = recs.length > 0;
+                                const isLeave = leaves.some(l => {
+                                    const s = l.startTime?.toDate?.() || (l.startTime ? new Date(l.startTime) : null);
+                                    const e = l.endTime?.toDate?.() || (l.endTime ? new Date(l.endTime) : null);
+                                    if (!s || !e) return false;
+                                    return s < nextDay && e > dayStart; // overlap
+                                });
+                                if (!scheduled && !isLeave && !isDuty && !hasAnyRecord) {
+                                    indicators.push('排休');
+                                }
+                                if (isLeave) {
+                                    indicators.push('請假');
+                                }
+                            }
+
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td class="border px-2 py-1">${dateLabel}</td>
+                                <td class="border px-2 py-1">${weekdayZh[w]}</td>
+                                <td class="border px-2 py-1">${startText}</td>
+                                <td class="border px-2 py-1">${endText}</td>
+                                <td class="border px-2 py-1">${totalHours}</td>
+                                <td class="border px-2 py-1">${indicators.join('、')}</td>`;
+                            bodyEl.appendChild(tr);
+                        }
+                    }
+
+                    // 注入列印樣式（沿用個人月報表樣式）
+                    if (!document.getElementById('monthly-report-print-style')) {
+                        const style = document.createElement('style');
+                        style.id = 'monthly-report-print-style';
+                        style.textContent = `
+                        @page { size: A4 portrait; margin: 10mm; }
+                        @media print {
+                            body { -webkit-print-color-adjust: exact; }
+                            body > * { display: none !important; }
+                            #monthly-report-container { display: block !important; position: static !important; }
+                            #monthly-report-container .px-4.py-3.bg-indigo-600 { display: none !important; }
+                            #monthly-report-container .p-4.flex-1 { padding: 0 !important; }
+                            #month-report-content { width: 190mm !important; margin: 0 auto !important; }
+                            table { border-collapse: collapse; }
+                            th, td { font-size: 10px; line-height: 1.15; padding: 2px 4px; }
+                            .monthly-report-section { page-break-after: always; break-after: page; height: 270mm; overflow: hidden; }
+                            .monthly-report-section:last-child { page-break-after: auto; }
+                        }
+                        `;
+                        document.head.appendChild(style);
+                    }
+
+                    container.querySelector('#close-month-report').addEventListener('click', () => container.remove());
+                    container.querySelector('#print-month-report').addEventListener('click', () => { window.print(); });
+                }
             }
-          } catch (e) {
-        console.error('updateClockTime error', e);
-        showToast('更新失敗：請檢查權限或格式', true);
-      }
-    };
-
-    const manualClock = async (row, type) => {
-      const assigneeId = row.getAttribute('data-assignee-id') || '';
-      try {
-        await addDoc(collection(db, 'clockInRecords'), {
-          userId: assigneeId,
-          type: type,
-          timestamp: Timestamp.fromDate(new Date()),
-          location: state.currentLocation ? { latitude: state.currentLocation.lat, longitude: state.currentLocation.lng } : null,
-          photoUrls: [],
-          descriptions: [],
-          deviceId: state.deviceId || 'manual',
-          locationName: state.currentCommunity?.name || '',
-          dutyType: '',
-          isAutomatic: false,
-          communityId: state.currentCommunity?.id || null,
-          communityCode: state.currentCommunity?.code || state.currentCommunity?.communityCode || null,
-          createdAt: serverTimestamp()
-        });
-        showToast(type === '上班' ? '已手動上班打卡' : '已手動下班打卡');
-        await renderList();
-      } catch (e) { console.error('manual clock error', e); showToast('手動打卡失敗', true); }
-    };
-
-    // 綁定按鈕
-    rowsEl.querySelectorAll('tr').forEach(tr => {
-      tr.querySelector('.save-start-time')?.addEventListener('click', async () => {
-        const assigneeId = tr.getAttribute('data-assignee-id') || '';
-        const iso = dateInput.value;
-        const hm = tr.querySelector('.start-time-input')?.value || '';
-        const existingRecordId = tr.getAttribute('data-start-record-id') || null;
-        await updateClockTime(assigneeId, '上班', iso, hm, existingRecordId);
-        await renderList();
-      });
-      tr.querySelector('.save-end-time')?.addEventListener('click', async () => {
-        const assigneeId = tr.getAttribute('data-assignee-id') || '';
-        const iso = dateInput.value;
-        const hm = tr.querySelector('.end-time-input')?.value || '';
-        const existingRecordId = tr.getAttribute('data-end-record-id') || null;
-        await updateClockTime(assigneeId, '下班', iso, hm, existingRecordId);
-        await renderList();
-      });
-      tr.querySelector('.manual-clock-in')?.addEventListener('click', () => manualClock(tr, '上班'));
-      tr.querySelector('.manual-clock-out')?.addEventListener('click', () => manualClock(tr, '下班'));
-      tr.querySelector('.row-leave-apply')?.addEventListener('click', () => {
-        try { openTempLeaveModal(); } catch (err) { showToast('無法開啟請假申請', true); }
-      });
-      tr.querySelector('.row-share')?.addEventListener('click', async () => {
-        try {
-          const docId = tr.getAttribute('data-doc-id');
-          const shiftIndex = parseInt(tr.getAttribute('data-shift-index'), 10);
-          const dref = doc(db,'communities', state.currentCommunity?.id, 'postSchedules', docId);
-          const dsnap = await getDoc(dref);
-          const data = dsnap.exists() ? dsnap.data() : null;
-          const shifts = Array.isArray(data?.shifts) ? data.shifts : [];
-          const newShifts = shifts.map((sh,i)=> i===shiftIndex ? { ...sh, cashShift: true } : sh);
-          await setDoc(dref, { ...data, shifts: newShifts, updatedAt: Timestamp.fromDate(new Date()) });
-          showToast('已標記為現金班');
-        } catch (e) { console.error('share cash shift error', e); showToast('分享失敗', true); }
-      });
-    });
-  };
-
-  ensureUsersOptions().then(renderList);
-  userSelect.addEventListener('change', renderList);
-  dateInput.addEventListener('change', renderList);
-  // 哨點下拉已移除
-}
 
 function renderTrackingLeave(container) {
                 container.innerHTML = `
@@ -11716,6 +11957,7 @@ function renderTrackingLeave(container) {
                 const selectedCommunityId = state.currentCommunity?.id || window.pageState?.selectedCommunityId || null;
                 const selectedCommunityCode = state.currentCommunity?.code || state.currentCommunity?.communityCode || null;
                 let communityUserIds = new Set();
+                let communityUserNames = {};
 
                 // 取得僅屬於目前社區的帳號清單（ID 集合）
                 async function ensureCommunityUserIds() {
@@ -11734,7 +11976,7 @@ function renderTrackingLeave(container) {
                             const oneCode = (data.serviceCommunityCode || '').trim();
                             const byId = selectedCommunityId ? svcIds.includes(selectedCommunityId) : false;
                             const byCode = selectedCommunityCode ? (svcCodes.includes(selectedCommunityCode) || oneCode === selectedCommunityCode) : false;
-                            if (byId || byCode) ids.push(d.id);
+                            if (byId || byCode) { ids.push(d.id); communityUserNames[d.id] = data?.name || d.id; }
                         });
                         communityUserIds = new Set(ids);
                     } catch (err) {
@@ -11901,7 +12143,7 @@ function renderTrackingLeave(container) {
                             row.innerHTML = `
                                 <td class="px-6 py-4 whitespace-nowrap">
                                     <div class="flex items-center">
-                                        <div class="text-sm font-medium text-gray-900">${leave.userName || '未知用戶'}</div>
+                                        <div class="text-sm font-medium text-gray-900">${(communityUserNames[(leave.userId || leave.userID || leave.uid)] || leave.userName || '未知用戶')}</div>
                                     </div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
@@ -12404,6 +12646,11 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                         <option value="">全部社區</option>
                                     </select>
                                 </div>` : '';
+                const searchFilterHtml = `
+                                <div>
+                                    <label class="block text-sm text-gray-600 mb-1">搜尋</label>
+                                    <input id="filter-search" type="text" class="w-full px-3 py-2 border rounded-md" placeholder="姓名、Email、電話">
+                                </div>`;
                 const tipHtml = isHRPage
                     ? '<div class="text-sm text-gray-500">此列表僅顯示目前社區之人員；不提供新增功能。</div>'
                     : '<div class="text-sm text-gray-500">顯示全部社區之人員；可依角色與社區過濾。</div>';
@@ -12418,7 +12665,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                     ${ (state.currentPage === 'navigation' && (state.currentUserData?.role === 'admin')) ? `<button id="add-user-btn" class="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700">新增帳號</button>` : '' }
                                 </div>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div class="grid grid-cols-1 ${isGlobalSettings ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-3">
                                 <div>
                                     <label class="block text-sm text-gray-600 mb-1">角色</label>
                                     <select id="filter-role" class="w-full px-3 py-2 border rounded-md">
@@ -12427,6 +12674,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                                     </select>
                                 </div>
                                 ${communityFilterHtml}
+                                ${searchFilterHtml}
                             </div>
                         </div>
 
@@ -12444,6 +12692,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 let lastRendered = [];
                 const roleSelect = document.getElementById('filter-role');
                 const communitySelect = document.getElementById('filter-community');
+                const searchInput = document.getElementById('filter-search');
                 let communitiesCache = [];
                 const getEffectiveRole = (u) => {
                     const jt = ((u?.jobTitle || u?.applicationTitle || '').trim());
@@ -12451,6 +12700,9 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 };
 
                 roleSelect.addEventListener('change', renderUserList);
+                if (searchInput) {
+                    searchInput.addEventListener('input', renderUserList);
+                }
                 if (isGlobalSettings && communitySelect) {
                     try { await ensureCommunitiesCache(); } catch (_) {}
                     try { computeAvailableCommunities(); } catch (_) {}
@@ -12567,8 +12819,26 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         }
                     }
 
+                    // 關鍵字搜尋（姓名、Email、電話、職稱）
+                    const kw = (searchInput && searchInput.value) ? searchInput.value.trim().toLowerCase() : '';
+                    if (kw) {
+                        filtered = filtered.filter(u => {
+                            const name = String(u.name || '').toLowerCase();
+                            const email = String(u.email || '').toLowerCase();
+                            const phone = String(u.phone || '').toLowerCase();
+                            const title = String(u.jobTitle || u.applicationTitle || '').toLowerCase();
+                            return name.includes(kw) || email.includes(kw) || phone.includes(kw) || title.includes(kw);
+                        });
+                    }
+
                     // 人員依姓氏筆畫少→多
                     filtered = filtered.slice().sort(compareUsersBySurnameStroke);
+
+                    if (filtered.length === 0) {
+                        userList.innerHTML = `<p class="text-center text-gray-500 p-4">沒有符合條件的帳號</p>`;
+                        lastRendered = [];
+                        return;
+                    }
 
                     filtered.forEach(user => {
                         const userElement = document.createElement('div');
@@ -16148,8 +16418,11 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                 const closeBtn = document.getElementById('clockin-close-btn');
                 closeBtn && closeBtn.addEventListener('click', closeMap);
                 const confirmBtn = document.getElementById('clockin-confirm-btn');
-                confirmBtn && confirmBtn.addEventListener('click', () => {
+                confirmBtn && confirmBtn.addEventListener('click', async () => {
                     if (!state.currentLocation) { alert('無法取得目前位置，請稍後再試'); return; }
+                    if (!center || typeof radius !== 'number') { showToast('尚未設定打卡範圍，請聯絡管理員', true); return; }
+                    const dist = calculateDistanceMeters(state.currentLocation.lat, state.currentLocation.lng, center.lat, center.lng);
+                    if (dist > radius) { showToast('您不在社區打卡範圍內，請移動至範圍內再打卡', true); return; }
                     const t = confirmBtn.getAttribute('data-type');
                     openCameraModal(t, state.currentLocation);
                 });
