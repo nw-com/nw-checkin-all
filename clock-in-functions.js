@@ -67,71 +67,80 @@ if (typeof state.autoSettingsErrorPromptShown === 'undefined') {
 
 // 根據狀態更新顯示文本和樣式
 function updateStatusTextAndStyle(statusText, statusDisplay) {
+    let commLabel = '';
+    try {
+        const rec = (window.state && window.state.__latestRecord) ? window.state.__latestRecord : null;
+        const byId = (window.state && window.state.communitiesById) ? window.state.communitiesById : {};
+        if (rec) {
+            // 先嘗試使用紀錄內嵌社區短名/名稱（若有）
+            try {
+                const embedded = rec.community || {};
+                const embeddedLabel = (embedded.shortName || embedded.name || '').trim();
+                if (embeddedLabel) commLabel = embeddedLabel;
+            } catch (_) {}
+            const rcid = (rec.communityId || '').trim();
+            const rcode = (rec.communityCode || rec.community?.code || '').trim();
+            if (rcid && byId[rcid]) {
+                const cm = byId[rcid];
+                // 僅使用短名/名稱，避免顯示社區編號或ID
+                commLabel = (cm.shortName || cm.name || '').trim();
+            } else if (rcode) {
+                const cm = Object.values(byId).find(c => (String(c.code || '').trim()) === rcode);
+                // 僅在能映射到社區時使用；避免顯示社區編號
+                commLabel = cm ? ((cm.shortName || cm.name || '').trim()) : '';
+            }
+        }
+    } catch (_) {}
+    if (!commLabel) {
+        const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+        // 僅使用短名/名稱作為顯示，避免顯示社區編號或ID
+        commLabel = comm && ((comm.shortName || comm.name) || '') || '';
+    }
     switch(state.clockInStatus) {
         case '上班':
-            statusText.textContent = '上班中-辦公室';
+            statusText.textContent = commLabel ? `已 ${commLabel} 上班` : '上班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-green-100 text-green-800';
             break;
         case '下班':
-            statusText.textContent = '已下班';
+            statusText.textContent = commLabel ? `已 ${commLabel} 下班` : '下班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-red-100 text-red-800';
             break;
         case '已下班-未打卡':
-            statusText.textContent = '已下班-未打卡';
+            statusText.textContent = commLabel ? `已 ${commLabel} 下班` : '下班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-yellow-100 text-yellow-800';
             break;
         case '外出':
-            let outboundText = '外出中';
-            if (state.outboundLocation) {
-                outboundText = `外出-${state.outboundLocation}`;
-            }
-            statusText.textContent = outboundText;
+            statusText.textContent = commLabel ? `已 ${commLabel} 上班` : '上班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-emerald-100 text-emerald-800';
             break;
         case '抵達':
-            let arriveText = '抵達';
-            if (state.outboundLocation) {
-                arriveText = `抵達-${state.outboundLocation}`;
-            }
-            statusText.textContent = arriveText;
+            statusText.textContent = commLabel ? `已 ${commLabel} 上班` : '上班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-blue-100 text-blue-800';
             break;
         case '離開':
-            let leaveText = '離開';
-            if (state.outboundLocation) {
-                leaveText = `離開-${state.outboundLocation}`;
-            }
-            statusText.textContent = leaveText;
+            statusText.textContent = commLabel ? `已 ${commLabel} 上班` : '上班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-blue-100 text-blue-800';
             break;
         case '返回':
-            statusText.textContent = '返回-辦公室';
+            statusText.textContent = commLabel ? `已 ${commLabel} 上班` : '上班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-green-100 text-green-800';
             break;
         case '臨時請假':
-            let leaveReasonText = (state.leaveStatus === 'approved') ? '已請假' : '請假申請';
-            if (state.leaveReason) {
-                leaveReasonText = `${leaveReasonText}-${state.leaveReason}`;
-            }
-            statusText.textContent = leaveReasonText;
+            statusText.textContent = commLabel ? `已 ${commLabel} 請假` : '請假';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-orange-100 text-orange-800';
             break;
         case '特殊勤務':
-            let dutyText = '出勤中';
-            if (state.dutyType) {
-                dutyText = `出勤-${state.dutyType}`;
-            }
-            statusText.textContent = dutyText;
+            statusText.textContent = commLabel ? `已 ${commLabel} 上班` : '上班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-purple-100 text-purple-800';
             break;
         default:
-            statusText.textContent = '尚未打卡';
+            statusText.textContent = '下班';
             statusDisplay.className = 'mb-4 p-3 rounded-lg text-center bg-gray-100 text-gray-800';
     }
 }
 
 // 更新狀態顯示
-function updateStatusDisplay() {
+async function updateStatusDisplay() {
     // 檢查狀態顯示區域是否存在，如果不存在則創建
     let statusDisplay = document.getElementById('status-display');
     if (!statusDisplay) {
@@ -152,33 +161,135 @@ function updateStatusDisplay() {
         clockInContainer.insertBefore(statusDisplay, clockInButtons);
     }
     
+    // 確保社區快取已載入，避免標籤為空
+    try { if (typeof ensureCommunitiesCache === 'function') { await ensureCommunitiesCache(); } } catch (_) {}
+    // 嘗試計算可用社區並更新頁首社區顯示，讓 currentCommunity 盡快就緒
+    try { if (typeof computeAvailableCommunities === 'function') { await computeAvailableCommunities(); } } catch (_) {}
+    try { if (typeof updateHeaderCommunity === 'function') { updateHeaderCommunity(); } } catch (_) {}
+    // 等待目前社區就緒（短名或名稱），最多約1秒
+    try {
+        let tries = 0;
+        while (tries < 10) {
+            const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+            const ready = !!(comm && (comm.shortName || comm.name));
+            if (ready) break;
+            await new Promise(r => setTimeout(r, 100));
+            tries++;
+        }
+    } catch (_) {}
+
     // 更新儀表板狀態
     updateDashboardStatus();
     
-    // 更新打卡狀態顯示
+    // 更新打卡狀態顯示（嚴格依目前社區過濾）
     const statusText = document.getElementById('status-text');
     if (statusText) {
-        // 強制檢查當前用戶的打卡狀態
         if (window.__auth?.currentUser) {
             const userId = window.__auth.currentUser.uid;
-            const { doc, getDoc } = window.__fs;
-            const userRef = doc(window.__db, 'users', userId);
-            getDoc(userRef).then(userDoc => {
-                if (userDoc.exists() && userDoc.data().clockInStatus) {
-                    const data = userDoc.data();
-                    state.clockInStatus = data.clockInStatus;
-                    state.outboundLocation = data.outboundLocation || null;
-                    state.dutyType = data.dutyType || null;
-                    state.leaveReason = data.leaveReason || null;
-                    state.leaveStatus = data.leaveStatus || null;
+            const fs = window.__fs || {};
+            const db = window.__db;
+            const { collection, query, where, orderBy, limit, getDocs, doc, getDoc } = fs;
+            const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+            (async () => {
+                let shown = false;
+                // 優先：使用社區限制查詢最新紀錄
+                try {
+                    if (db && collection && query && where && orderBy && limit && getDocs) {
+                        let q;
+                        if (comm && (comm.id || comm.code || comm.communityCode)) {
+                            if (comm.id) {
+                                q = query(
+                                    collection(db, 'clockInRecords'),
+                                    where('userId','==', userId),
+                                    where('communityId','==', comm.id),
+                                    orderBy('timestamp','desc'),
+                                    limit(1)
+                                );
+                            } else {
+                                const ccode = (comm.code || comm.communityCode);
+                                q = query(
+                                    collection(db, 'clockInRecords'),
+                                    where('userId','==', userId),
+                                    where('communityCode','==', ccode),
+                                    orderBy('timestamp','desc'),
+                                    limit(1)
+                                );
+                            }
+                            const snap = await getDocs(q);
+                            if (!snap.empty) {
+                                const r = snap.docs[0].data();
+                                state.clockInStatus = r.type || 'none';
+                                state.outboundLocation = r.locationName || null;
+                                state.dutyType = r.dutyType || null;
+                                updateStatusTextAndStyle(statusText, statusDisplay);
+                                shown = true;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    const expected = ['permission-denied','failed-precondition','invalid-argument'];
+                    const logFn = expected.includes(e?.code) ? console.warn : console.error;
+                    logFn('個人狀態（社區限制）查詢失敗:', e?.code, e?.message || e);
                 }
-                
-                // 根據狀態更新顯示
-                updateStatusTextAndStyle(statusText, statusDisplay);
-            }).catch(error => {
-                console.error("獲取用戶狀態失敗:", error);
-                updateStatusTextAndStyle(statusText, statusDisplay);
-            });
+
+                // 備援：抓取最近 N 筆再前端過濾（僅當前社區）
+                if (!shown) {
+                    try {
+                        if (db && collection && query && orderBy && limit && getDocs) {
+                            const snap = await getDocs(query(collection(db, 'clockInRecords'), orderBy('timestamp','desc'), limit(200)));
+                            const cid = (comm && comm.id) ? String(comm.id).trim() : '';
+                            const ccode = (comm && (comm.code || comm.communityCode)) ? String(comm.code || comm.communityCode).trim() : '';
+                            const my = snap.docs.find(d => {
+                                const r = d.data() || {};
+                                if (r.userId !== userId) return false;
+                                const rcid = (r.communityId || '').trim();
+                                const rcode = (r.communityCode || r.dutyCommunityCode || '').trim();
+                                if (cid && rcid && rcid === cid) return true;
+                                if (ccode && rcode && rcode === ccode) return true;
+                                // 未設定社區時，允許顯示（例如首頁或無社區上下文）
+                                if (!comm) return true;
+                                return false;
+                            });
+                            if (my) {
+                                const r = my.data();
+                                state.clockInStatus = r.type || 'none';
+                                state.outboundLocation = r.locationName || null;
+                                state.dutyType = r.dutyType || null;
+                                try { window.state.__latestRecord = r; } catch (_) {}
+                                updateStatusTextAndStyle(statusText, statusDisplay);
+                                shown = true;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('個人狀態備援查詢失敗', e);
+                    }
+                }
+
+                // 最終：讀取 users 狀態，僅在無社區上下文時使用；有社區但未找到匹配則顯示「尚未打卡」
+                if (!shown) {
+                    try {
+                        if (db && doc && getDoc) {
+                            const userRef = doc(db, 'users', userId);
+                            const userDoc = await getDoc(userRef);
+                            if (!comm && userDoc.exists() && userDoc.data().clockInStatus) {
+                                const data = userDoc.data();
+                                state.clockInStatus = data.clockInStatus;
+                                state.outboundLocation = data.outboundLocation || null;
+                                state.dutyType = data.dutyType || null;
+                                state.leaveReason = data.leaveReason || null;
+                                state.leaveStatus = data.leaveStatus || null;
+                            } else {
+                                // 有社區但找不到對應紀錄：視為社區內「尚未打卡」
+                                state.clockInStatus = 'none';
+                            }
+                        }
+                    } catch (error) {
+                        console.error('獲取用戶狀態失敗:', error);
+                    } finally {
+                        updateStatusTextAndStyle(statusText, statusDisplay);
+                    }
+                }
+            })();
         } else {
             updateStatusTextAndStyle(statusText, statusDisplay);
         }
@@ -191,6 +302,19 @@ function updateDashboardStatus() {
     if (!dashboardStatusElement) return;
 
     (async () => {
+        // 確保社區快取已載入，讓狀態文字能插入社區名稱
+        try { if (typeof ensureCommunitiesCache === 'function') { await ensureCommunitiesCache(); } } catch (_) {}
+        // 等待目前社區就緒（短名或名稱），最多約1秒
+        try {
+            let tries = 0;
+            while (tries < 10) {
+                const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+                const ready = !!(comm && (comm.shortName || comm.name));
+                if (ready) break;
+                await new Promise(r => setTimeout(r, 100));
+                tries++;
+            }
+        } catch (_) {}
         const { collection, query, where, orderBy, limit, getDocs, doc, getDoc } = window.__fs;
         const userId = window.__auth?.currentUser?.uid || state.currentUser?.uid;
         if (!userId) {
@@ -203,18 +327,65 @@ function updateDashboardStatus() {
             return;
         }
 
-        // 優先使用：userId + timestamp desc 的查詢（需要複合索引）
+        // 優先使用：限制於目前社區的最新紀錄（需要複合索引）
         try {
-            const q = query(
-                collection(window.__db, 'clockInRecords'),
-                where('userId', '==', userId),
-                orderBy('timestamp', 'desc'),
-                limit(1)
-            );
+            const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+            let q;
+            if (comm && (comm.id || comm.code || comm.communityCode)) {
+                if (comm.id) {
+                    q = query(
+                        collection(window.__db, 'clockInRecords'),
+                        where('userId', '==', userId),
+                        where('communityId', '==', comm.id),
+                        orderBy('timestamp', 'desc'),
+                        limit(1)
+                    );
+                } else {
+                    const ccode = (comm.code || comm.communityCode);
+                    q = query(
+                        collection(window.__db, 'clockInRecords'),
+                        where('userId', '==', userId),
+                        where('communityCode', '==', ccode),
+                        orderBy('timestamp', 'desc'),
+                        limit(1)
+                    );
+                }
+            } else {
+                q = query(
+                    collection(window.__db, 'clockInRecords'),
+                    where('userId', '==', userId),
+                    orderBy('timestamp', 'desc'),
+                    limit(1)
+                );
+            }
             const snap = await getDocs(q);
             if (!snap.empty) {
                 const r = snap.docs[0].data();
-                const statusText = getStatusDisplayText(r.type || '未知', r.locationName || null, r.dutyType || null);
+                let statusText = getStatusDisplayText(r.type || '未知', r.locationName || null, r.dutyType || null);
+                // 以紀錄的社區資訊覆蓋（優先短名）
+                try {
+                    const byId = state.communitiesById || {};
+                    const rcid = (r.communityId || '').trim();
+                    const rcode = (r.communityCode || r.dutyCommunityCode || '').trim();
+                    // 若無法映射，使用紀錄內嵌社區名稱
+                    let embeddedName = '';
+                    try { embeddedName = (r.community && (r.community.shortName || r.community.name)) ? (r.community.shortName || r.community.name) : ''; } catch (_) {}
+                    let commLabel = embeddedName;
+                    if (rcid && byId[rcid]) {
+                        const cm = byId[rcid];
+                        // 僅使用短名/名稱，避免顯示社區編號或ID
+                        commLabel = (cm.shortName || cm.name || '').trim();
+                    } else if (rcode) {
+                        const cm = Object.values(byId).find(c => (String(c.code || '').trim()) === rcode);
+                        // 僅在能映射到社區時使用；避免顯示社區編號
+                        commLabel = cm ? ((cm.shortName || cm.name || '').trim()) : '';
+                    }
+                    if (commLabel) {
+                        if (statusText.includes('上班')) statusText = `已 ${commLabel} 上班`;
+                        else if (statusText.includes('下班')) statusText = `已 ${commLabel} 下班`;
+                        else if (statusText.includes('請假')) statusText = `已 ${commLabel} 請假`;
+                    }
+                } catch(_) {}
                 const statusColor = getStatusColor(statusText);
                 const ts = r.timestamp && r.timestamp.toDate ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : null);
                 dashboardStatusElement.innerHTML = `
@@ -233,7 +404,7 @@ function updateDashboardStatus() {
             logFn('讀取最新打卡紀錄（複合索引）失敗:', e?.code, e?.message || e);
         }
 
-        // 備援：只按 timestamp desc 抓取最近 N 筆，再用 userId 篩選
+        // 備援：只按 timestamp desc 抓取最近 N 筆，再用 userId + 社區篩選
         try {
             const fallbackQ = query(
                 collection(window.__db, 'clockInRecords'),
@@ -241,10 +412,53 @@ function updateDashboardStatus() {
                 limit(200)
             );
             const fallbackSnap = await getDocs(fallbackQ);
-            const myDoc = fallbackSnap.docs.find(d => (d.data()?.userId === userId));
+            const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+            const cname = (comm && comm.name) ? String(comm.name).trim() : '';
+            const cid = (comm && comm.id) ? String(comm.id).trim() : '';
+            const ccode = (comm && (comm.code || comm.communityCode)) ? String(comm.code || comm.communityCode).trim() : '';
+            const myDoc = fallbackSnap.docs.find(d => {
+                const r = d.data() || {};
+                if (r.userId !== userId) return false;
+                const rcid = (r.communityId || '').trim();
+                const rcode = (r.communityCode || r.dutyCommunityCode || '').trim();
+                const lname = (r.locationName || '').trim();
+                if (cid && rcid && rcid === cid) return true;
+                if (ccode && rcode && rcode === ccode) return true;
+                if (cname && lname && lname.includes(cname)) return true;
+                // 若未設定社區或舊紀錄無社區欄位，則允許顯示
+                if (!comm) return true;
+                return false;
+            });
             if (myDoc) {
                 const r = myDoc.data();
-                const statusText = getStatusDisplayText(r.type || '未知', r.locationName || null, r.dutyType || null);
+                try { window.state.__latestRecord = r; } catch (_) {}
+                let statusText = getStatusDisplayText(r.type || '未知', r.locationName || null, r.dutyType || null);
+                // 以紀錄的社區資訊覆蓋（優先短名）
+                try {
+                    const byId = state.communitiesById || {};
+                    const rcid = (r.communityId || '').trim();
+                    const rcode = (r.communityCode || r.dutyCommunityCode || '').trim();
+                    // 若無法映射，使用紀錄內嵌社區名稱
+                    let embeddedName = '';
+                    try { embeddedName = (r.community && (r.community.shortName || r.community.name)) ? (r.community.shortName || r.community.name) : ''; } catch (_) {}
+                    let commLabel = '';
+                    if (rcid && byId[rcid]) {
+                        const cm = byId[rcid];
+                        // 僅使用短名/名稱，避免顯示社區編號或ID
+                        commLabel = (cm.shortName || cm.name || '').trim();
+                    } else if (rcode) {
+                        const cm = Object.values(byId).find(c => (String(c.code || '').trim()) === rcode);
+                        // 僅在能映射到社區時使用；避免顯示社區編號
+                        commLabel = cm ? ((cm.shortName || cm.name || '').trim()) : '';
+                    } else if (embeddedName) {
+                        commLabel = embeddedName;
+                    }
+                    if (commLabel) {
+                        if (statusText.includes('上班')) statusText = `已 ${commLabel} 上班`;
+                        else if (statusText.includes('下班')) statusText = `已 ${commLabel} 下班`;
+                        else if (statusText.includes('請假')) statusText = `已 ${commLabel} 請假`;
+                    }
+                } catch(_) {}
                 const statusColor = getStatusColor(statusText);
                 const ts = r.timestamp && r.timestamp.toDate ? r.timestamp.toDate() : (r.timestamp ? new Date(r.timestamp) : null);
                 dashboardStatusElement.innerHTML = `
@@ -269,11 +483,33 @@ function updateDashboardStatus() {
             if (userDoc.exists() && userDoc.data().clockInStatus) {
                 const u = userDoc.data();
                 const statusText = getStatusDisplayText(u.clockInStatus, u.outboundLocation || null, u.dutyType || null);
+                try {
+                    const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+                    // 僅使用短名/名稱作為顯示，避免顯示社區編號或ID
+                    const label = comm && ((comm.shortName || comm.name) || '') || '';
+                    if (label) {
+                        if (statusText.includes('上班')) state.clockInStatus = '上班';
+                        else if (statusText.includes('下班') || statusText.includes('已下班')) state.clockInStatus = '下班';
+                        else if (statusText.includes('請假')) state.clockInStatus = '臨時請假';
+                    }
+                } catch (_) {}
                 const statusColor = getStatusColor(statusText);
                 const ts = u.lastUpdated && u.lastUpdated.toDate ? u.lastUpdated.toDate() : (u.lastUpdated ? new Date(u.lastUpdated) : null);
                 dashboardStatusElement.innerHTML = `
                     <div class="flex items-center justify-between">
-                        <span class="font-semibold text-lg ${statusColor}">${statusText}</span>
+                        <span class="font-semibold text-lg ${statusColor}">${(function(){
+                            try {
+                                const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
+                                // 僅使用短名/名稱作為顯示，避免顯示社區編號或ID
+                                const label = comm && ((comm.shortName || comm.name) || '') || '';
+                                if (label) {
+                                    if (statusText.includes('上班')) return `已 ${label} 上班`;
+                                    if (statusText.includes('下班') || statusText.includes('已下班')) return `已 ${label} 下班`;
+                                    if (statusText.includes('請假')) return `已 ${label} 請假`;
+                                }
+                            } catch (_) {}
+                            return statusText;
+                        })()}</span>
                     </div>
                     <div class="text-sm text-gray-500 mt-1">
                         ${ts ? '狀態更新 ' + ts.toLocaleString('zh-TW', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false}) : ''}
@@ -392,14 +628,14 @@ function updateButtonStatus() {
     enableSpecialButton('臨時請假', 'bg-orange-500');
     enableSpecialButton('特殊勤務', 'bg-purple-500');
 
-    // 返回按鈕預設顯示且不可用（灰色）
+    // 返回按鈕預設顯示且不可用（灰）；僅在「離開」之後變為深綠可動作
     const returnBtn = document.getElementById('return-btn');
     if (returnBtn) {
         returnBtn.disabled = true;
-        returnBtn.classList.remove('bg-gray-500', 'hover:bg-gray-600', 'bg-green-700', 'hover:bg-green-800');
+        returnBtn.classList.remove('bg-gray-500', 'hover:bg-gray-600', 'bg-green-700', 'hover:bg-green-800', 'bg-blue-500', 'hover:bg-blue-600');
         returnBtn.classList.add('bg-gray-300', 'cursor-not-allowed', 'disabled');
         returnBtn.dataset.type = '返回';
-        returnBtn.textContent = '返回打卡';
+        returnBtn.innerHTML = '返回<br>打卡';
     }
 
     // 複合循環按鈕（外出/抵達/離開/返回）動態設定器
@@ -407,7 +643,8 @@ function updateButtonStatus() {
         const cycleBtn = document.getElementById('outbound-cycle-btn');
         if (!cycleBtn) return;
         cycleBtn.dataset.type = nextType;
-        cycleBtn.textContent = label;
+        // 將「打卡」移至下一行
+        cycleBtn.innerHTML = String(label).replace('打卡', '<br>打卡');
         cycleBtn.disabled = false;
         cycleBtn.classList.remove('bg-gray-300', 'cursor-not-allowed', 'disabled',
                                   'bg-blue-500', 'hover:bg-blue-600', 'bg-teal-700', 'hover:bg-teal-800',
@@ -429,22 +666,30 @@ function updateButtonStatus() {
 
         // 設定文字與型別
         startBtn.dataset.type = '上班';
-        startBtn.textContent = '上班打卡';
+        startBtn.innerHTML = '上班<br>打卡';
         endBtn.dataset.type = '下班';
-        endBtn.textContent = '下班打卡';
+        endBtn.innerHTML = '下班<br>打卡';
 
-        if (nextType === '上班') {
-            // 啟用上班、禁用下班
+        // 依當前狀態切換按鈕顏色與禁用
+        const workingStates = ['上班','外出','抵達','離開','返回'];
+        if (workingStates.includes(state.clockInStatus)) {
+            // 已上班或工作流程中：上班灰色禁用，下班紅色可按
+            startBtn.disabled = true;
+            startBtn.classList.add('bg-gray-300','cursor-not-allowed','disabled');
+            endBtn.disabled = false;
+            endBtn.classList.add('bg-red-500','hover:bg-red-600');
+        } else if (state.clockInStatus === '下班' || state.clockInStatus === '已下班-未打卡') {
+            // 已下班：下班灰色禁用，上班綠色可按
+            endBtn.disabled = true;
+            endBtn.classList.add('bg-gray-300','cursor-not-allowed','disabled');
+            startBtn.disabled = false;
+            startBtn.classList.add('bg-green-500','hover:bg-green-600');
+        } else {
+            // 初始/未知：預設僅開啟上班（綠），下班灰色
             startBtn.disabled = false;
             startBtn.classList.add('bg-green-500','hover:bg-green-600');
             endBtn.disabled = true;
             endBtn.classList.add('bg-gray-300','cursor-not-allowed','disabled');
-        } else if (nextType === '下班') {
-            // 啟用下班、禁用上班
-            endBtn.disabled = false;
-            endBtn.classList.add('bg-red-500','hover:bg-red-600');
-            startBtn.disabled = true;
-            startBtn.classList.add('bg-gray-300','cursor-not-allowed','disabled');
         }
     };
     
@@ -453,6 +698,8 @@ function updateButtonStatus() {
         case 'none':
             // 尚未打卡，只啟用上班（切換按鈕設為上班）
             setWorkToggleButton('上班', '上班打卡', 'bg-green-500');
+            // 讓外出打卡在初始狀態也可動作（藍色）
+            setOutboundCycleButton('外出', '外出打卡', 'bg-blue-500');
             break;
         case '上班':
             // 已上班：下班可動作（紅），外出可動作（藍），返回不可動作（灰）
@@ -470,24 +717,12 @@ function updateButtonStatus() {
             setWorkToggleButton('下班', '下班打卡', 'bg-red-500');
             break;
         case '外出':
-            // 外出中：抵達可動作（藍系），下班不可動作（灰），返回不可動作（灰）
+            // 外出中：抵達可動作（藍系）；上下班保持可打
             setOutboundCycleButton('抵達', '抵達打卡', 'bg-blue-500');
-            const endBtn1 = document.getElementById('work-end-btn');
-            if (endBtn1) {
-                endBtn1.disabled = true;
-                endBtn1.classList.remove('bg-red-500','hover:bg-red-600');
-                endBtn1.classList.add('bg-gray-300','cursor-not-allowed','disabled');
-            }
             break;
         case '抵達':
-            // 抵達中：離開可動作（藍系），下班不可動作（灰），返回不可動作（灰）
+            // 抵達中：離開可動作（藍系）；上下班保持可打
             setOutboundCycleButton('離開', '離開打卡', 'bg-blue-500');
-            const endBtn2 = document.getElementById('work-end-btn');
-            if (endBtn2) {
-                endBtn2.disabled = true;
-                endBtn2.classList.remove('bg-red-500','hover:bg-red-600');
-                endBtn2.classList.add('bg-gray-300','cursor-not-allowed','disabled');
-            }
             break;
         case '離開':
             // 離開後：外出循環回到外出（藍），下班可動作（紅），返回可動作（深綠）
@@ -496,7 +731,8 @@ function updateButtonStatus() {
             if (returnBtn) {
                 returnBtn.disabled = false;
                 returnBtn.classList.remove('bg-gray-300', 'cursor-not-allowed', 'disabled');
-                returnBtn.classList.add('bg-green-700');
+                returnBtn.classList.add('bg-green-700', 'hover:bg-green-800');
+                returnBtn.innerHTML = '返回<br>打卡';
             }
             break;
         case '返回':
@@ -505,15 +741,16 @@ function updateButtonStatus() {
             setOutboundCycleButton('外出', '外出打卡', 'bg-blue-500');
             if (returnBtn) {
                 returnBtn.disabled = true;
-                returnBtn.classList.remove('bg-green-700');
+                returnBtn.classList.remove('bg-green-700', 'hover:bg-green-800');
                 returnBtn.classList.add('bg-gray-300', 'cursor-not-allowed', 'disabled');
+                returnBtn.innerHTML = '返回<br>打卡';
             }
             break;
         case '臨時請假':
-            // 臨時請假中，不啟用其他按鈕
+            // 臨時請假中：保留上下班可打
             break;
         case '特殊勤務':
-            // 特殊勤務中，不啟用其他按鈕
+            // 特殊勤務中：保留上下班可打
             break;
         default:
             // 未知狀態，切換按鈕設為上班
@@ -848,6 +1085,7 @@ function openTempLeaveModal(el) {
             if (isOther && !reasonText) { showToast('請輸入自定義事由', true); showLoading(false); return; }
 
             const { addDoc, collection, updateDoc, doc, serverTimestamp, Timestamp } = window.__fs;
+            const comm = (window.state && window.state.currentCommunity) ? window.state.currentCommunity : null;
             await addDoc(collection(window.__db, 'leaves'), {
                 userId: user.uid,
                 userName: (state.currentUserData?.name || user?.displayName || user?.email || ''),
@@ -856,7 +1094,9 @@ function openTempLeaveModal(el) {
                 startTime: Timestamp.fromDate(startDt),
                 endTime: Timestamp.fromDate(endDt),
                 status: 'pending',
-                createdAt: serverTimestamp()
+                createdAt: serverTimestamp(),
+                ...(comm && comm.id ? { communityId: comm.id } : {}),
+                ...(comm && (comm.code || comm.communityCode) ? { communityCode: (comm.code || comm.communityCode) } : {})
             });
 
             await updateDoc(doc(window.__db, 'users', user.uid), {
@@ -1300,7 +1540,9 @@ async function performAutoClockOut() {
             photoUrls: [],
             descriptions: [],
             isAutomatic: true,
-            deviceId: (window.state && window.state.deviceId) ? window.state.deviceId : 'unknown-device'
+            deviceId: (window.state && window.state.deviceId) ? window.state.deviceId : 'unknown-device',
+            communityId: (window.state && window.state.currentCommunity && window.state.currentCommunity.id) ? window.state.currentCommunity.id : null,
+            communityCode: (window.state && window.state.currentCommunity && (window.state.currentCommunity.code || window.state.currentCommunity.communityCode)) ? (window.state.currentCommunity.code || window.state.currentCommunity.communityCode) : null
         };
         if (locationName) {
             recordData.locationName = locationName;
@@ -1510,7 +1752,9 @@ async function checkAllUsersOvertimeStatus() {
                             photoUrls: [],
                             descriptions: [],
                             isAutomatic: true,
-                            deviceId: (window.state && window.state.deviceId) ? window.state.deviceId : 'unknown-device'
+                            deviceId: (window.state && window.state.deviceId) ? window.state.deviceId : 'unknown-device',
+                            communityId: (window.state && window.state.currentCommunity && window.state.currentCommunity.id) ? window.state.currentCommunity.id : null,
+                            communityCode: (window.state && window.state.currentCommunity && (window.state.currentCommunity.code || window.state.currentCommunity.communityCode)) ? (window.state.currentCommunity.code || window.state.currentCommunity.communityCode) : null
                         };
                         if (locationName) {
                             recordData.locationName = locationName;

@@ -128,6 +128,9 @@ function initPointsResetFeatures() {
 // 等待 index.html 模組初始化完成（__auth/__db/__fs 就緒）
 function initWhenFirebaseReady() {
     if (window.__auth && window.__db && window.__fs && window.__authHelpers) {
+        // 避免重複初始化造成重覆日誌與重覆排程
+        if (window.__monthlyResetInitialized) return;
+        window.__monthlyResetInitialized = true;
         initPointsResetFeatures();
     } else {
         // 若尚未就緒，稍後重試

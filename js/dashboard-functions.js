@@ -34,10 +34,14 @@ function calculateWorkingTime(status, clockInTime) {
  * @returns {string} 格式化的狀態文本
  */
 function getStatusDisplayText(status, location, dutyType) {
+    // 取社區顯示名稱：優先短名，其次正式名稱，最後代碼/ID
+    const comm = (typeof window !== 'undefined' && window.state) ? window.state.currentCommunity : null;
+    // 僅使用短名/名稱作為顯示，避免顯示社區編號
+    const commLabel = comm && ((comm.shortName || comm.name) || '') || '';
     switch(status) {
-        case '上班': return '上班';
-        case '下班': return '下班';
-        case '自動下班': return '下班';
+        case '上班': return commLabel ? `已 ${commLabel} 上班` : '上班';
+        case '下班': return commLabel ? `已 ${commLabel} 下班` : '下班';
+        case '自動下班': return commLabel ? `已 ${commLabel} 下班` : '下班';
         case '已下班-未打卡': return '已下班-未打卡';
         case '外出': {
             if (dutyType && location) return `外出-${dutyType}-${location}`;
@@ -58,7 +62,7 @@ function getStatusDisplayText(status, location, dutyType) {
             return '離開';
         }
         case '返回': return '返回-辦公室';
-        case '臨時請假': return '請假申請';
+        case '臨時請假': return commLabel ? `已 ${commLabel} 請假` : '請假申請';
         case '特殊勤務': {
             if (dutyType) return `出勤-${dutyType}`;
             if (location) return `出勤-${location}`;

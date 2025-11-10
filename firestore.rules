@@ -42,7 +42,9 @@ service cloud.firestore {
           'leaveStatus',
           'status',
           'lastUpdated',
-          'firstClockInDeviceId'
+          'firstClockInDeviceId',
+          'lastLocation',
+          'lastClockInTime'
         ])
       ) || (
         isReviewer() &&
@@ -100,6 +102,19 @@ service cloud.firestore {
       allow create, update: if isAdmin() || isReviewer();
       allow delete: if false;
     }
+
+    // 單裝置登入：每位使用者一份 sessions 文件，僅本人可讀寫
+    match /sessions/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null && request.auth.uid == userId &&
+        request.resource.data.keys().hasOnly(['deviceId','sessionId','createdAt','updatedAt']) &&
+        (request.resource.data.deviceId == null || request.resource.data.deviceId is string) &&
+        (request.resource.data.sessionId == null || request.resource.data.sessionId is string) &&
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp) &&
+        (request.resource.data.updatedAt == null || request.resource.data.updatedAt is timestamp);
+      // 允許本人刪除（登出或清理時）
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
     
     // 允許所有登入的使用者讀取所有人的打卡紀錄。
     // 注意：Firestore 的讀取權限是針對整個文件，無法只開放部分欄位。
@@ -110,7 +125,7 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.userId || isReviewer()
       ) &&
       request.resource.data.keys().hasOnly([
-        'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','shiftId'
+        'userId','type','timestamp','location','photoUrls','descriptions','deviceId','locationName','dutyType','isAutomatic','shiftId','communityId','communityCode'
       ]) &&
       (
         (

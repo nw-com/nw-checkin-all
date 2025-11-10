@@ -427,69 +427,117 @@ function renderCalendarNotifications(container) {
 }
 
 // 載入通知
-function loadNotifications() {
+async function loadNotifications() {
     const notificationsList = document.getElementById('notifications-list');
-    
-    // 模擬通知數據
-    const notifications = [
-        {
-            id: 1,
-            title: '會議提醒',
-            message: '您有一個會議將在30分鐘後開始',
-            time: new Date(Date.now() - 1800000),
-            read: false,
-            type: 'meeting'
-        },
-        {
-            id: 2,
-            title: '打卡提醒',
-            message: '請記得完成今日的打卡',
-            time: new Date(Date.now() - 3600000),
-            read: true,
-            type: 'clock-in'
-        },
-        {
-            id: 3,
-            title: '系統通知',
-            message: '系統將於今晚進行維護',
-            time: new Date(Date.now() - 7200000),
-            read: false,
-            type: 'system'
-        }
-    ];
-    
+    if (!notificationsList) return;
+
+    // 取得目前社區脈絡（優先 URL，其次 index 維護的 state）
+    let currentCommId = null;
+    let currentCommCode = null;
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const qp = params.get('communityId') || null;
+        currentCommId = qp; // 若 URL 帶的是 id
+        currentCommCode = qp; // 若 URL 帶的是 code
+        currentCommId = (window?.state?.currentCommunity?.id) || currentCommId;
+        currentCommCode = (window?.state?.currentCommunity?.code) || (window?.state?.currentCommunity?.communityCode) || currentCommCode;
+    } catch (_) {}
+
+    const fs = window.__fs;
+    const db = window.__db;
+
     notificationsList.innerHTML = '';
-    
-    if (notifications.length === 0) {
-        notificationsList.innerHTML = '<p class="text-gray-500 text-center py-8">暫無通知</p>';
+
+    if (!fs || !db || !fs.collection || !fs.getDocs) {
+        notificationsList.innerHTML = '<p class="text-sm text-gray-500">目前無法讀取通知資料</p>';
         return;
     }
-    
-    notifications.forEach(notification => {
-        const notificationDiv = document.createElement('div');
-        notificationDiv.className = `border border-gray-200 rounded-lg p-4 cursor-pointer hover:bg-gray-50 ${!notification.read ? 'bg-blue-50 border-blue-200' : ''}`;
-        notificationDiv.innerHTML = `
-            <div class="flex items-start justify-between">
-                <div class="flex-1">
-                    <div class="flex items-center space-x-2">
-                        <h3 class="font-semibold text-gray-800">${notification.title}</h3>
-                        ${!notification.read ? '<div class="w-2 h-2 bg-blue-600 rounded-full"></div>' : ''}
+
+    // 僅顯示「目前社區」的異常通知；若沒有社區脈絡，提示切換
+    if (!currentCommId && !currentCommCode) {
+        notificationsList.innerHTML = '<p class="text-gray-500 text-center py-8">請先切換到某個社區以查看該社區的異常通知</p>';
+        return;
+    }
+
+    try {
+        const { collection, query, where, orderBy, limit, getDocs } = fs;
+        const anomaliesRef = collection(db, 'anomalies');
+
+        // 先嘗試以 communityId 查詢；若資料以 code 儲存，則改用 client-side 過濾
+        let q = null;
+        if (currentCommId) {
+            try {
+                q = query(anomaliesRef, where('communityId', '==', currentCommId), orderBy('time', 'desc'), limit(50));
+            } catch (_) {
+                // 某些情況缺少索引導致 query 建立失敗；改用不排序的 where 或全抓再排
+                q = query(anomaliesRef, where('communityId', '==', currentCommId));
+            }
+        } else {
+            // 無 id 時，先抓最近 200 筆，由 client-side 以 code 過濾
+            try {
+                q = query(anomaliesRef, orderBy('time', 'desc'), limit(200));
+            } catch (_) {
+                q = anomaliesRef; // 無法使用 orderBy 時，退回整集合（可能較慢）
+            }
+        }
+
+        const snap = await getDocs(q);
+        const items = [];
+        snap.forEach(doc => {
+            const data = doc.data() || {};
+            const commMatchById = currentCommId ? (data.communityId === currentCommId) : true;
+            const commMatchByCode = currentCommCode ? (data.communityCode === currentCommCode || data.communityId === currentCommCode) : true;
+            const matchesCommunity = commMatchById && commMatchByCode;
+            if (!matchesCommunity) return;
+            if (data.suppressed === true) return; // 被抑制的異常不顯示
+
+            // 構造通知項目
+            const ts = data.time;
+            const when = ts && ts.toDate ? ts.toDate() : (typeof ts === 'number' ? new Date(ts) : new Date());
+            const type = 'anomaly';
+            const title = '打卡異常';
+            const detail = data.detail || data.type || '異常事件';
+            const message = `${detail}`;
+            items.push({ id: doc.id, title, message, time: when, read: false, type });
+        });
+
+        // 若使用 id 查不到，且提供了 code，進一步以 code 客端過濾（已在上面處理）
+
+        if (items.length === 0) {
+            notificationsList.innerHTML = '<p class="text-gray-500 text-center py-8">目前該社區沒有異常通知</p>';
+            return;
+        }
+
+        items.sort((a, b) => b.time - a.time);
+
+        items.forEach(notification => {
+            const div = document.createElement('div');
+            div.className = `border border-gray-200 rounded-lg p-4 cursor-pointer hover:bg-gray-50 ${!notification.read ? 'bg-blue-50 border-blue-200' : ''}`;
+            div.innerHTML = `
+                <div class="flex items-start justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-2">
+                            <h3 class="font-semibold text-gray-800">${notification.title}</h3>
+                            ${!notification.read ? '<div class="w-2 h-2 bg-blue-600 rounded-full"></div>' : ''}
+                        </div>
+                        <p class="text-gray-600 mt-1">${notification.message}</p>
+                        <span class="text-xs text-gray-500 mt-2">${formatTimeAgo(notification.time)}</span>
                     </div>
-                    <p class="text-gray-600 mt-1">${notification.message}</p>
-                    <span class="text-xs text-gray-500 mt-2">${formatTimeAgo(notification.time)}</span>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-3 h-3 rounded-full ${getNotificationColor(notification.type)}"></div>
+                        <button class="text-gray-400 hover:text-gray-600" onclick="deleteNotification('${notification.id}')">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <div class="w-3 h-3 rounded-full ${getNotificationColor(notification.type)}"></div>
-                    <button class="text-gray-400 hover:text-gray-600" onclick="deleteNotification(${notification.id})">
-                        <i data-lucide="x" class="w-4 h-4"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-        
-        notificationDiv.addEventListener('click', () => markNotificationRead(notification.id));
-        notificationsList.appendChild(notificationDiv);
-    });
+            `;
+            div.addEventListener('click', () => markNotificationRead(notification.id));
+            notificationsList.appendChild(div);
+        });
+    } catch (e) {
+        console.error('載入異常通知失敗', e);
+        notificationsList.innerHTML = `<p class="text-sm text-red-600">載入通知失敗：${e.message || e}</p>`;
+    }
 }
 
 // 輔助函數
@@ -509,6 +557,7 @@ function getNotificationColor(type) {
         'meeting': 'bg-blue-500',
         'clock-in': 'bg-green-500',
         'system': 'bg-yellow-500',
+        'anomaly': 'bg-red-500',
         'default': 'bg-gray-500'
     };
     return colors[type] || colors.default;
