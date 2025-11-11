@@ -7890,14 +7890,24 @@
                         if (!user) { listEl.innerHTML = '<p class="text-sm text-red-600">請先登入</p>'; return; }
                         const qs = await getDocs(query(collection(db, 'retroClockRequests'), where('userId','==', user.uid)));
                         if (qs.empty) { listEl.innerHTML = '<p class="text-sm text-gray-500">尚無申請</p>'; return; }
-                        const items = [];
+                        let items = [];
                         qs.forEach(docSnap => items.push({ id: docSnap.id, ...docSnap.data() }));
+                        // 嚴格依目前社區過濾：僅顯示屬於當前社區的申請；
+                        // retroClockRequests 無社區欄位時，回退以地點名稱包含社區名稱
+                        const comm = state.currentCommunity || null;
+                        if (comm) {
+                            items = items.filter(r => recordMatchesCommunityStrict(r, comm) || recordMatchesCommunityByName(r, comm));
+                        }
                         items.sort((a,b)=>{
                             const at = a.requestedAt?.toDate?.() ? a.requestedAt.toDate().getTime() : (a.requestedAt ? new Date(a.requestedAt).getTime() : 0);
                             const bt = b.requestedAt?.toDate?.() ? b.requestedAt.toDate().getTime() : (b.requestedAt ? new Date(b.requestedAt).getTime() : 0);
                             return bt - at;
                         });
                         listEl.innerHTML = '';
+                        if (items.length === 0) {
+                            listEl.innerHTML = '<p class="text-sm text-gray-500">目前社區沒有我的申請</p>';
+                            return;
+                        }
                         items.forEach(r => {
                             const when = r.targetTime?.toDate?.() ? r.targetTime.toDate() : (r.targetTime ? new Date(r.targetTime) : null);
                             const item = document.createElement('div');
