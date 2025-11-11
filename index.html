@@ -713,6 +713,24 @@
         // 掛到全域讓外部腳本可使用
         window.showLoading = showLoading;
 
+        // 語音提示（Web Speech API）
+        function speak(text) {
+            try {
+                const synth = window.speechSynthesis;
+                if (!synth || !text) return;
+                const utter = new SpeechSynthesisUtterance(String(text));
+                utter.lang = 'zh-TW'; utter.rate = 1; utter.pitch = 1; utter.volume = 1;
+                try {
+                    const voices = synth.getVoices();
+                    const prefer = voices.find(v => (v.lang || '').toLowerCase().startsWith('zh') || (v.name || '').includes('Chinese'));
+                    if (prefer) utter.voice = prefer;
+                } catch (_) {}
+                try { synth.cancel(); } catch (_) {}
+                synth.speak(utter);
+            } catch (_) {}
+        }
+        window.speak = speak;
+
         function initializeAppLogic() {
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
@@ -5382,6 +5400,7 @@
                                 const dist = calculateDistanceMeters(state.currentLocation.lat, state.currentLocation.lng, center.lat, center.lng);
                                 if (dist > radius) {
                                     showToast('您不在社區打卡範圍內，請移動至範圍內再打卡', true);
+                                    try { window.speak && window.speak('您不在打卡範圍，請重新定位'); } catch (_) {}
                                     return;
                                 }
                             } catch (_) {
@@ -6211,7 +6230,7 @@
                                         ...(comm && comm.id ? { communityId: comm.id } : {}),
                                         ...(comm && (comm.code || comm.communityCode) ? { communityCode: (comm.code || comm.communityCode) } : {})
                                     });
-                                    try { showToast('已送出請假申請'); } catch(_){}
+                                    try { showToast('已送出請假申請'); window.speak && window.speak('您已申請請假'); } catch(_){}
                                     close();
                                 } catch (e) {
                                     console.error('請假申請失敗', e);
@@ -16981,6 +17000,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                             const dist = calculateDistanceMeters(locToCheck.lat, locToCheck.lng, center.lat, center.lng);
                             if (dist > radius) {
                                 showToast('您不在社區打卡範圍內，請移動至範圍內再打卡', true);
+                                try { window.speak && window.speak('您不在打卡範圍，請重新定位'); } catch (_) {}
                                 showLoading(false);
                                 return;
                             }
@@ -17231,6 +17251,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                         }
                         
                         showToast(`${type}打卡成功！`);
+                        try { window.speak && window.speak('您已打卡成功'); } catch (_) {}
                         close();
                         try { if (typeof updateMyScheduleButtons === 'function') { updateMyScheduleButtons(); } } catch(_) {}
                         // 保留當前頁，不再跳轉定位打卡
@@ -17238,6 +17259,7 @@ const roleBorderClass = roleColorMap[titleKey] || null;
                     } catch (error) {
                         console.error("Clock in error:", error);
                         showToast("打卡失敗，請稍後再試", true);
+                        try { window.speak && window.speak('您打卡失敗'); } catch (_) {}
                     } finally {
                         showLoading(false);
                         stopCamera();

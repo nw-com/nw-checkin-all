@@ -1108,6 +1108,7 @@ function openTempLeaveModal(el) {
             updateStatusDisplay();
             updateButtonStatus();
             showToast('請假申請已提交，等待審核');
+            try { window.speak && window.speak('您已申請請假'); } catch (_) {}
             document.body.removeChild(backdrop); document.body.removeChild(modal);
         } catch (error) {
             console.error('提交請假申請失敗:', error);
